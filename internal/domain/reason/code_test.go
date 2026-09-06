@@ -10,9 +10,16 @@ import (
 func TestCodeRegistryAcceptsEveryDeclaredCodeWithStableFamily(t *testing.T) {
 	wantFamilies := map[Code]string{
 		CodeCampaignValidationInvalid:         "campaign.validation",
+		CodeCampaignValidationAccepted:        "campaign.validation",
+		CodeCampaignValidationFailed:          "campaign.validation",
 		CodeCampaignWaveBlocked:               "campaign.wave",
+		CodeCampaignWaveAdvanced:              "campaign.wave",
 		CodeCampaignBudgetThresholdReached:    "campaign.budget",
 		CodeCampaignPauseEpochMismatch:        "campaign.pause",
+		CodeCampaignPauseApplied:              "campaign.pause",
+		CodeCampaignPauseResumed:              "campaign.pause",
+		CodeCampaignPauseAbortStarted:         "campaign.pause",
+		CodeCampaignPauseAbortResolved:        "campaign.pause",
 		CodeTargetPrecheckIneligible:          "target.precheck",
 		CodeTargetSubmissionNotAuthorized:     "target.submission",
 		CodeTargetAmbiguityInconclusive:       "target.ambiguity",

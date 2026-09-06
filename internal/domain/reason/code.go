@@ -10,9 +10,16 @@ type Code string
 
 const (
 	CodeCampaignValidationInvalid         Code = "campaign.validation.invalid"
+	CodeCampaignValidationAccepted        Code = "campaign.validation.accepted"
+	CodeCampaignValidationFailed          Code = "campaign.validation.failed"
 	CodeCampaignWaveBlocked               Code = "campaign.wave.blocked"
+	CodeCampaignWaveAdvanced              Code = "campaign.wave.advanced"
 	CodeCampaignBudgetThresholdReached    Code = "campaign.budget.threshold_reached"
 	CodeCampaignPauseEpochMismatch        Code = "campaign.pause.command_epoch_mismatch"
+	CodeCampaignPauseApplied              Code = "campaign.pause.applied"
+	CodeCampaignPauseResumed              Code = "campaign.pause.resumed"
+	CodeCampaignPauseAbortStarted         Code = "campaign.pause.abort_started"
+	CodeCampaignPauseAbortResolved        Code = "campaign.pause.abort_resolved"
 	CodeTargetPrecheckIneligible          Code = "target.precheck.ineligible"
 	CodeTargetSubmissionNotAuthorized     Code = "target.submission.not_authorized"
 	CodeTargetAmbiguityInconclusive       Code = "target.ambiguity.inconclusive"
@@ -24,9 +31,16 @@ const (
 
 var allCodes = []Code{
 	CodeCampaignValidationInvalid,
+	CodeCampaignValidationAccepted,
+	CodeCampaignValidationFailed,
 	CodeCampaignWaveBlocked,
+	CodeCampaignWaveAdvanced,
 	CodeCampaignBudgetThresholdReached,
 	CodeCampaignPauseEpochMismatch,
+	CodeCampaignPauseApplied,
+	CodeCampaignPauseResumed,
+	CodeCampaignPauseAbortStarted,
+	CodeCampaignPauseAbortResolved,
 	CodeTargetPrecheckIneligible,
 	CodeTargetSubmissionNotAuthorized,
 	CodeTargetAmbiguityInconclusive,
