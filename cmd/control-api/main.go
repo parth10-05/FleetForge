@@ -1,0 +1,57 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/parth10-05/fleetforge/internal/delivery/healthhttp"
+	"github.com/parth10-05/fleetforge/internal/platform/buildinfo"
+	"github.com/parth10-05/fleetforge/internal/platform/config"
+)
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("control API stopped", "error", err.Error())
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg, err := config.LoadAPI()
+	if err != nil {
+		return err
+	}
+	handler := healthhttp.NewHandler(healthhttp.FileProbe{Path: cfg.ReadinessFile}, cfg.ReadinessTimeout, buildinfo.Current())
+	handler.MarkStarted()
+	server := newServer(cfg.Address, handler.Routes())
+	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errorsChannel := make(chan error, 1)
+	go func() { errorsChannel <- server.ListenAndServe() }()
+	slog.Info("control API started", "role", "control-api", "environment", cfg.Environment, "address", cfg.Address, "version", buildinfo.Current().Version)
+	select {
+	case err := <-errorsChannel:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	case <-shutdownContext.Done():
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			return fmt.Errorf("graceful shutdown: %w", err)
+		}
+		return nil
+	}
+}
+
+func newServer(address string, handler http.Handler) *http.Server {
+	return &http.Server{Addr: address, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
+}

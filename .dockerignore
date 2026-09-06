@@ -1,0 +1,16 @@
+.git
+.github
+.fleetforge
+.env
+.env.*
+!.env.example
+node_modules
+web/node_modules
+web/dist
+docs/evidence/generated
+*.tfstate
+*.tfstate.*
+*.pem
+*.key
+*.p12
+*.pfx

@@ -1,0 +1,39 @@
+# Go
+bin/
+*.test
+*.out
+coverage/
+
+# Node and Vite
+node_modules/
+web/node_modules/
+web/dist/
+web/coverage/
+*.tsbuildinfo
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Terraform and cloud tooling
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
+
+# Generated evidence and local simulator state
+docs/evidence/generated/
+.fleetforge/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini

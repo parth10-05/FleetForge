@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Generated files are reviewed for provenance, not hand-edited.
+api/openapi/generated/** linguist-generated=true
+web/src/api/generated/** linguist-generated=true
+docs/evidence/generated/** linguist-generated=true

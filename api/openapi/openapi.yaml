@@ -1,0 +1,34 @@
+openapi: 3.1.0
+info:
+  title: FleetForge Control API
+  version: 0.0.0-foundation
+  description: Phase 01 operational contract only. No rollout operation is exposed.
+paths:
+  /health/live:
+    get:
+      operationId: getLiveness
+      responses:
+        '200':
+          description: Process is alive.
+  /health/ready:
+    get:
+      operationId: getReadiness
+      responses:
+        '200':
+          description: Process is ready for its current phase contract.
+        '503':
+          description: Required startup or platform prerequisite is unavailable.
+  /health/startup:
+    get:
+      operationId: getStartup
+      responses:
+        '200':
+          description: Startup completed.
+        '503':
+          description: Startup has not completed or failed.
+  /version:
+    get:
+      operationId: getVersion
+      responses:
+        '200':
+          description: Safe build metadata.

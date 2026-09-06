@@ -75,6 +75,11 @@ Each ADR contains:
 
 Avoid long implementation code. Small diagrams, contract fragments, or benchmark tables are permitted.
 
+## Phase 01 accepted ADR records
+
+- [ADR-007 — One Go module with enforced inward package boundaries](../adr/ADR-007-go-module-boundaries.md)
+- [ADR-008 — Contract-first OpenAPI with generated transport types only](../adr/ADR-008-openapi-boundary.md)
+
 ## Decision gates
 
 - Required ADR for a phase must be accepted before code depends on it.
