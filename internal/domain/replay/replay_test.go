@@ -10,6 +10,7 @@ import (
 
 	"github.com/parth10-05/fleetforge/internal/domain/campaign"
 	"github.com/parth10-05/fleetforge/internal/domain/event"
+	"github.com/parth10-05/fleetforge/internal/domain/targetupdate"
 	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
 
@@ -61,6 +62,30 @@ func TestReplayFailsClosedForUnknownVersionAndOrderIsExplicit(t *testing.T) {
 	}
 	if got.Aggregate.State != campaign.StateValidating.String() || got.Aggregate.Revision != 1 || got.Decisions[0].Class != string(campaign.DecisionConflict) {
 		t.Fatalf("reordered trace was not rejected deterministically: %#v", got)
+	}
+}
+
+func TestTargetReplayIsByteStable(t *testing.T) {
+	id := commandID(t, "00000000-0000-4000-8000-0000000000b3")
+	trace := TargetUpdateTrace{Version: event.VersionV1, Initial: targetupdate.Aggregate{State: targetupdate.StatePending}, Actions: []targetupdate.CommandInput{{ID: id, Command: targetupdate.CommandStartPrecheck, GuardsSatisfied: true}, {ID: id, Command: targetupdate.CommandPrecheckPassed, ExpectedRevision: 1, GuardsSatisfied: true}, {ID: id, Command: targetupdate.CommandAdmitSubmission, ExpectedRevision: 2, GuardsSatisfied: true}}}
+	first, err := ReplayTargetUpdate(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ReplayTargetUpdate(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstJSON, err := CanonicalJSON(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondJSON, err := CanonicalJSON(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstJSON, secondJSON) {
+		t.Fatalf("target replay varied: %s / %s", firstJSON, secondJSON)
 	}
 }
 
