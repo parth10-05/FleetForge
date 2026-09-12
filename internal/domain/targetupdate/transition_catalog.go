@@ -23,7 +23,7 @@ func buildCatalog() map[State]map[Command]Transition {
 	for _, state := range AllStates() {
 		result[state] = map[Command]Transition{}
 		for _, command := range AllCommands() {
-			result[state][command] = reject(state, command)
+			result[state][command] = rejectedTransition(state, command)
 		}
 	}
 	overrides := []Transition{
@@ -42,7 +42,7 @@ func buildCatalog() map[State]map[Command]Transition {
 	}
 	return result
 }
-func reject(from State, command Command) Transition {
+func rejectedTransition(from State, command Command) Transition {
 	return Transition{From: from, Command: command, Class: TransitionRejected, Result: from, Reason: reason.CodeTargetPrecheckIneligible}
 }
 func allow(from State, command Command, result State, resume ResumeStep, attention AttentionExit, code reason.Code, submit bool) Transition {
