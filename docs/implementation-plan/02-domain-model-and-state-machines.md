@@ -132,52 +132,52 @@ Reason codes are versioned contract values. Human messages may change; reason se
 
 ### Vocabulary and value objects
 
-- [ ] **P02-T01** Define canonical IDs for campaign, wave, target, target update, artifact, attempt, command, event, and policy version.
-- [ ] **P02-T02** Define state enumerations and one parser/validator per enumeration.
-- [ ] **P02-T03** Define UTC timestamp value and IANA maintenance-window value without embedding system-clock reads.
-- [ ] **P02-T04** Define failure-domain labels (`site`, `rack`, extensible labels) with normalized keys and size limits.
-- [ ] **P02-T05** Define digest, firmware version, remote task URI, endpoint identity, retry budget, failure budget, and concurrency-limit values.
-- [ ] **P02-T06** Define normalized evidence categories: task, firmware inventory, reachability, reboot, health, rejection, ambiguity.
+- [x] **P02-T01** Define canonical IDs for campaign, wave, target, target update, artifact, attempt, command, event, and policy version.
+- [x] **P02-T02** Define state enumerations and one parser/validator per enumeration.
+- [x] **P02-T03** Define UTC timestamp value and IANA maintenance-window value without embedding system-clock reads.
+- [x] **P02-T04** Define failure-domain labels (`site`, `rack`, extensible labels) with normalized keys and size limits.
+- [x] **P02-T05** Define digest, firmware version, remote task URI, endpoint identity, retry budget, failure budget, and concurrency-limit values.
+- [x] **P02-T06** Define normalized evidence categories: task, firmware inventory, reachability, reboot, health, rejection, ambiguity.
 
 ### Transition tables
 
-- [ ] **P02-T07** Write the complete campaign transition matrix including no-op and prohibited transitions.
-- [ ] **P02-T08** Write the complete target-update transition matrix including retry/ambiguity paths.
-- [ ] **P02-T08A** Define `resume_step` for every retry transition; an observation retry must never return to a submission-capable state.
-- [ ] **P02-T08B** Define `NEEDS_ATTENTION` resolution transitions: adopt-and-observe, terminal failure, and proof-backed retry, including counter/reservation effects.
-- [ ] **P02-T08C** Define `suspended_phase` for campaign pause and resume, including `EVALUATING_CANARY`.
-- [ ] **P02-T08D** Define abort behavior separately for work with no possible side effect and accepted/ambiguous work that must continue observation.
-- [ ] **P02-T09** Define terminal-state immutability and the separate audited manual-retry command semantics.
-- [ ] **P02-T10** Define wave release/evaluation transitions and ordinal monotonicity.
-- [ ] **P02-T11** Define artifact readiness transitions and the conditions consumed by campaign validation.
-- [ ] **P02-T12** Define target administrative states such as active, disabled, unreachable, or maintenance-blocked without conflating them with campaign target state.
+- [x] **P02-T07** Write the complete campaign transition matrix including no-op and prohibited transitions.
+- [x] **P02-T08** Write the complete target-update transition matrix including retry/ambiguity paths.
+- [x] **P02-T08A** Define `resume_step` for every retry transition; an observation retry must never return to a submission-capable state.
+- [x] **P02-T08B** Define `NEEDS_ATTENTION` resolution transitions: adopt-and-observe, terminal failure, and proof-backed retry, including counter/reservation effects.
+- [x] **P02-T08C** Define `suspended_phase` for campaign pause and resume, including `EVALUATING_CANARY`.
+- [x] **P02-T08D** Define abort behavior separately for work with no possible side effect and accepted/ambiguous work that must continue observation.
+- [x] **P02-T09** Define terminal-state immutability and the separate audited manual-retry command semantics.
+- [x] **P02-T10** Define wave release/evaluation transitions and ordinal monotonicity.
+- [x] **P02-T11** Define artifact readiness transitions and the conditions consumed by campaign validation.
+- [x] **P02-T12** Define target administrative states such as active, disabled, unreachable, or maintenance-blocked without conflating them with campaign target state.
 
 ### Pure reducers and policies
 
-- [ ] **P02-T13** Implement campaign command reducer with explicit revision/epoch checks.
-- [ ] **P02-T14** Implement target-update evidence reducer with stale/duplicate evidence semantics.
-- [ ] **P02-T15** Implement canary-selection interface accepting injected deterministic ordering/seed.
-- [ ] **P02-T16** Implement wave plan representation and release eligibility decision.
-- [ ] **P02-T17** Implement failure-budget calculation using exact integer/rational rules; document rounding at boundaries.
-- [ ] **P02-T18** Implement retry classification input/output model without performing retry sleeps.
-- [ ] **P02-T19** Implement maintenance-window decision using injected logical time and timezone database.
-- [ ] **P02-T20** Implement post-update success decision requiring version plus configured health checks.
-- [ ] **P02-T21** Implement pause/abort epoch semantics as a persisted submission-admission decision: a commit blocks new admissions, while earlier admissions remain potentially in flight.
-- [ ] **P02-T22** Define ambiguity resolution outcomes: matching operation adopted, expected version observed, proven absent, contradicted, or inconclusive.
+- [x] **P02-T13** Implement campaign command reducer with explicit revision/epoch checks.
+- [x] **P02-T14** Implement target-update evidence reducer with stale/duplicate evidence semantics.
+- [x] **P02-T15** Implement canary-selection interface accepting injected deterministic ordering/seed.
+- [x] **P02-T16** Implement wave plan representation and release eligibility decision.
+- [x] **P02-T17** Implement failure-budget calculation using exact integer/rational rules; document rounding at boundaries.
+- [x] **P02-T18** Implement retry classification input/output model without performing retry sleeps.
+- [x] **P02-T19** Implement maintenance-window decision using injected logical time and timezone database.
+- [x] **P02-T20** Implement post-update success decision requiring version plus configured health checks.
+- [x] **P02-T21** Implement pause/abort epoch semantics as a persisted submission-admission decision: a commit blocks new admissions, while earlier admissions remain potentially in flight.
+- [x] **P02-T22** Define ambiguity resolution outcomes: matching operation adopted, expected version observed, proven absent, contradicted, or inconclusive.
 
 ### Events and replay
 
-- [ ] **P02-T23** Define domain event names and minimum payloads without transport envelope fields.
-- [ ] **P02-T24** Make events carry aggregate revision and decision reason.
-- [ ] **P02-T25** Define a pure replay function over commands/evidence that reconstructs decisions but cannot execute external calls.
-- [ ] **P02-T26** Add canonical serialization fixtures for state and events to catch accidental contract drift.
+- [x] **P02-T23** Define domain event names and minimum payloads without transport envelope fields.
+- [x] **P02-T24** Make events carry aggregate revision and decision reason.
+- [x] **P02-T25** Define a pure replay function over commands/evidence that reconstructs decisions but cannot execute external calls.
+- [x] **P02-T26** Add canonical serialization fixtures for state and events to catch accidental contract drift.
 
 ### Defensive boundaries
 
-- [ ] **P02-T27** Reject unknown states, invalid counters, negative budgets, zero/negative concurrency, invalid wave ordinals, and impossible timestamps.
-- [ ] **P02-T28** Add invariant assertion functions used in tests and at persistence/application boundaries.
-- [ ] **P02-T29** Ensure errors do not contain secret-bearing values or unbounded raw evidence.
-- [ ] **P02-T30** Add package dependency test/lint rule preventing infrastructure imports into the domain.
+- [x] **P02-T27** Reject unknown states, invalid counters, negative budgets, zero/negative concurrency, invalid wave ordinals, and impossible timestamps.
+- [x] **P02-T28** Add invariant assertion functions used in tests and at persistence/application boundaries.
+- [x] **P02-T29** Ensure errors do not contain secret-bearing values or unbounded raw evidence.
+- [x] **P02-T30** Add package dependency test/lint rule preventing infrastructure imports into the domain.
 
 ## Required test matrix
 
