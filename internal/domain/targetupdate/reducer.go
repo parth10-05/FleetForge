@@ -39,7 +39,7 @@ type Decision struct {
 }
 
 func Reduce(aggregate Aggregate, input CommandInput) Decision {
-	if input.ID.IsZero() || !knownState(aggregate.State) || !knownCommand(input.Command) {
+	if input.ID.IsZero() || !ValidateAggregate(aggregate) || !knownCommand(input.Command) {
 		return reject(DecisionInvalidInput, aggregate, reason.CodeInternalInvariantInvalidAggregate)
 	}
 	if input.Duplicate || input.EvidenceOlder {

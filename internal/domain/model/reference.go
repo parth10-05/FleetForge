@@ -131,6 +131,7 @@ func pause(next CampaignAggregate) (CampaignAggregate, bool) {
 }
 func abort(next CampaignAggregate) (CampaignAggregate, bool) {
 	next.State = CampaignAborting
+	next.SuspendedPhase = ""
 	next.Revision++
 	next.CommandEpoch++
 	return next, true

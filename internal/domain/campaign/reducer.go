@@ -38,7 +38,7 @@ type Decision struct {
 }
 
 func Reduce(aggregate Aggregate, input CommandInput) Decision {
-	if input.ID.IsZero() || !knownState(aggregate.State) || !knownCommand(input.Command) || aggregate.SuspendedPhase != "" && !isSuspensible(aggregate.SuspendedPhase) {
+	if input.ID.IsZero() || !ValidateAggregate(aggregate) || !knownCommand(input.Command) {
 		return reject(DecisionInvalidInput, aggregate, reason.CodeInternalInvariantInvalidAggregate)
 	}
 	if input.Duplicate {
@@ -77,6 +77,8 @@ func Reduce(aggregate Aggregate, input CommandInput) Decision {
 	}
 	if transition.Suspended == SuspendedPhaseCapture {
 		next.SuspendedPhase = aggregate.State
+	} else if next.State != StatePaused {
+		next.SuspendedPhase = ""
 	}
 	if transition.Revision == RevisionIncrement {
 		next.Revision++
