@@ -21,6 +21,7 @@ var allowedDomainImports = map[string]map[string]struct{}{
 	"artifact":     {"value": {}},
 	"inventory":    {"value": {}},
 	"policy":       {"value": {}},
+	"canary":       {"value": {}},
 	"campaign":     {"value": {}, "reason": {}, "policy": {}},
 	"wave":         {"value": {}, "reason": {}},
 	"targetupdate": {"value": {}, "reason": {}, "evidence": {}, "policy": {}},
