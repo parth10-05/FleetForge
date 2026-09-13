@@ -1,5 +1,12 @@
 # FleetForge Phase 02 Verification Evidence
 
+> **Audit status (2026-09-13): FAIL — BLOCKING.**
+> [The Phase 02 audit record](phase-02-audit-2026-09-13.md) found a retry
+> resume-step bypass and no hosted Linux race evidence. The bypass is fixed
+> locally in `6f2fa0c`, but the branch has not been pushed and additional
+> blocking/major remediation remains. This document is historical evidence,
+> not a Phase 03 readiness declaration.
+
 **Scope:** pure domain model and state machines only. No database, queue,
 network client, background timer, Docker workload, or device side effect was
 added.
