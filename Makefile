@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := verify
 
-.PHONY: format lint test test-race build web-typecheck web-lint web-test web-build container-build secret-scan verify
+.PHONY: format lint test test-race build domain-test domain-property-test web-typecheck web-lint web-test web-build container-build secret-scan verify
 
 format:
 	go fmt ./...
@@ -13,6 +13,12 @@ test:
 
 test-race:
 	go test -race ./...
+
+domain-test:
+	go test -count=1 ./internal/domain/... ./internal/architecturetest/...
+
+domain-property-test:
+	go test -count=1 ./test/domainmodel/... -args --rapid.checks=200
 
 build:
 	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator

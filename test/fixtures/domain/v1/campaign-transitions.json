@@ -1,0 +1,33 @@
+{
+  "version": "v1",
+  "states": ["DRAFT", "VALIDATING", "READY", "RUNNING_CANARY", "EVALUATING_CANARY", "RUNNING_WAVES", "PAUSED", "ABORTING", "COMPLETED", "FAILED", "CANCELLED"],
+  "commands": ["BEGIN_VALIDATION", "VALIDATION_PASSED", "VALIDATION_FAILED", "START_CANARY", "CANARY_TERMINAL", "APPROVE_CANARY", "RELEASE_NEXT_WAVE", "COMPLETE", "PAUSE", "RESUME", "CANCEL", "ABORT", "ABORT_FAILED", "ABORT_CANCELLED"],
+  "default": {"class": "REJECTED", "reason": "campaign.validation.invalid"},
+  "overrides": [
+    {"from":"DRAFT","command":"BEGIN_VALIDATION","class":"ALLOWED","result":"VALIDATING"},
+    {"from":"DRAFT","command":"CANCEL","class":"ALLOWED","result":"CANCELLED"},
+    {"from":"VALIDATING","command":"VALIDATION_PASSED","class":"ALLOWED","result":"READY"},
+    {"from":"VALIDATING","command":"VALIDATION_FAILED","class":"ALLOWED","result":"DRAFT"},
+    {"from":"VALIDATING","command":"BEGIN_VALIDATION","class":"NO_OP","result":"VALIDATING"},
+    {"from":"READY","command":"START_CANARY","class":"ALLOWED","result":"RUNNING_CANARY"},
+    {"from":"READY","command":"CANCEL","class":"ALLOWED","result":"CANCELLED"},
+    {"from":"RUNNING_CANARY","command":"CANARY_TERMINAL","class":"ALLOWED","result":"EVALUATING_CANARY"},
+    {"from":"RUNNING_CANARY","command":"PAUSE","class":"ALLOWED","result":"PAUSED"},
+    {"from":"RUNNING_CANARY","command":"ABORT","class":"ALLOWED","result":"ABORTING"},
+    {"from":"EVALUATING_CANARY","command":"APPROVE_CANARY","class":"ALLOWED","result":"RUNNING_WAVES"},
+    {"from":"EVALUATING_CANARY","command":"PAUSE","class":"ALLOWED","result":"PAUSED"},
+    {"from":"EVALUATING_CANARY","command":"ABORT","class":"ALLOWED","result":"ABORTING"},
+    {"from":"RUNNING_WAVES","command":"RELEASE_NEXT_WAVE","class":"ALLOWED","result":"RUNNING_WAVES"},
+    {"from":"RUNNING_WAVES","command":"COMPLETE","class":"ALLOWED","result":"COMPLETED"},
+    {"from":"RUNNING_WAVES","command":"PAUSE","class":"ALLOWED","result":"PAUSED"},
+    {"from":"RUNNING_WAVES","command":"ABORT","class":"ALLOWED","result":"ABORTING"},
+    {"from":"PAUSED","command":"RESUME","class":"ALLOWED","result":""},
+    {"from":"PAUSED","command":"PAUSE","class":"NO_OP","result":"PAUSED"},
+    {"from":"PAUSED","command":"ABORT","class":"ALLOWED","result":"ABORTING"},
+    {"from":"ABORTING","command":"ABORT_FAILED","class":"ALLOWED","result":"FAILED"},
+    {"from":"ABORTING","command":"ABORT_CANCELLED","class":"ALLOWED","result":"CANCELLED"},
+    {"from":"COMPLETED","command":"COMPLETE","class":"NO_OP","result":"COMPLETED"},
+    {"from":"FAILED","command":"ABORT_FAILED","class":"NO_OP","result":"FAILED"},
+    {"from":"CANCELLED","command":"CANCEL","class":"NO_OP","result":"CANCELLED"}
+  ]
+}
