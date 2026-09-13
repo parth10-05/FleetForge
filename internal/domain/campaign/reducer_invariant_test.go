@@ -11,7 +11,7 @@ func TestAbortFromPausedClearsCapturedPhase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decision := Reduce(Aggregate{State: StatePaused, Revision: 3, CommandEpoch: 2, SuspendedPhase: StateRunningCanary}, CommandInput{ID: id, Command: CommandAbort, ExpectedRevision: 3, ExpectedEpoch: 2, GuardsSatisfied: true})
+	decision := Reduce(Aggregate{State: StatePaused, Revision: 3, CommandEpoch: 2, SuspendedPhase: StateRunningCanary}, CommandInput{ID: id, Command: CommandAbort, ExpectedRevision: 3, ExpectedEpoch: 2, Authorization: authorizedCampaign()})
 	if decision.Class != DecisionAllowed || decision.Aggregate.State != StateAborting || decision.Aggregate.SuspendedPhase != "" || !ValidateAggregate(decision.Aggregate) {
 		t.Fatalf("abort result = %#v", decision)
 	}

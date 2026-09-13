@@ -12,7 +12,7 @@ func FuzzTargetReducerRejectsMalformedInputsWithoutSubmission(f *testing.F) {
 	f.Fuzz(func(t *testing.T, rawState, rawCommand string) {
 		id, _ := value.ParseCommandID("00000000-0000-4000-8000-0000000000c2")
 		before := Aggregate{State: State(rawState)}
-		decision := Reduce(before, CommandInput{ID: id, Command: Command(rawCommand), GuardsSatisfied: true})
+		decision := Reduce(before, authorizedTargetInput(id, Command(rawCommand), 0, 0))
 		if decision.Class != DecisionAllowed && (decision.Aggregate != before || decision.SubmitIntent) {
 			t.Fatalf("rejected malformed input created mutation or submit intent")
 		}

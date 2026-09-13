@@ -1,6 +1,7 @@
 package targetupdate
 
 import (
+	"github.com/parth10-05/fleetforge/internal/domain/policy"
 	"github.com/parth10-05/fleetforge/internal/domain/reason"
 	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
@@ -17,7 +18,10 @@ type CommandInput struct {
 	ExpectedRevision value.Revision
 	ExpectedEpoch    value.CommandEpoch
 	Duplicate        bool
-	GuardsSatisfied  bool
+	Authorization    policy.TargetAuthorization
+	Submission       policy.SubmissionAdmission
+	RetryAbsence     policy.IndependentAbsenceProof
+	SuccessEvidence  policy.VersionAndHealthSuccess
 	EvidenceOlder    bool
 }
 type DecisionClass string
@@ -64,8 +68,17 @@ func Reduce(aggregate Aggregate, input CommandInput) Decision {
 	if transition.Class == TransitionNoOp {
 		return reject(DecisionNoOp, aggregate, transition.Reason)
 	}
-	if !input.GuardsSatisfied {
+	if !input.Authorization.Allows() {
 		return reject(DecisionUnsafeCondition, aggregate, transition.Reason)
+	}
+	if transition.SubmitIntent && !input.Submission.Matches(input.ID, aggregate.CommandEpoch) {
+		return reject(DecisionUnsafeCondition, aggregate, reason.CodeTargetSubmissionNotAuthorized)
+	}
+	if requiresIndependentAbsence(input.Command) && !input.RetryAbsence.IsProven() {
+		return reject(DecisionUnsafeCondition, aggregate, transition.Reason)
+	}
+	if requiresVersionAndHealthSuccess(input.Command) && !input.SuccessEvidence.IsVerified() {
+		return reject(DecisionUnsafeCondition, aggregate, reason.CodeTargetVerificationInsufficient)
 	}
 	next := aggregate
 	next.State = transition.Result
@@ -82,3 +95,11 @@ func reject(class DecisionClass, aggregate Aggregate, code reason.Code) Decision
 }
 func knownState(state State) bool       { _, err := ParseState(state.String()); return err == nil }
 func knownCommand(command Command) bool { _, err := ParseCommand(command.String()); return err == nil }
+
+func requiresIndependentAbsence(command Command) bool {
+	return command == CommandPreSendAbsent || command == CommandAttentionRetry
+}
+
+func requiresVersionAndHealthSuccess(command Command) bool {
+	return command == CommandAlreadyCurrent || command == CommandVerificationSucceeded
+}

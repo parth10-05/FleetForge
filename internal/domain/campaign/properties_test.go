@@ -16,7 +16,7 @@ func TestCampaignReducerAgreesWithIndependentSequentialModel(t *testing.T) {
 		reference := model.CampaignAggregate{State: model.CampaignDraft}
 		for range 100 {
 			command := rapid.SampledFrom(AllCommands()).Draw(t, "command")
-			decision := Reduce(actual, CommandInput{ID: commandID, Command: command, ExpectedRevision: actual.Revision, ExpectedEpoch: actual.CommandEpoch, GuardsSatisfied: true})
+			decision := Reduce(actual, CommandInput{ID: commandID, Command: command, ExpectedRevision: actual.Revision, ExpectedEpoch: actual.CommandEpoch, Authorization: authorizedCampaign()})
 			nextReference, advanced := model.Step(reference, model.CampaignCommand(command.String()))
 			if advanced {
 				if decision.Class != DecisionAllowed {
@@ -42,7 +42,7 @@ func TestCampaignEpochOnlyChangesForPauseOrAbort(t *testing.T) {
 		current := Aggregate{State: StateDraft}
 		for range 100 {
 			command := rapid.SampledFrom(AllCommands()).Draw(t, "command")
-			decision := Reduce(current, CommandInput{ID: commandID, Command: command, ExpectedRevision: current.Revision, ExpectedEpoch: current.CommandEpoch, GuardsSatisfied: true})
+			decision := Reduce(current, CommandInput{ID: commandID, Command: command, ExpectedRevision: current.Revision, ExpectedEpoch: current.CommandEpoch, Authorization: authorizedCampaign()})
 			if decision.Aggregate.CommandEpoch < current.CommandEpoch || decision.Aggregate.CommandEpoch > current.CommandEpoch+1 {
 				t.Fatalf("epoch changed unsafely: %#v -> %#v", current, decision.Aggregate)
 			}

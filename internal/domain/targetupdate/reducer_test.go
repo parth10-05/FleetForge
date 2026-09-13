@@ -1,6 +1,7 @@
 package targetupdate
 
 import (
+	"github.com/parth10-05/fleetforge/internal/domain/policy"
 	"github.com/parth10-05/fleetforge/internal/domain/value"
 	"testing"
 )
@@ -13,25 +14,58 @@ func targetID(t *testing.T) value.CommandID {
 	}
 	return id
 }
+
+func TestReduceRequiresSpecificSafetyProofs(t *testing.T) {
+	id := targetID(t)
+	t.Run("submission needs persisted exact admission", func(t *testing.T) {
+		before := Aggregate{State: StateSubmitting, CommandEpoch: 2}
+		input := authorizedTargetInput(id, CommandAdmitSubmission, 0, 2)
+		input.Submission = policy.NewPersistedSubmissionAdmission(id, 1)
+		decision := Reduce(before, input)
+		if decision.Class != DecisionUnsafeCondition || decision.SubmitIntent || decision.Aggregate != before {
+			t.Fatalf("unfenced submission = %#v", decision)
+		}
+	})
+	t.Run("retry needs independent absence and late-caller exclusion", func(t *testing.T) {
+		before := Aggregate{State: StateNeedsAttention}
+		input := authorizedTargetInput(id, CommandAttentionRetry, 0, 0)
+		input.RetryAbsence = policy.IndependentAbsenceProof{}
+		decision := Reduce(before, input)
+		if decision.Class != DecisionUnsafeCondition || decision.Aggregate != before {
+			t.Fatalf("unproven retry = %#v", decision)
+		}
+	})
+	t.Run("success needs version and health evidence", func(t *testing.T) {
+		before := Aggregate{State: StateVerifying}
+		input := authorizedTargetInput(id, CommandVerificationSucceeded, 0, 0)
+		input.SuccessEvidence = policy.VersionAndHealthSuccess{}
+		decision := Reduce(before, input)
+		if decision.Class != DecisionUnsafeCondition || decision.Aggregate != before {
+			t.Fatalf("unverified success = %#v", decision)
+		}
+	})
+}
 func TestReducePreservesRetryAndBlocksStaleEvidence(t *testing.T) {
 	a := Aggregate{State: StateVerifying, Revision: 2}
-	d := Reduce(a, CommandInput{ID: targetID(t), Command: CommandVerificationRetryable, ExpectedRevision: 2, GuardsSatisfied: true})
+	d := Reduce(a, authorizedTargetInput(targetID(t), CommandVerificationRetryable, 2, 0))
 	if d.Class != DecisionAllowed || d.Aggregate.State != StateRetryWait || d.Aggregate.ResumeStep != ResumeStepVerifying {
 		t.Fatalf("retry=%+v", d)
 	}
-	stale := Reduce(d.Aggregate, CommandInput{ID: targetID(t), Command: CommandAdmitSubmission, ExpectedRevision: 3, EvidenceOlder: true, GuardsSatisfied: true})
-	if stale.Class != DecisionNoOp || stale.SubmitIntent {
-		t.Fatalf("stale=%+v", stale)
+	stale := authorizedTargetInput(targetID(t), CommandAdmitSubmission, 3, 0)
+	stale.EvidenceOlder = true
+	staleDecision := Reduce(d.Aggregate, stale)
+	if staleDecision.Class != DecisionNoOp || staleDecision.SubmitIntent {
+		t.Fatalf("stale=%+v", staleDecision)
 	}
 }
 func TestReduceAttentionAndSubmissionEpoch(t *testing.T) {
 	a := Aggregate{State: StateNeedsAttention, Revision: 1, CommandEpoch: 4}
-	d := Reduce(a, CommandInput{ID: targetID(t), Command: CommandAttentionRetry, ExpectedRevision: 1, GuardsSatisfied: true})
+	d := Reduce(a, authorizedTargetInput(targetID(t), CommandAttentionRetry, 1, 4))
 	if d.Class != DecisionAllowed || d.Aggregate.ResumeStep != ResumeStepSubmitting || d.Attention != AttentionExitProofRetry {
 		t.Fatalf("attention=%+v", d)
 	}
 	b := Aggregate{State: StateSubmitting, CommandEpoch: 4}
-	conflict := Reduce(b, CommandInput{ID: targetID(t), Command: CommandAdmitSubmission, ExpectedEpoch: 3, GuardsSatisfied: true})
+	conflict := Reduce(b, authorizedTargetInput(targetID(t), CommandAdmitSubmission, 0, 3))
 	if conflict.Class != DecisionConflict || conflict.SubmitIntent {
 		t.Fatalf("conflict=%+v", conflict)
 	}
@@ -58,7 +92,7 @@ func TestReduceRetryWaitRequiresMatchingPersistedResumeStep(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			before := Aggregate{State: StateRetryWait, ResumeStep: testCase.resume}
-			decision := Reduce(before, CommandInput{ID: targetID(t), Command: testCase.command, GuardsSatisfied: true})
+			decision := Reduce(before, authorizedTargetInput(targetID(t), testCase.command, 0, 0))
 			if decision.Class == DecisionAllowed || decision.Aggregate != before || decision.SubmitIntent {
 				t.Fatalf("mismatched retry exit = %#v", decision)
 			}

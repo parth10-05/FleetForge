@@ -16,7 +16,7 @@ func TestTargetReducerAgreesWithIndependentSequentialModel(t *testing.T) {
 		reference := model.TargetAggregate{State: model.TargetPending}
 		for range 100 {
 			command := rapid.SampledFrom(AllCommands()).Draw(t, "command")
-			decision := Reduce(actual, CommandInput{ID: id, Command: command, ExpectedRevision: actual.Revision, ExpectedEpoch: actual.CommandEpoch, GuardsSatisfied: true})
+			decision := Reduce(actual, authorizedTargetInput(id, command, actual.Revision, actual.CommandEpoch))
 			nextReference, advanced, submit := model.StepTarget(reference, model.TargetCommand(command.String()))
 			if advanced {
 				if decision.Class != DecisionAllowed || decision.SubmitIntent != submit {
@@ -37,7 +37,7 @@ func TestTargetObservationCannotCreateSubmissionIntent(t *testing.T) {
 	id := targetCommandID(t, "00000000-0000-4000-8000-0000000000b2")
 	states := []State{StateUpdateAccepted, StateWaitingReboot, StateVerifying, StateNeedsAttention}
 	for _, state := range states {
-		decision := Reduce(Aggregate{State: state}, CommandInput{ID: id, Command: CommandContinueObservation, GuardsSatisfied: true})
+		decision := Reduce(Aggregate{State: state}, authorizedTargetInput(id, CommandContinueObservation, 0, 0))
 		if decision.SubmitIntent {
 			t.Fatalf("observation in %s created submission intent", state)
 		}

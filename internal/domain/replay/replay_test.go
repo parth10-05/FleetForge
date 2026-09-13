@@ -10,6 +10,7 @@ import (
 
 	"github.com/parth10-05/fleetforge/internal/domain/campaign"
 	"github.com/parth10-05/fleetforge/internal/domain/event"
+	"github.com/parth10-05/fleetforge/internal/domain/policy"
 	"github.com/parth10-05/fleetforge/internal/domain/targetupdate"
 	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
@@ -67,7 +68,11 @@ func TestReplayFailsClosedForUnknownVersionAndOrderIsExplicit(t *testing.T) {
 
 func TestTargetReplayIsByteStable(t *testing.T) {
 	id := commandID(t, "00000000-0000-4000-8000-0000000000b3")
-	trace := TargetUpdateTrace{Version: event.VersionV1, Initial: targetupdate.Aggregate{State: targetupdate.StatePending}, Actions: []targetupdate.CommandInput{{ID: id, Command: targetupdate.CommandStartPrecheck, GuardsSatisfied: true}, {ID: id, Command: targetupdate.CommandPrecheckPassed, ExpectedRevision: 1, GuardsSatisfied: true}, {ID: id, Command: targetupdate.CommandAdmitSubmission, ExpectedRevision: 2, GuardsSatisfied: true}}}
+	trace := TargetUpdateTrace{Version: event.VersionV1, Initial: targetupdate.Aggregate{State: targetupdate.StatePending}, Actions: []targetupdate.CommandInput{
+		authorizedTargetAction(id, targetupdate.CommandStartPrecheck, 0, 0),
+		authorizedTargetAction(id, targetupdate.CommandPrecheckPassed, 1, 0),
+		authorizedTargetAction(id, targetupdate.CommandAdmitSubmission, 2, 0),
+	}}
 	first, err := ReplayTargetUpdate(trace)
 	if err != nil {
 		t.Fatal(err)
@@ -95,10 +100,34 @@ func campaignTrace(t *testing.T) CampaignTrace {
 	second := commandID(t, "00000000-0000-4000-8000-000000000012")
 	third := commandID(t, "00000000-0000-4000-8000-000000000013")
 	return CampaignTrace{Version: event.VersionV1, Initial: campaign.Aggregate{State: campaign.StateDraft}, Actions: []campaign.CommandInput{
-		{ID: first, Command: campaign.CommandBeginValidation, GuardsSatisfied: true},
-		{ID: second, Command: campaign.CommandValidationPassed, ExpectedRevision: 1, GuardsSatisfied: true},
-		{ID: third, Command: campaign.CommandStartCanary, ExpectedRevision: 2, GuardsSatisfied: true},
+		{ID: first, Command: campaign.CommandBeginValidation, Authorization: authorizedCampaignAction()},
+		{ID: second, Command: campaign.CommandValidationPassed, ExpectedRevision: 1, Authorization: authorizedCampaignAction()},
+		{ID: third, Command: campaign.CommandStartCanary, ExpectedRevision: 2, Authorization: authorizedCampaignAction()},
 	}}
+}
+
+func authorizedTargetAction(id value.CommandID, command targetupdate.Command, revision value.Revision, epoch value.CommandEpoch) targetupdate.CommandInput {
+	return targetupdate.CommandInput{
+		ID: id, Command: command, ExpectedRevision: revision, ExpectedEpoch: epoch,
+		Authorization:   policy.ApproveTargetTransition(),
+		Submission:      policy.NewPersistedSubmissionAdmission(id, epoch),
+		RetryAbsence:    policy.NewIndependentAbsenceAndLateCallerExclusion(),
+		SuccessEvidence: policy.NewVersionAndHealthSuccess(),
+	}
+}
+
+func authorizedCampaignAction() policy.CampaignAuthorization {
+	return policy.NewCampaignAuthorization(
+		policy.CampaignGuardValidSnapshot, policy.CampaignGuardCancellationPermitted,
+		policy.CampaignGuardPreflightPassed, policy.CampaignGuardSnapshotFrozen,
+		policy.CampaignGuardCorrectableFailure, policy.CampaignGuardAuthorizedStart,
+		policy.CampaignGuardCanaryTargetsTerminal, policy.CampaignGuardPauseAuthorized,
+		policy.CampaignGuardAbortAuthorized, policy.CampaignGuardCanaryEvaluated,
+		policy.CampaignGuardFailureBudgetPassed, policy.CampaignGuardPriorWaveEvaluated,
+		policy.CampaignGuardAllTargetsTerminal, policy.CampaignGuardFinalPolicyPassed,
+		policy.CampaignGuardSuspendedPhasePresent, policy.CampaignGuardInflightOutcomeBlocked,
+		policy.CampaignGuardRemainingWorkResolved,
+	)
 }
 
 func commandID(t *testing.T, raw string) value.CommandID {

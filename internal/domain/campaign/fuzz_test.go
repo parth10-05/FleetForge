@@ -12,7 +12,7 @@ func FuzzCampaignReducerRejectsMalformedInputsWithoutMutation(f *testing.F) {
 	f.Fuzz(func(t *testing.T, rawState, rawCommand string) {
 		id, _ := value.ParseCommandID("00000000-0000-4000-8000-0000000000c1")
 		before := Aggregate{State: State(rawState)}
-		decision := Reduce(before, CommandInput{ID: id, Command: Command(rawCommand), GuardsSatisfied: true})
+		decision := Reduce(before, CommandInput{ID: id, Command: Command(rawCommand), Authorization: authorizedCampaign()})
 		if decision.Class == DecisionAllowed && decision.Aggregate.Revision != before.Revision+1 {
 			t.Fatalf("allowed malformed replay did not increment once")
 		}

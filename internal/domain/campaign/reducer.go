@@ -1,6 +1,7 @@
 package campaign
 
 import (
+	"github.com/parth10-05/fleetforge/internal/domain/policy"
 	"github.com/parth10-05/fleetforge/internal/domain/reason"
 	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
@@ -17,7 +18,7 @@ type CommandInput struct {
 	ExpectedRevision value.Revision
 	ExpectedEpoch    value.CommandEpoch
 	Duplicate        bool
-	GuardsSatisfied  bool
+	Authorization    policy.CampaignAuthorization
 }
 type DecisionClass string
 
@@ -62,7 +63,7 @@ func Reduce(aggregate Aggregate, input CommandInput) Decision {
 	if transition.Class == TransitionNoOp {
 		return reject(DecisionNoOp, aggregate, transition.Reason)
 	}
-	if !input.GuardsSatisfied {
+	if !input.Authorization.Satisfies(transition.Guards) {
 		return reject(DecisionUnsafeCondition, aggregate, transition.Reason)
 	}
 	next := aggregate
