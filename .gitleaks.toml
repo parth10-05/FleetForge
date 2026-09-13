@@ -1,0 +1,7 @@
+# This is an intentionally invalid UUID parser fixture, not a credential.
+# Keep the allowlist exact so real credential-like values remain scanned.
+[allowlist]
+  description = "Invalid UUID test fixture"
+  regexes = [
+    '''not-a-uuid-secret-canary''',
+  ]

@@ -32,6 +32,7 @@ jobs:
               - 'internal/**'
               - 'test/**'
               - 'Makefile'
+              - '.gitleaks.toml'
               - '.github/workflows/foundation.yml'
             web:
               - 'web/**'
