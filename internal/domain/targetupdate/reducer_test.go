@@ -36,3 +36,32 @@ func TestReduceAttentionAndSubmissionEpoch(t *testing.T) {
 		t.Fatalf("conflict=%+v", conflict)
 	}
 }
+
+func TestReduceRetryWaitRequiresMatchingPersistedResumeStep(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		resume  ResumeStep
+		command Command
+	}{
+		{name: "precheck cannot admit submission", resume: ResumeStepPrecheck, command: CommandAdmitSubmission},
+		{name: "precheck cannot resume reboot observation", resume: ResumeStepPrecheck, command: CommandRebootObserved},
+		{name: "precheck cannot resume verification", resume: ResumeStepPrecheck, command: CommandVerificationRetryable},
+		{name: "submitting cannot restart precheck", resume: ResumeStepSubmitting, command: CommandRetryDue},
+		{name: "submitting cannot resume reboot observation", resume: ResumeStepSubmitting, command: CommandRebootObserved},
+		{name: "submitting cannot resume verification", resume: ResumeStepSubmitting, command: CommandVerificationRetryable},
+		{name: "waiting reboot cannot restart precheck", resume: ResumeStepWaitingReboot, command: CommandRetryDue},
+		{name: "waiting reboot cannot admit submission", resume: ResumeStepWaitingReboot, command: CommandAdmitSubmission},
+		{name: "waiting reboot cannot resume verification", resume: ResumeStepWaitingReboot, command: CommandVerificationRetryable},
+		{name: "verifying cannot restart precheck", resume: ResumeStepVerifying, command: CommandRetryDue},
+		{name: "verifying cannot admit submission", resume: ResumeStepVerifying, command: CommandAdmitSubmission},
+		{name: "verifying cannot resume reboot observation", resume: ResumeStepVerifying, command: CommandRebootObserved},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			before := Aggregate{State: StateRetryWait, ResumeStep: testCase.resume}
+			decision := Reduce(before, CommandInput{ID: targetID(t), Command: testCase.command, GuardsSatisfied: true})
+			if decision.Class == DecisionAllowed || decision.Aggregate != before || decision.SubmitIntent {
+				t.Fatalf("mismatched retry exit = %#v", decision)
+			}
+		})
+	}
+}

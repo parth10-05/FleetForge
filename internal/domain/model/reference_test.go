@@ -41,3 +41,21 @@ func TestReferenceModelPreservesMonotonicRevisions(t *testing.T) {
 		}
 	})
 }
+
+func TestTargetReferenceRequiresMatchingResumeStep(t *testing.T) {
+	for _, testCase := range []struct {
+		resume  TargetResumeStep
+		command TargetCommand
+	}{
+		{TargetResumePrecheck, TargetAdmitSubmission},
+		{TargetResumeSubmitting, TargetRetryDue},
+		{TargetResumeWaitingReboot, TargetVerificationRetryable},
+		{TargetResumeVerifying, TargetRebootObserved},
+	} {
+		before := TargetAggregate{State: TargetRetryWait, ResumeStep: testCase.resume}
+		got, advanced, submit := StepTarget(before, testCase.command)
+		if advanced || submit || got != before {
+			t.Fatalf("mismatched target retry exit = %#v, %t, %t", got, advanced, submit)
+		}
+	}
+}

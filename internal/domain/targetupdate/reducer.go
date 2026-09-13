@@ -55,6 +55,9 @@ func Reduce(aggregate Aggregate, input CommandInput) Decision {
 	if transition.SubmitIntent && input.ExpectedEpoch != aggregate.CommandEpoch {
 		return reject(DecisionConflict, aggregate, reason.CodeTargetSubmissionNotAuthorized)
 	}
+	if aggregate.State == StateRetryWait && transition.Class == TransitionAllowed && transition.Resume != aggregate.ResumeStep {
+		return reject(DecisionUnsafeCondition, aggregate, reason.CodeTargetPrecheckIneligible)
+	}
 	if transition.Class == TransitionRejected {
 		return reject(DecisionUnsafeCondition, aggregate, transition.Reason)
 	}

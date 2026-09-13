@@ -121,13 +121,21 @@ func StepTarget(current TargetAggregate, command TargetCommand) (TargetAggregate
 	case TargetRetryWait:
 		switch command {
 		case TargetRetryDue:
-			return advance(TargetPrecheck, "", false)
+			if current.ResumeStep == TargetResumePrecheck {
+				return advance(TargetPrecheck, "", false)
+			}
 		case TargetAdmitSubmission:
-			return advance(TargetSubmitting, "", true)
+			if current.ResumeStep == TargetResumeSubmitting {
+				return advance(TargetSubmitting, "", true)
+			}
 		case TargetRebootObserved:
-			return advance(TargetWaitingReboot, "", false)
+			if current.ResumeStep == TargetResumeWaitingReboot {
+				return advance(TargetWaitingReboot, "", false)
+			}
 		case TargetVerificationRetryable:
-			return advance(TargetVerifying, "", false)
+			if current.ResumeStep == TargetResumeVerifying {
+				return advance(TargetVerifying, "", false)
+			}
 		}
 	case TargetNeedsAttention:
 		switch command {
