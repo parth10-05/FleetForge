@@ -22,7 +22,6 @@ var allowedDomainImports = map[string]map[string]struct{}{
 	"inventory":    {"value": {}},
 	"policy":       {"value": {}},
 	"canary":       {"value": {}},
-	"model":        {},
 	"campaign":     {"value": {}, "reason": {}, "policy": {}},
 	"wave":         {"value": {}, "reason": {}},
 	"targetupdate": {"value": {}, "reason": {}, "evidence": {}, "policy": {}},
@@ -112,6 +111,7 @@ func TestDomainImportPolicy(t *testing.T) {
 		{name: "forbidden external dependency", packageName: "value", imported: "github.com/google/uuid", wantError: true},
 		{name: "forbidden outward domain dependency", packageName: "replay", imported: domainImportPrefix + "value", wantError: true},
 		{name: "unknown domain package", packageName: "unknown", imported: "strings", wantError: true},
+		{name: "production reference model package", packageName: "model", imported: "strings", wantError: true},
 	}
 
 	for _, testCase := range testCases {
