@@ -340,3 +340,25 @@ func TestTargetReferenceRequiresMatchingResumeStep(t *testing.T) {
 		}
 	}
 }
+
+// This deliberate mutant models the unsafe bug fixed by 6f2fa0c: it permits
+// submission from every RETRY_WAIT step. The independent oracle must disagree
+// with it, proving the property suite can expose that safety regression.
+func TestIndependentModelDetectsUnsafeRetryMutation(t *testing.T) {
+	before := TargetAggregate{State: TargetRetryWait, ResumeStep: TargetResumeVerifying}
+	oracle, oracleAdvanced, oracleSubmit := stepTarget(before, TargetAdmitSubmission)
+	mutant, mutantAdvanced, mutantSubmit := unsafeRetryMutation(before, TargetAdmitSubmission)
+	if oracleAdvanced || oracleSubmit || oracle != before {
+		t.Fatalf("oracle unexpectedly allowed mismatched retry: %#v, %t, %t", oracle, oracleAdvanced, oracleSubmit)
+	}
+	if !mutantAdvanced || !mutantSubmit || mutant.State != TargetSubmitting {
+		t.Fatalf("mutant did not represent the unsafe transition: %#v, %t, %t", mutant, mutantAdvanced, mutantSubmit)
+	}
+}
+
+func unsafeRetryMutation(current TargetAggregate, command TargetCommand) (TargetAggregate, bool, bool) {
+	if current.State == TargetRetryWait && command == TargetAdmitSubmission {
+		return TargetAggregate{State: TargetSubmitting, Revision: current.Revision + 1}, true, true
+	}
+	return stepTarget(current, command)
+}
