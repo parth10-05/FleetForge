@@ -18,7 +18,7 @@ domain-test:
 	go test -count=1 ./internal/domain/... ./internal/architecturetest/...
 
 domain-property-test:
-	go test -count=1 ./test/domainmodel/...
+	go test -count=1 ./test/domainmodel/... -args --rapid.checks=200
 
 build:
 	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator
