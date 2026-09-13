@@ -12,7 +12,7 @@ network client, background timer, Docker workload, or device side effect was
 added.
 
 **Branch:** `codex/phase-02-domain-model`  
-**Remediation head before hosted verification:** `5afa1af`  
+**Remediation head before hosted verification:** `5afa1af`
 **Date:** 2026-09-13
 
 ## Delivered contract slices
