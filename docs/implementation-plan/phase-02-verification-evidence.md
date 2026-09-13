@@ -1,18 +1,18 @@
 # FleetForge Phase 02 Verification Evidence
 
-> **Audit status (2026-09-13): REMEDIATION PENDING HOSTED CI.**
+> **Audit status (2026-09-13): PASS.**
 > [The Phase 02 audit record](phase-02-audit-2026-09-13.md) found a retry
 > resume-step bypass, untyped safety inputs, misplaced reference models,
-> incomplete properties, and no hosted Linux race evidence. The local
-> remediation sequence ends at `5afa1af`; hosted Linux verification remains
-> required before this becomes a Phase 03 readiness declaration.
+> incomplete properties, and no hosted Linux race evidence. The remediation
+> passed all required local and hosted verification gates; see the closure
+> audit for the immutable Linux evidence.
 
 **Scope:** pure domain model and state machines only. No database, queue,
 network client, background timer, Docker workload, or device side effect was
 added.
 
 **Branch:** `codex/phase-02-domain-model`  
-**Remediation head before hosted verification:** `5afa1af`
+**Audited code commit:** `a5ecfff3b82e17bf373a66a7de83d02e65bbd543`
 **Date:** 2026-09-13
 
 ## Delivered contract slices
@@ -55,8 +55,9 @@ cc1.exe: sorry, unimplemented: 64-bit mode not compiled in
 ```
 
 This is a host toolchain limitation, not a failing domain test. The workflow
-now runs the directed 200-check suite and `go test -race ./...` on Ubuntu;
-the immutable run URL and final SHA are pending the pull-request run.
+runs the directed 200-check suite and `go test -race ./...` on Ubuntu. Both
+passed on [Foundation verification run 34758655981](https://github.com/parth10-05/FleetForge/actions/runs/34758655981)
+for audited code commit `a5ecfff3b82e17bf373a66a7de83d02e65bbd543`.
 
 ## Deliberate Phase boundaries
 
