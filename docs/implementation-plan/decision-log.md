@@ -33,10 +33,10 @@ This log tracks implementation decisions that must remain explicit. Create one A
 |---|---|---:|---|---|
 | ADR-007 | Go module/package boundary and dependency enforcement | 01 | Simplicity, boundary clarity, build/test speed | One module, internal packages |
 | ADR-008 | OpenAPI generation/server/client approach | 01/10 | Contract drift, type safety, domain isolation | Contract-first; generated transport types only |
-| ADR-009 | PostgreSQL migration/query tooling | 03 | Explicit SQL, migrations, typing, lock visibility | Lightweight migration tool + explicit/typed queries |
-| ADR-010 | State storage representation: text checks vs PostgreSQL enums | 03 | Evolution/rollback/validation | Prefer text+checks if enum evolution complicates rollback |
-| ADR-011 | Idempotency in-progress/concurrent caller behavior | 03/10 | Stable response, bounded waiting, failure recovery | Persist claim; explicit conflict/retry guidance or bounded wait |
-| ADR-012 | Audit append-only enforcement boundary | 03 | Tamper resistance vs operational simplicity | Separate DB role/repository restriction; add stronger enforcement if practical |
+| ADR-009 | PostgreSQL migration/query tooling | Accepted 2026-09-14 | Explicit SQL, migrations, typing, lock visibility | pgx/v5 + sqlc pgx/v5 + goose Provider with direct-session advisory lock |
+| ADR-010 | State storage representation: text checks vs PostgreSQL enums | Accepted 2026-09-14 | Evolution/rollback/validation | Bounded text plus named checks and strict domain parsing |
+| ADR-011 | Idempotency in-progress/concurrent caller behavior | Accepted 2026-09-14 | Stable response, bounded waiting, failure recovery | Durable lease-owned claim; bounded in-progress response; completed replay |
+| ADR-012 | Audit append-only enforcement boundary | Accepted 2026-09-14 | Tamper resistance vs operational simplicity | Separate migration/application/diagnostic roles with application update/delete denied |
 | ADR-013 | Selected Redfish/OpenBMC firmware update mechanism/version | Pre-04 capability spike/09 | Official support, pinned QEMU feasibility, upload/data path, apply-time, task/evidence behavior | One explicit supported path before simulator contract freezes |
 | ADR-014 | Simulator scenario schema and controllable clock | 04 | Determinism, scale, fault composability | Seeded declarative scenarios |
 | ADR-015 | Selector grammar and query compilation | 05 | Safety, bounded complexity, indexability | Whitelisted expression grammar |
@@ -45,7 +45,7 @@ This log tracks implementation decisions that must remain explicit. Create one A
 | ADR-018 | Canary selection algorithm/versioning | 07 | Determinism, failure-domain diversity, explanation | Stable hash with rack/site stratification |
 | ADR-019 | Failure-budget threshold/rounding semantics | 07 | Boundary clarity/replay | Integer count with explicitly defined inclusive rule |
 | ADR-020 | Queue classes, semantic command identity, delivery-generation identity, and retry configuration | 08 | Backpressure, redelivery-safe repair, cost | Few workload classes; DB idempotency authoritative |
-| ADR-021 | Work lease, durable operation reservation, enrollment claim, and complete lock acquisition order | 08 | Deadlock avoidance, stale-worker safety, physical blast radius | Row-backed reservations with deterministic order across every writer |
+| ADR-021 | Work lease, durable operation reservation, enrollment claim, and complete lock acquisition order | Accepted early 2026-09-14 | Deadlock avoidance, stale-worker safety, physical blast radius | Row-backed reservations with documented deterministic writer order |
 | ADR-022 | Ambiguity evidence hierarchy/proof-of-absence policy | 09 | Safety, OpenBMC observability, operator burden | Conservative hierarchy; inconclusive → attention |
 | ADR-023 | Redfish event authentication/correlation | 09 | Supported target behavior, spoofing/replay | Signed secret/network isolation where available; polling remains correctness path |
 | ADR-024 | Amazon Cognito User Pools, Google sign-in, application RBAC, and browser session storage | 10/11 | Secure session/token storage, CSRF, revocation, `auth_time` recent auth | Cognito OIDC adapter; server-managed secure cookie or in-memory token flow; no localStorage by default |
@@ -79,6 +79,11 @@ Avoid long implementation code. Small diagrams, contract fragments, or benchmark
 
 - [ADR-007 — One Go module with enforced inward package boundaries](../adr/ADR-007-go-module-boundaries.md)
 - [ADR-008 — Contract-first OpenAPI with generated transport types only](../adr/ADR-008-openapi-boundary.md)
+- [ADR-009 — Explicit PostgreSQL tooling: pgx, sqlc, and goose](../adr/ADR-009-postgresql-persistence-tooling.md)
+- [ADR-010 — PostgreSQL states use text with named checks](../adr/ADR-010-postgresql-text-state-checks.md)
+- [ADR-011 — Durable, lease-owned idempotency claims](../adr/ADR-011-durable-idempotency-claims.md)
+- [ADR-012 — Database-enforced audit append-only boundary](../adr/ADR-012-audit-immutability-roles.md)
+- [ADR-021 — Deterministic lock order for persistence writers](../adr/ADR-021-persistence-lock-order.md)
 
 ## Decision gates
 
