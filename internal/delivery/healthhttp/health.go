@@ -18,6 +18,14 @@ var ErrProbeUnavailable = errors.New("required probe unavailable")
 
 type Probe interface{ Check(context.Context) error }
 
+// ReasonedProbe maps a private probe failure to a stable, safe readiness
+// reason. It lets persistence distinguish unavailable infrastructure from an
+// incompatible schema without exposing connection details.
+type ReasonedProbe interface {
+	Probe
+	ReadinessReason(error) string
+}
+
 // FileProbe requires an optional local prerequisite file. It keeps Phase 01
 // readiness testable without requiring a cloud or database dependency.
 type FileProbe struct{ Path string }
@@ -66,7 +74,11 @@ func (h *Handler) ready(writer http.ResponseWriter, _ *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), h.timeout)
 		defer cancel()
 		if err := h.probe.Check(ctx); err != nil {
-			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "reason": "required_probe_unavailable"})
+			reason := "required_probe_unavailable"
+			if probe, ok := h.probe.(ReasonedProbe); ok {
+				reason = probe.ReadinessReason(err)
+			}
+			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "reason": reason})
 			return
 		}
 	}

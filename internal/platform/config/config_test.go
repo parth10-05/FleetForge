@@ -60,3 +60,27 @@ func TestMissingRequiredConfig(t *testing.T) {
 		t.Fatalf("LoadAPI() error = %v, want missing %s", err, apiAddressKey)
 	}
 }
+
+func TestLoadPostgreSQLUsesBoundedRoleSpecificConfiguration(t *testing.T) {
+	t.Setenv(postgresApplicationDSNKey, "postgres://app:secret@127.0.0.1:5432/fleetforge?sslmode=disable")
+	t.Setenv(postgresMigrationDSNKey, "postgres://migrate:secret@127.0.0.1:5432/fleetforge?sslmode=disable")
+	t.Setenv("FLEETFORGE_POSTGRES_MAX_CONNS", "7")
+	t.Setenv("FLEETFORGE_POSTGRES_MIN_CONNS", "2")
+	loaded, err := LoadPostgreSQL()
+	if err != nil {
+		t.Fatalf("LoadPostgreSQL() error = %v", err)
+	}
+	if loaded.MaxConns != 7 || loaded.MinConns != 2 || loaded.StatementTimeout <= 0 {
+		t.Fatalf("LoadPostgreSQL() = %#v, want bounded connection settings", loaded)
+	}
+}
+
+func TestLoadPostgreSQLRedactsInvalidDSN(t *testing.T) {
+	const secret = "postgres://app:credential-that-must-not-appear@/bad"
+	t.Setenv(postgresApplicationDSNKey, secret)
+	t.Setenv(postgresMigrationDSNKey, "postgres://migrate:secret@127.0.0.1:5432/fleetforge")
+	_, err := LoadPostgreSQL()
+	if err == nil || !strings.Contains(err.Error(), postgresApplicationDSNKey) || strings.Contains(err.Error(), secret) {
+		t.Fatalf("LoadPostgreSQL() error = %v, want safely redacted validation error", err)
+	}
+}

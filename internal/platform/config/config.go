@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,10 +13,12 @@ import (
 )
 
 const (
-	apiAddressKey           = "FLEETFORGE_API_ADDR"
-	simulatorAddressKey     = "FLEETFORGE_SIMULATOR_ADDR"
-	simulatorStatePathKey   = "FLEETFORGE_SIMULATOR_STATE_PATH"
-	simulatorJournalPathKey = "FLEETFORGE_SIMULATOR_JOURNAL_PATH"
+	apiAddressKey             = "FLEETFORGE_API_ADDR"
+	simulatorAddressKey       = "FLEETFORGE_SIMULATOR_ADDR"
+	simulatorStatePathKey     = "FLEETFORGE_SIMULATOR_STATE_PATH"
+	simulatorJournalPathKey   = "FLEETFORGE_SIMULATOR_JOURNAL_PATH"
+	postgresApplicationDSNKey = "FLEETFORGE_POSTGRES_APP_DSN"
+	postgresMigrationDSNKey   = "FLEETFORGE_POSTGRES_MIGRATION_DSN"
 )
 
 type Environment string
@@ -46,6 +49,20 @@ type Worker struct{ Common }
 type Simulator struct {
 	Common
 	Address, StatePath, JournalPath string
+}
+
+// PostgreSQL holds bounded, role-specific database settings. DSNs are opaque
+// credentials and must never be included in an error, log, or readiness body.
+type PostgreSQL struct {
+	ApplicationDSN     string
+	MigrationDSN       string
+	MaxConns           int32
+	MinConns           int32
+	AcquireTimeout     time.Duration
+	TransactionTimeout time.Duration
+	StatementTimeout   time.Duration
+	MaxConnLifetime    time.Duration
+	MaxConnIdleTime    time.Duration
 }
 
 // Error identifies a key and safe validation category, never the supplied value.
@@ -94,6 +111,54 @@ func LoadSimulator() (Simulator, error) {
 		return Simulator{}, &Error{Key: simulatorJournalPathKey, Reason: "must differ from simulator state path"}
 	}
 	return Simulator{Common: common, Address: address, StatePath: statePath, JournalPath: journalPath}, nil
+}
+
+// LoadPostgreSQL is opt-in: Phase 01 process startup does not call it, so
+// bootstrap-only roles remain database-free until they adopt persistence.
+func LoadPostgreSQL() (PostgreSQL, error) {
+	applicationDSN, err := requiredPostgresDSN(os.LookupEnv, postgresApplicationDSNKey)
+	if err != nil {
+		return PostgreSQL{}, err
+	}
+	migrationDSN, err := requiredPostgresDSN(os.LookupEnv, postgresMigrationDSNKey)
+	if err != nil {
+		return PostgreSQL{}, err
+	}
+	maxConns, err := boundedInt32(os.LookupEnv, "FLEETFORGE_POSTGRES_MAX_CONNS", 4, 1, 50)
+	if err != nil {
+		return PostgreSQL{}, err
+	}
+	minConns, err := boundedInt32(os.LookupEnv, "FLEETFORGE_POSTGRES_MIN_CONNS", 0, 0, maxConns)
+	if err != nil {
+		return PostgreSQL{}, err
+	}
+	acquireTimeout, err := duration(os.LookupEnv, "FLEETFORGE_POSTGRES_ACQUIRE_TIMEOUT", 2*time.Second, 100*time.Millisecond, 30*time.Second)
+	if err != nil {
+		return PostgreSQL{}, err
+	}
+	transactionTimeout, err := duration(os.LookupEnv, "FLEETFORGE_POSTGRES_TRANSACTION_TIMEOUT", 10*time.Second, time.Second, time.Minute)
+	if err != nil {
+		return PostgreSQL{}, err
+	}
+	statementTimeout, err := duration(os.LookupEnv, "FLEETFORGE_POSTGRES_STATEMENT_TIMEOUT", 5*time.Second, 100*time.Millisecond, 30*time.Second)
+	if err != nil {
+		return PostgreSQL{}, err
+	}
+	maxLifetime, err := duration(os.LookupEnv, "FLEETFORGE_POSTGRES_MAX_CONN_LIFETIME", 30*time.Minute, time.Minute, time.Hour)
+	if err != nil {
+		return PostgreSQL{}, err
+	}
+	maxIdle, err := duration(os.LookupEnv, "FLEETFORGE_POSTGRES_MAX_CONN_IDLE", 5*time.Minute, time.Second, 30*time.Minute)
+	if err != nil {
+		return PostgreSQL{}, err
+	}
+	return PostgreSQL{
+		ApplicationDSN: applicationDSN, MigrationDSN: migrationDSN,
+		MaxConns: maxConns, MinConns: minConns,
+		AcquireTimeout: acquireTimeout, TransactionTimeout: transactionTimeout,
+		StatementTimeout: statementTimeout, MaxConnLifetime: maxLifetime,
+		MaxConnIdleTime: maxIdle,
+	}, nil
 }
 
 type lookupEnv func(string) (string, bool)
@@ -153,6 +218,17 @@ func requiredPath(lookup lookupEnv, key string) (string, error) {
 	}
 	return value, nil
 }
+func requiredPostgresDSN(lookup lookupEnv, key string) (string, error) {
+	value, ok := lookup(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return "", &Error{Key: key, Reason: "is required"}
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Host == "" {
+		return "", &Error{Key: key, Reason: "must be a PostgreSQL URL"}
+	}
+	return value, nil
+}
 func validateAddress(value string) error {
 	_, port, err := net.SplitHostPort(value)
 	if err != nil {
@@ -174,6 +250,17 @@ func duration(lookup lookupEnv, key string, fallback, minimum, maximum time.Dura
 		return 0, &Error{Key: key, Reason: "must be within the supported duration range"}
 	}
 	return parsed, nil
+}
+func boundedInt32(lookup lookupEnv, key string, fallback, minimum, maximum int32) (int32, error) {
+	value, ok := lookup(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 32)
+	if err != nil || parsed < int64(minimum) || parsed > int64(maximum) {
+		return 0, &Error{Key: key, Reason: "must be within the supported range"}
+	}
+	return int32(parsed), nil
 }
 func boolean(lookup lookupEnv, key string, fallback bool) (bool, error) {
 	value, ok := lookup(key)
