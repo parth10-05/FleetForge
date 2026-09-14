@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -69,6 +70,20 @@ func (h Harness) OpenPool(t testing.TB) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	return pool
+}
+
+// ScopedDSN applies this harness's generated schema as a startup parameter for
+// direct migration connections as well as pooled test connections.
+func (h Harness) ScopedDSN(t testing.TB) string {
+	t.Helper()
+	parsed, err := url.Parse(h.DSN)
+	if err != nil {
+		t.Fatalf("parse PostgreSQL integration DSN: %v", err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", h.Schema)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func makeIdentifier(t testing.TB) string {
