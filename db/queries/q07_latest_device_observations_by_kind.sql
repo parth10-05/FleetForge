@@ -1,6 +1,7 @@
 -- P03-Q07: latest-device-observations-by-kind.sql
 -- Access pattern: inspect the latest normalized evidence for a target and observation kind.
 -- Index: device_observations_target_kind_time_index ON device_observations (target_id, kind, observed_at DESC)
+-- name: LatestDeviceObservationsByKind :many
 SELECT id,
        target_id,
        target_update_id,

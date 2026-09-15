@@ -1,6 +1,7 @@
 -- P03-Q02: find-target-campaign-membership.sql
 -- Access pattern: find a target's campaign memberships before enrollment and readiness decisions.
 -- Index: campaign_targets_target_index ON campaign_targets (target_id, campaign_id)
+-- name: FindTargetCampaignMembership :many
 SELECT ct.id,
        ct.campaign_id,
        ct.target_id,

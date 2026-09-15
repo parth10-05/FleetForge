@@ -47,6 +47,43 @@ func TestIdempotencyClaimAndCompleteRoundTrip(t *testing.T) {
 	}
 }
 
+// TestIdempotentAggregateMutationCommitsCompletionWithMutation proves the
+// second transaction never publishes a replay result without its aggregate,
+// audit, and outbox writes.
+func TestIdempotentAggregateMutationCommitsCompletionWithMutation(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	claim := persistence.IdempotencyClaim{
+		ID: "00000000-0000-0000-8011-000000000001", ActorID: "actor-atomic",
+		Route: "/v1/campaigns", RawKey: "key-atomic", RequestBody: []byte(`{"name":"atomic"}`),
+		CommandID: "00000000-0000-0000-8011-000000000002", OwnerToken: "00000000-0000-0000-8011-000000000003", TTL: defaultTTL,
+	}
+	if err := persistence.ClaimIdempotencyKey(ctx, pool, claim); err != nil {
+		t.Fatalf("ClaimIdempotencyKey: %v", err)
+	}
+
+	input := persistence.IdempotentAggregateMutation{
+		Completion: persistence.IdempotencyCompletion{ActorID: claim.ActorID, Route: claim.Route, RawKey: claim.RawKey, ResponseStatus: 201, ResponseReference: "campaigns/atomic"},
+		OwnerToken: claim.OwnerToken,
+		Mutation:   campaignMutation(fixture, 0, "VALIDATING", "00000000-0000-0000-8011-000000000004", claim.CommandID),
+	}
+	if err := persistence.ApplyIdempotentAggregateMutation(ctx, pool, input); err != nil {
+		t.Fatalf("ApplyIdempotentAggregateMutation: %v", err)
+	}
+
+	var state string
+	if err := pool.QueryRow(ctx, "SELECT state FROM campaigns WHERE id=$1::uuid", fixture.campaignID).Scan(&state); err != nil {
+		t.Fatalf("read campaign: %v", err)
+	}
+	if state != "VALIDATING" {
+		t.Errorf("campaign state=%q, want VALIDATING", state)
+	}
+	status, reference, found, err := persistence.GetCompletedIdempotencyRecord(ctx, pool, claim.ActorID, claim.Route, claim.RawKey)
+	if err != nil || !found || status != 201 || reference != "campaigns/atomic" {
+		t.Errorf("replay after atomic completion: status=%d reference=%q found=%v err=%v", status, reference, found, err)
+	}
+}
+
 // TestIdempotencyIdenticalConcurrentClaimConverges proves that when two
 // goroutines race to claim the same key+hash, exactly one wins and one
 // receives ErrIdempotencyInProgress (never both succeed or both error with

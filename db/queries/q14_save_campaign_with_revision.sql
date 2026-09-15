@@ -1,6 +1,7 @@
 -- P03-Q14: save-campaign-with-revision.sql
 -- Access pattern: atomic campaign save with expected-revision guard.
 -- Zero rows affected → revision conflict (caller maps to conflict error).
+-- name: SaveCampaignWithRevision :execrows
 UPDATE campaigns
    SET state = $3,
        revision = revision + 1,

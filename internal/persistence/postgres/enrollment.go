@@ -26,6 +26,7 @@ import (
 	"sort"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -46,6 +47,10 @@ type ReadinessEnrollmentRequest struct {
 	PolicyVersionID  string
 	ExpectedRevision int64
 	Targets          []TargetEnrollmentEntry // must not be empty
+	// Frozen snapshot hashes are written only by the VALIDATING -> READY
+	// transition, together with the enrollment claims they authorize.
+	FrozenPolicyHash         string
+	FrozenTargetSnapshotHash string
 
 	// Audit event fields.
 	ActorID       string
@@ -87,6 +92,12 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 	).Scan(&campaignState); err != nil {
 		return fmt.Errorf("lock campaign row for readiness: %w", err)
 	}
+	if campaignState != "VALIDATING" {
+		return fmt.Errorf("%w: campaign %s is %s, want VALIDATING", ErrRevisionConflict, req.CampaignID, campaignState)
+	}
+	if req.FrozenPolicyHash == "" || req.FrozenTargetSnapshotHash == "" {
+		return fmt.Errorf("readiness enrollment requires frozen policy and target snapshot hashes")
+	}
 
 	// Step 2: For each target in sorted ID order, check for blocking
 	// conditions then insert enrollment.
@@ -99,9 +110,9 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 	// Step 3: Transition campaign to READY with expected-revision guard.
 	tag, err := tx.Exec(ctx,
 		"UPDATE campaigns SET state='READY', revision=revision+1, "+
-			"policy_version_id=$2::uuid, updated_at=now() "+
-			"WHERE id=$1::uuid AND revision=$3 AND state<>'READY'",
-		req.CampaignID, req.PolicyVersionID, req.ExpectedRevision,
+			"policy_version_id=$2::uuid, frozen_policy_hash=$3, frozen_target_snapshot_hash=$4, updated_at=now() "+
+			"WHERE id=$1::uuid AND revision=$5 AND state='VALIDATING'",
+		req.CampaignID, req.PolicyVersionID, req.FrozenPolicyHash, req.FrozenTargetSnapshotHash, req.ExpectedRevision,
 	)
 	if err != nil {
 		return fmt.Errorf("transition campaign to READY: %w", err)
@@ -145,6 +156,19 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 // quarantine, then inserts the enrollment row. It runs within the caller's
 // transaction; the sort order guarantees per-target lock order is consistent.
 func checkAndEnroll(ctx context.Context, tx pgx.Tx, campaignID string, entry TargetEnrollmentEntry) error {
+	// Confirm the caller is claiming the campaign's frozen membership. This also
+	// locks the membership row before its enrollment can be created.
+	var membershipID string
+	if err := tx.QueryRow(ctx,
+		"SELECT id FROM campaign_targets WHERE id=$1::uuid AND campaign_id=$2::uuid AND target_id=$3::uuid FOR UPDATE",
+		entry.CampaignTargetID, campaignID, entry.TargetID,
+	).Scan(&membershipID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: target %s is not a frozen member of campaign %s", ErrEnrollmentBlocked, entry.TargetID, campaignID)
+		}
+		return fmt.Errorf("lock campaign target membership for %s: %w", entry.TargetID, err)
+	}
+
 	// Check for an existing active enrollment (partial index prevents duplicates,
 	// but we want an early-exit with a meaningful error rather than a constraint
 	// violation to surface the right error type).
@@ -165,7 +189,7 @@ func checkAndEnroll(ctx context.Context, tx pgx.Tx, campaignID string, entry Tar
 	// Check for QUARANTINED operation reservations that block readiness.
 	var quarantineID string
 	qErr := tx.QueryRow(ctx,
-		"SELECT id FROM operation_reservations WHERE target_id=$1::uuid AND state='QUARANTINED' LIMIT 1",
+		"SELECT id FROM operation_reservations WHERE target_id=$1::uuid AND state='QUARANTINED' LIMIT 1 FOR UPDATE",
 		entry.TargetID,
 	).Scan(&quarantineID)
 	if qErr == nil {
@@ -182,6 +206,10 @@ func checkAndEnroll(ctx context.Context, tx pgx.Tx, campaignID string, entry Tar
 			"VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)",
 		entry.EnrollmentID, entry.TargetID, campaignID, entry.CampaignTargetID,
 	); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("%w: target %s enrollment raced another campaign", ErrEnrollmentBlocked, entry.TargetID)
+		}
 		return fmt.Errorf("insert enrollment for target %s: %w", entry.TargetID, err)
 	}
 	return nil

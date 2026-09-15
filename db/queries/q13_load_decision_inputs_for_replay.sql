@@ -2,6 +2,7 @@
 -- Access pattern: reconstruct decisions after observations expire (replay support).
 -- Index: decision_inputs_aggregate_revision_sequence_unique UNIQUE
 --        (aggregate_type, aggregate_id, aggregate_revision, decision_sequence)
+-- name: LoadDecisionInputsForReplay :many
 SELECT id,
        aggregate_type,
        aggregate_id,

@@ -2,6 +2,7 @@
 -- Access pattern: reconstruct an immutable aggregate audit timeline.
 -- Index: audit_events_timeline_index ON audit_events
 --        (aggregate_type, aggregate_id, aggregate_revision, event_sequence)
+-- name: AuditTimeline :many
 SELECT id,
        aggregate_type,
        aggregate_id,

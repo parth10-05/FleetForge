@@ -3,6 +3,7 @@
 -- Index: due_work_claimable_index ON due_work (not_before, created_at)
 --        WHERE delivery_state = 'PENDING'
 -- Caller must UPDATE delivery_state = 'CLAIMED' + set lease fields after this SELECT.
+-- name: ClaimDueWork :many
 SELECT id,
        command_id,
        subject_type,

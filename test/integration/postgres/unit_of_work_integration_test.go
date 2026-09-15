@@ -37,12 +37,18 @@ func TestUnitOfWorkAppliesAtomicCampaignMutation(t *testing.T) {
 		t.Errorf("campaign after mutation: state=%q revision=%d, want VALIDATING/1", state, revision)
 	}
 
-	var auditCount int
+	var auditCount, decisionCount int
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_events WHERE aggregate_type='CAMPAIGN' AND aggregate_id=$1::uuid", fixture.campaignID).Scan(&auditCount); err != nil {
 		t.Fatalf("count audit events: %v", err)
 	}
 	if auditCount != 1 {
 		t.Errorf("audit events after mutation = %d, want 1", auditCount)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM decision_inputs WHERE aggregate_type='CAMPAIGN' AND aggregate_id=$1::uuid", fixture.campaignID).Scan(&decisionCount); err != nil {
+		t.Fatalf("count decision inputs: %v", err)
+	}
+	if decisionCount != 1 {
+		t.Errorf("decision inputs after mutation = %d, want 1", decisionCount)
 	}
 
 	var outboxCount int
@@ -93,21 +99,25 @@ func TestUnitOfWorkRevisionConflictAllowsOnlyOneWinner(t *testing.T) {
 	}
 }
 
-// TestUnitOfWorkRollsBackOnDownstreamWriteFailure proves that when the audit
-// event insert fails (simulated by a bad aggregate_type string that violates
-// the check constraint), the entire transaction is rolled back and the
-// campaign row is unchanged.
+// TestUnitOfWorkRollsBackOnDownstreamWriteFailure proves a failure after the
+// aggregate and audit writes rolls the entire transaction back. A pre-existing
+// outbox ID makes the third write fail with a real database constraint.
 func TestUnitOfWorkRollsBackOnDownstreamWriteFailure(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 
-	// Craft a mutation with an invalid audit AggregateType to force audit INSERT failure.
 	m := campaignMutation(fixture, 0, "VALIDATING", "00000000-0000-0000-7003-000000000001", "00000000-0000-0000-7003-000000000002")
-	m.AggregateType = "CORRUPT_TYPE" // violates both the UPDATE switch and constraint
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO outbox_events (event_id, aggregate_type, aggregate_id, aggregate_revision, event_type, schema_version, payload) "+
+			"VALUES ($1::uuid, 'CAMPAIGN', $2::uuid, 0, 'seed.duplicate', 1, '{}'::jsonb)",
+		m.OutboxEventID, fixture.campaignID,
+	); err != nil {
+		t.Fatalf("seed duplicate outbox event: %v", err)
+	}
 
 	err := persistence.ApplyAggregateMutation(ctx, pool, m)
 	if err == nil {
-		t.Fatal("ApplyAggregateMutation with corrupt type succeeded, want error")
+		t.Fatal("ApplyAggregateMutation with duplicate outbox event succeeded, want error")
 	}
 
 	// Campaign row must be unchanged (state=DRAFT, revision=0).
@@ -120,12 +130,13 @@ func TestUnitOfWorkRollsBackOnDownstreamWriteFailure(t *testing.T) {
 		t.Errorf("campaign after failed mutation: state=%q revision=%d, want DRAFT/0", state, revision)
 	}
 
-	// Audit and outbox must be empty.
-	var auditCount, outboxCount int
+	// The transaction's audit write must roll back; only the seeded outbox row remains.
+	var auditCount, decisionCount, outboxCount int
 	_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_events WHERE aggregate_type='CAMPAIGN' AND aggregate_id=$1::uuid", fixture.campaignID).Scan(&auditCount)
+	_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM decision_inputs WHERE aggregate_type='CAMPAIGN' AND aggregate_id=$1::uuid", fixture.campaignID).Scan(&decisionCount)
 	_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events WHERE aggregate_type='CAMPAIGN' AND aggregate_id=$1::uuid", fixture.campaignID).Scan(&outboxCount)
-	if auditCount != 0 || outboxCount != 0 {
-		t.Errorf("rows after rollback: audit=%d outbox=%d, want 0/0", auditCount, outboxCount)
+	if auditCount != 0 || decisionCount != 0 || outboxCount != 1 {
+		t.Errorf("rows after rollback: audit=%d decision=%d outbox=%d, want 0/0/1", auditCount, decisionCount, outboxCount)
 	}
 }
 
@@ -163,20 +174,27 @@ func TestUnitOfWorkSchedulesDueWork(t *testing.T) {
 func campaignMutation(fixture ownershipFixture, revision int64, newState, eventID, commandID string) persistence.AggregateMutation {
 	cmdID := commandID
 	return persistence.AggregateMutation{
-		AggregateType:       "CAMPAIGN",
-		AggregateID:         fixture.campaignID,
-		ExpectedRevision:    revision,
-		NewState:            newState,
-		CommandEpoch:        0,
-		PolicyVersionID:     "00000000-0000-0000-0000-000000000207",
-		ActorID:             "system",
-		CommandID:           &cmdID,
-		Action:              "TRANSITION",
-		ReasonCode:          "campaign.validation.accepted",
-		EventSequence:       0,
-		OutboxEventID:       eventID,
-		OutboxEventType:     "campaign.validation_started",
-		OutboxSchemaVersion: 1,
-		OutboxPayload:       json.RawMessage(`{"version":"v1"}`),
+		AggregateType:         "CAMPAIGN",
+		AggregateID:           fixture.campaignID,
+		ExpectedRevision:      revision,
+		NewState:              newState,
+		CommandEpoch:          0,
+		PolicyVersionID:       "00000000-0000-0000-0000-000000000207",
+		ActorID:               "system",
+		CommandID:             &cmdID,
+		Action:                "TRANSITION",
+		ReasonCode:            "campaign.validation.accepted",
+		EventSequence:         0,
+		OutboxEventID:         eventID,
+		OutboxEventType:       "campaign.validation_started",
+		OutboxSchemaVersion:   1,
+		OutboxPayload:         json.RawMessage(`{"version":"v1"}`),
+		DecisionInputID:       eventID,
+		DecisionSequence:      0,
+		DecisionLogicalTime:   time.Now().UTC(),
+		ReducerVersion:        "phase-02",
+		DecisionPolicyVersion: "policy-v1",
+		NormalizedFacts:       json.RawMessage(`{"snapshot":"validated"}`),
+		DecisionResult:        "TRANSITION_APPLIED",
 	}
 }

@@ -3,10 +3,13 @@ package postgres
 import (
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/parth10-05/fleetforge/internal/domain/campaign"
 	"github.com/parth10-05/fleetforge/internal/domain/reason"
 	"github.com/parth10-05/fleetforge/internal/domain/targetupdate"
+	"github.com/parth10-05/fleetforge/internal/persistence/postgres/sqlcgen"
 )
 
 // ─── CampaignRowState ────────────────────────────────────────────────────────
@@ -235,6 +238,36 @@ func TestParseDecisionInputAggregateTypeRejectsUnknownValues(t *testing.T) {
 		if !isCorrupt(err) {
 			t.Errorf("ParseDecisionInputAggregateType(%q) error = %v, want ErrCorruptPersistedValue", raw, err)
 		}
+	}
+}
+
+// ─── sqlc generated row mappers ─────────────────────────────────────────────
+
+func TestCampaignRowFromSQLCRejectsUnknownState(t *testing.T) {
+	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	validID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	row := sqlcgen.Campaign{
+		ID: validID, ArtifactID: validID, PolicyVersionID: validID,
+		State: "UNKNOWN", CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := CampaignRowFromSQLC(row); !isCorrupt(err) {
+		t.Errorf("CampaignRowFromSQLC unknown state error = %v, want ErrCorruptPersistedValue", err)
+	}
+}
+
+func TestCampaignRowFromSQLCMapsValidRow(t *testing.T) {
+	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	validID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	row := sqlcgen.Campaign{
+		ID: validID, ArtifactID: validID, PolicyVersionID: validID,
+		State: "DRAFT", Revision: 3, CommandEpoch: 2, CreatedAt: now, UpdatedAt: now,
+	}
+	got, err := CampaignRowFromSQLC(row)
+	if err != nil {
+		t.Fatalf("CampaignRowFromSQLC: %v", err)
+	}
+	if got.State != "DRAFT" || got.Revision != 3 || got.ID == "" {
+		t.Errorf("mapped campaign = %#v, want DRAFT/revision 3/nonempty id", got)
 	}
 }
 

@@ -1,6 +1,7 @@
 -- P03-Q12: resolve-idempotency-key.sql
 -- Access pattern: look up an idempotency record by actor, route, and key hash.
 -- Index: idempotency_records_actor_route_key_unique UNIQUE (actor_id, route, key_hash)
+-- name: ResolveIdempotencyKey :one
 SELECT id,
        actor_id,
        route,

@@ -1,6 +1,7 @@
 -- P03-Q01: load-campaign-waves.sql
 -- Access pattern: load all waves for a campaign in release order.
 -- Index: campaign_waves_campaign_ordinal_index ON campaign_waves (campaign_id, ordinal)
+-- name: LoadCampaignWaves :many
 SELECT id,
        campaign_id,
        ordinal,

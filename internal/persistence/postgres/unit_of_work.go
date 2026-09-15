@@ -30,10 +30,10 @@ var ErrRevisionConflict = errors.New("aggregate revision conflict")
 // All fields are validated by the caller before passing to ApplyAggregateMutation.
 type AggregateMutation struct {
 	// Aggregate identity and revision guard.
-	AggregateType     string // "CAMPAIGN" or "TARGET_UPDATE"
-	AggregateID       string // UUID string
-	ExpectedRevision  int64  // current revision; mutation sets revision = current + 1
-	NewState          string // the validated next state token
+	AggregateType    string // "CAMPAIGN" or "TARGET_UPDATE"
+	AggregateID      string // UUID string
+	ExpectedRevision int64  // current revision; mutation sets revision = current + 1
+	NewState         string // the validated next state token
 
 	// Campaign-specific (only used when AggregateType == "CAMPAIGN").
 	CommandEpoch             int64
@@ -56,10 +56,20 @@ type AggregateMutation struct {
 	EventSequence int64
 
 	// Outbox event fields (required).
-	OutboxEventID     string
-	OutboxEventType   string
+	OutboxEventID       string
+	OutboxEventType     string
 	OutboxSchemaVersion int
-	OutboxPayload     json.RawMessage
+	OutboxPayload       json.RawMessage
+
+	// Decision input fields are the durable replay record for the validated
+	// Phase 02 reducer decision that produced this mutation.
+	DecisionInputID       string
+	DecisionSequence      int64
+	DecisionLogicalTime   time.Time
+	ReducerVersion        string
+	DecisionPolicyVersion string
+	NormalizedFacts       json.RawMessage
+	DecisionResult        string
 
 	// Optional due-work scheduling. If DueWorkID is empty no due-work row is written.
 	DueWorkID            string
@@ -86,10 +96,31 @@ func ApplyAggregateMutation(ctx context.Context, pool *pgxpool.Pool, m Aggregate
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // intentional best-effort rollback
 
+	if err := applyAggregateMutationInTx(ctx, tx, m); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: serialization during aggregate commit", ErrRevisionConflict)
+		}
+		return fmt.Errorf("commit aggregate mutation: %w", err)
+	}
+	return nil
+}
+
+// applyAggregateMutationInTx contains the durable aggregate writes shared by
+// normal mutations and the idempotent completion transaction. Keeping this
+// sequence inside the caller's transaction is what prevents a completed
+// idempotency record from referring to a mutation that did not commit.
+func applyAggregateMutationInTx(ctx context.Context, tx pgx.Tx, m AggregateMutation) error {
 	if err := applyAggregateRevisionUpdate(ctx, tx, m); err != nil {
 		return err
 	}
 	if err := appendAuditEvent(ctx, tx, m); err != nil {
+		return err
+	}
+	if err := insertDecisionInput(ctx, tx, m); err != nil {
 		return err
 	}
 	if err := insertOutboxEvent(ctx, tx, m); err != nil {
@@ -100,12 +131,24 @@ func ApplyAggregateMutation(ctx context.Context, pool *pgxpool.Pool, m Aggregate
 			return err
 		}
 	}
+	return nil
+}
 
-	if err := tx.Commit(ctx); err != nil {
-		if isSerialization(err) {
-			return fmt.Errorf("%w: serialization during aggregate commit", ErrRevisionConflict)
-		}
-		return fmt.Errorf("commit aggregate mutation: %w", err)
+func insertDecisionInput(ctx context.Context, tx pgx.Tx, m AggregateMutation) error {
+	if m.DecisionInputID == "" || m.DecisionLogicalTime.IsZero() || m.ReducerVersion == "" ||
+		m.DecisionPolicyVersion == "" || len(m.NormalizedFacts) == 0 || m.DecisionResult == "" {
+		return fmt.Errorf("decision input is required for aggregate mutation")
+	}
+	_, err := tx.Exec(ctx,
+		"INSERT INTO decision_inputs (id, aggregate_type, aggregate_id, aggregate_revision, decision_sequence, "+
+			"logical_time, reducer_version, policy_version, normalized_facts, result, reason_code) "+
+			"VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11)",
+		m.DecisionInputID, m.AggregateType, m.AggregateID, m.ExpectedRevision+1, m.DecisionSequence,
+		m.DecisionLogicalTime, m.ReducerVersion, m.DecisionPolicyVersion, m.NormalizedFacts,
+		m.DecisionResult, m.ReasonCode,
+	)
+	if err != nil {
+		return fmt.Errorf("insert decision input for %s/%s: %w", m.AggregateType, m.AggregateID, err)
 	}
 	return nil
 }

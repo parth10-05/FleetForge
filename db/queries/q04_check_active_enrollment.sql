@@ -1,6 +1,7 @@
 -- P03-Q04: check-active-enrollment.sql
 -- Access pattern: readiness ownership gate — find the active enrollment for a target.
 -- Index: target_enrollments_one_active_target (partial unique on target_id WHERE state='ACTIVE')
+-- name: CheckActiveEnrollment :one
 SELECT id,
        target_id,
        campaign_id,

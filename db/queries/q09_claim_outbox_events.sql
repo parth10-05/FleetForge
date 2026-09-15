@@ -3,6 +3,7 @@
 -- Index: outbox_events_publishable_index ON outbox_events (next_attempt_at, created_at)
 --        WHERE delivery_state = 'PENDING'
 -- Caller must set delivery_state = 'CLAIMED' after this SELECT within the same transaction.
+-- name: ClaimOutboxEvents :many
 SELECT event_id,
        aggregate_type,
        aggregate_id,

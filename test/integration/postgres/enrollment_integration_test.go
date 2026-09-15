@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
@@ -20,6 +21,7 @@ import (
 func TestReadinessEnrollmentTransitionsCampaignToReady(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareReadinessCampaign(t, pool, ctx, fixture)
 
 	req := enrollmentRequest(fixture, "00000000-0000-0000-9001-000000000001", "00000000-0000-0000-9001-000000000002")
 	if err := persistence.AcquireReadinessEnrollment(ctx, pool, req); err != nil {
@@ -57,6 +59,7 @@ func TestReadinessEnrollmentTransitionsCampaignToReady(t *testing.T) {
 func TestReadinessEnrollmentBlockedByExistingActiveEnrollment(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareReadinessCampaign(t, pool, ctx, fixture)
 	// Pre-insert an active enrollment for the target under a different campaign context.
 	insertEnrollment(t, pool, ctx, "00000000-0000-0000-9002-000000000001", fixture)
 
@@ -66,12 +69,12 @@ func TestReadinessEnrollmentBlockedByExistingActiveEnrollment(t *testing.T) {
 		t.Errorf("already-enrolled target error = %v, want ErrEnrollmentBlocked", err)
 	}
 
-	// Campaign must remain unchanged (DRAFT, revision=0).
+	// Campaign must remain unchanged (VALIDATING, revision=0).
 	var state string
 	var revision int64
 	_ = pool.QueryRow(ctx, "SELECT state, revision FROM campaigns WHERE id=$1", fixture.campaignID).Scan(&state, &revision)
-	if state != "DRAFT" || revision != 0 {
-		t.Errorf("campaign after blocked enrollment: state=%q revision=%d, want DRAFT/0", state, revision)
+	if state != "VALIDATING" || revision != 0 {
+		t.Errorf("campaign after blocked enrollment: state=%q revision=%d, want VALIDATING/0", state, revision)
 	}
 }
 
@@ -80,6 +83,7 @@ func TestReadinessEnrollmentBlockedByExistingActiveEnrollment(t *testing.T) {
 func TestReadinessEnrollmentBlockedByQuarantinedReservation(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareReadinessCampaign(t, pool, ctx, fixture)
 	insertAdmission(t, pool, ctx, "00000000-0000-0000-9003-000000000001", "00000000-0000-0000-9003-000000000002", fixture)
 
 	// Insert a QUARANTINED operation reservation for the target.
@@ -105,6 +109,8 @@ func TestReadinessEnrollmentCompetingCampaignsOnlyOneWins(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	second := seedSecondCampaignTarget(t, pool, ctx, fixture)
+	prepareReadinessCampaign(t, pool, ctx, fixture)
+	prepareReadinessCampaign(t, pool, ctx, second)
 
 	type result struct{ err error }
 	results := make(chan result, 2)
@@ -150,6 +156,7 @@ func TestReadinessEnrollmentCompetingCampaignsOnlyOneWins(t *testing.T) {
 func TestReadinessEnrollmentTerminalTargetUpdateDoesNotReleaseEnrollment(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareReadinessCampaign(t, pool, ctx, fixture)
 
 	req := enrollmentRequest(fixture, "00000000-0000-0000-9005-000000000001", "00000000-0000-0000-9005-000000000002")
 	if err := persistence.AcquireReadinessEnrollment(ctx, pool, req); err != nil {
@@ -174,9 +181,11 @@ func TestReadinessEnrollmentTerminalTargetUpdateDoesNotReleaseEnrollment(t *test
 
 func enrollmentRequest(fixture ownershipFixture, enrollmentID, outboxEventID string) persistence.ReadinessEnrollmentRequest {
 	return persistence.ReadinessEnrollmentRequest{
-		CampaignID:      fixture.campaignID,
-		PolicyVersionID: "00000000-0000-0000-0000-000000000207",
-		ExpectedRevision: 0,
+		CampaignID:               fixture.campaignID,
+		PolicyVersionID:          "00000000-0000-0000-0000-000000000207",
+		ExpectedRevision:         0,
+		FrozenPolicyHash:         "policy-hash",
+		FrozenTargetSnapshotHash: "target-snapshot-hash",
 		Targets: []persistence.TargetEnrollmentEntry{{
 			EnrollmentID:     enrollmentID,
 			TargetID:         fixture.targetID,
@@ -190,5 +199,12 @@ func enrollmentRequest(fixture ownershipFixture, enrollmentID, outboxEventID str
 		OutboxEventType:     "campaign.validation_succeeded",
 		OutboxSchemaVersion: 1,
 		OutboxPayload:       json.RawMessage(`{"version":"v1"}`),
+	}
+}
+
+func prepareReadinessCampaign(t *testing.T, pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, "UPDATE campaigns SET state='VALIDATING' WHERE id=$1::uuid", fixture.campaignID); err != nil {
+		t.Fatalf("prepare campaign for readiness: %v", err)
 	}
 }

@@ -2,6 +2,7 @@
 -- Access pattern: parent release and quarantine checks find unresolved target operations.
 -- Index: operation_reservations_target_active_index ON operation_reservations (target_id, state)
 --        WHERE state IN ('ACTIVE', 'QUARANTINED')
+-- name: CheckActiveOperationReservations :many
 SELECT id,
        admission_id,
        target_id,

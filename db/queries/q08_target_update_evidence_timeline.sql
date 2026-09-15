@@ -2,6 +2,7 @@
 -- Access pattern: reconstruct a target-update evidence timeline.
 -- Index: device_observations_update_time_index ON device_observations (target_update_id, observed_at DESC)
 --        WHERE target_update_id IS NOT NULL
+-- name: TargetUpdateEvidenceTimeline :many
 SELECT id,
        target_id,
        target_update_id,

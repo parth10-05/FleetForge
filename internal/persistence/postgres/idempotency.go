@@ -6,8 +6,10 @@
 //     Returns ErrIdempotencyConflict if the same key+hash already exists or a
 //     different request hash is presented for the same key.
 //
-//  2. CompleteIdempotencyKey: Updates the record to COMPLETED with a stable
-//     response reference (atomic completion transaction).
+//  2. ApplyIdempotentAggregateMutation: Applies the aggregate transition and
+//     marks the record COMPLETED in one short transaction. This is the command
+//     path; CompleteIdempotencyKey remains only for commands with no aggregate
+//     mutation to persist.
 //
 // Hash normalization: the idempotency key is SHA-256 hashed (hex) of the
 // normalized "actor:route:rawkey" string; the request hash is SHA-256 of the
@@ -69,6 +71,15 @@ type IdempotencyCompletion struct {
 	RawKey            string
 	ResponseStatus    int
 	ResponseReference string
+}
+
+// IdempotentAggregateMutation is the second transaction of a mutating command.
+// Its aggregate and durable envelope changes are committed with idempotency
+// completion, so replay can never observe COMPLETED for a rolled-back command.
+type IdempotentAggregateMutation struct {
+	Completion IdempotencyCompletion
+	OwnerToken string
+	Mutation   AggregateMutation
 }
 
 // NormalizeKey returns the hex-encoded SHA-256 hash of "actor:route:rawkey".
@@ -145,6 +156,65 @@ func CompleteIdempotencyKey(ctx context.Context, pool *pgxpool.Pool, completion 
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("%w: no matching IN_PROGRESS record for owner token", ErrIdempotencyConflict)
+	}
+	return nil
+}
+
+// ApplyIdempotentAggregateMutation performs the second phase of a mutating
+// idempotent command. It locks the successful claim, writes the aggregate,
+// audit/outbox/due-work records, and completes the key in the same serializable
+// transaction. A crash before this function commits leaves only IN_PROGRESS.
+func ApplyIdempotentAggregateMutation(ctx context.Context, pool *pgxpool.Pool, input IdempotentAggregateMutation) error {
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return fmt.Errorf("begin idempotent aggregate transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // intentional best-effort rollback
+
+	keyHash := NormalizeKey(input.Completion.ActorID, input.Completion.Route, input.Completion.RawKey)
+	var state string
+	if err := tx.QueryRow(ctx,
+		"SELECT state FROM idempotency_records "+
+			"WHERE actor_id=$1 AND route=$2 AND key_hash=$3 AND owner_token=$4::uuid FOR UPDATE",
+		input.Completion.ActorID, input.Completion.Route, keyHash, input.OwnerToken,
+	).Scan(&state); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: no matching claim for owner token", ErrIdempotencyConflict)
+		}
+		return fmt.Errorf("lock idempotency claim: %w", err)
+	}
+	if state != string(IdempotencyStateInProgress) {
+		return fmt.Errorf("%w: claim is %s", ErrIdempotencyConflict, state)
+	}
+
+	if err := applyAggregateMutationInTx(ctx, tx, input.Mutation); err != nil {
+		return err
+	}
+	if err := completeIdempotencyKeyInTx(ctx, tx, input.Completion, input.OwnerToken, keyHash); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: serialization during idempotent aggregate commit", ErrRevisionConflict)
+		}
+		return fmt.Errorf("commit idempotent aggregate mutation: %w", err)
+	}
+	return nil
+}
+
+func completeIdempotencyKeyInTx(ctx context.Context, tx pgx.Tx, completion IdempotencyCompletion, ownerToken, keyHash string) error {
+	tag, err := tx.Exec(ctx,
+		"UPDATE idempotency_records "+
+			"SET state='COMPLETED', completed_at=now(), response_status=$1, response_reference=$2 "+
+			"WHERE actor_id=$3 AND route=$4 AND key_hash=$5 AND owner_token=$6::uuid AND state='IN_PROGRESS'",
+		completion.ResponseStatus, completion.ResponseReference,
+		completion.ActorID, completion.Route, keyHash, ownerToken,
+	)
+	if err != nil {
+		return fmt.Errorf("complete idempotency record: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: claim changed before completion", ErrIdempotencyConflict)
 	}
 	return nil
 }
