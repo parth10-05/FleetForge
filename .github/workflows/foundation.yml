@@ -70,7 +70,10 @@ jobs:
       - run: go vet ./...
       - run: mkdir -p test-results && go test -json ./... > test-results/go-unit.json
       - run: go test -count=1 ./test/domainmodel/... -args --rapid.checks=200
-      - run: mkdir -p test-results && go test -json -tags=postgresintegration -count=1 ./test/integration/postgres/... > test-results/postgres-integration.json
+      - run: |
+          set -o pipefail
+          mkdir -p test-results
+          go test -json -tags=postgresintegration -count=1 ./test/integration/postgres/... | tee test-results/postgres-integration.json
         env:
           FLEETFORGE_TEST_POSTGRES_DSN: postgres://fleetforge_test:fleetforge_test@localhost:5432/fleetforge_test?sslmode=disable
       - name: Confirm wrong PostgreSQL endpoint fails the integration gate
