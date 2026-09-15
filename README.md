@@ -25,6 +25,17 @@ Copy `.env.example` only for local API or simulator runs. It contains safe
 dummy values; do not place a secret value in an environment file committed to
 this repository.
 
+## PostgreSQL developer branch
+
+Phase 03 keeps application traffic and migrations on separate database paths.
+The application reads `FLEETFORGE_POSTGRES_APP_DSN` and the migration command
+reads `FLEETFORGE_POSTGRES_MIGRATION_DSN`. For a linked Neon development
+branch, the standard `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED`
+(direct) variables are accepted as their respective fallbacks. Pull those
+variables only into an ignored local `.env.local`; do not copy a connection
+string into `.env.example`, source control, logs, or issue comments. Migrations
+must always use the direct, unpooled URL.
+
 The API exposes only operational endpoints during Phase 01:
 
 - `GET /health/live`

@@ -99,7 +99,9 @@ func RunMigrations(ctx context.Context, settings config.PostgreSQL, migrations f
 		if err != nil {
 			return fmt.Errorf("configure migration provider: %w", err)
 		}
-		defer provider.Close()
+		// Provider.Close closes the caller-supplied *sql.DB. The database must
+		// remain open until WithMigrationLock releases its session advisory lock;
+		// RunMigrations owns and closes it after that scope returns.
 		if _, err := provider.Up(ctx); err != nil {
 			return fmt.Errorf("apply migrations: %w", err)
 		}

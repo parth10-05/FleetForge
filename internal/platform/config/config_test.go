@@ -75,6 +75,21 @@ func TestLoadPostgreSQLUsesBoundedRoleSpecificConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadPostgreSQLAcceptsNeonStandardConnectionVariables(t *testing.T) {
+	t.Setenv(postgresApplicationDSNKey, "")
+	t.Setenv(postgresMigrationDSNKey, "")
+	t.Setenv(postgresApplicationDSNFallbackKey, "postgres://app:secret@pooled.example:5432/fleetforge?sslmode=require")
+	t.Setenv(postgresMigrationDSNFallbackKey, "postgres://migrate:secret@direct.example:5432/fleetforge?sslmode=require")
+
+	loaded, err := LoadPostgreSQL()
+	if err != nil {
+		t.Fatalf("LoadPostgreSQL() error = %v", err)
+	}
+	if loaded.ApplicationDSN == loaded.MigrationDSN {
+		t.Fatal("LoadPostgreSQL() reused the pooled application DSN for migrations")
+	}
+}
+
 func TestLoadPostgreSQLRedactsInvalidDSN(t *testing.T) {
 	const secret = "postgres://app:credential-that-must-not-appear@/bad"
 	t.Setenv(postgresApplicationDSNKey, secret)

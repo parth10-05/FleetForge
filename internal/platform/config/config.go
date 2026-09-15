@@ -13,12 +13,14 @@ import (
 )
 
 const (
-	apiAddressKey             = "FLEETFORGE_API_ADDR"
-	simulatorAddressKey       = "FLEETFORGE_SIMULATOR_ADDR"
-	simulatorStatePathKey     = "FLEETFORGE_SIMULATOR_STATE_PATH"
-	simulatorJournalPathKey   = "FLEETFORGE_SIMULATOR_JOURNAL_PATH"
-	postgresApplicationDSNKey = "FLEETFORGE_POSTGRES_APP_DSN"
-	postgresMigrationDSNKey   = "FLEETFORGE_POSTGRES_MIGRATION_DSN"
+	apiAddressKey                     = "FLEETFORGE_API_ADDR"
+	simulatorAddressKey               = "FLEETFORGE_SIMULATOR_ADDR"
+	simulatorStatePathKey             = "FLEETFORGE_SIMULATOR_STATE_PATH"
+	simulatorJournalPathKey           = "FLEETFORGE_SIMULATOR_JOURNAL_PATH"
+	postgresApplicationDSNKey         = "FLEETFORGE_POSTGRES_APP_DSN"
+	postgresMigrationDSNKey           = "FLEETFORGE_POSTGRES_MIGRATION_DSN"
+	postgresApplicationDSNFallbackKey = "DATABASE_URL"
+	postgresMigrationDSNFallbackKey   = "DATABASE_URL_UNPOOLED"
 )
 
 type Environment string
@@ -116,11 +118,11 @@ func LoadSimulator() (Simulator, error) {
 // LoadPostgreSQL is opt-in: Phase 01 process startup does not call it, so
 // bootstrap-only roles remain database-free until they adopt persistence.
 func LoadPostgreSQL() (PostgreSQL, error) {
-	applicationDSN, err := requiredPostgresDSN(os.LookupEnv, postgresApplicationDSNKey)
+	applicationDSN, err := preferredPostgresDSN(os.LookupEnv, postgresApplicationDSNKey, postgresApplicationDSNFallbackKey)
 	if err != nil {
 		return PostgreSQL{}, err
 	}
-	migrationDSN, err := requiredPostgresDSN(os.LookupEnv, postgresMigrationDSNKey)
+	migrationDSN, err := preferredPostgresDSN(os.LookupEnv, postgresMigrationDSNKey, postgresMigrationDSNFallbackKey)
 	if err != nil {
 		return PostgreSQL{}, err
 	}
@@ -223,6 +225,21 @@ func requiredPostgresDSN(lookup lookupEnv, key string) (string, error) {
 	if !ok || strings.TrimSpace(value) == "" {
 		return "", &Error{Key: key, Reason: "is required"}
 	}
+	return validatePostgresDSN(key, value)
+}
+
+// preferredPostgresDSN preserves FleetForge's explicit role-specific DSNs
+// while accepting Neon CLI's standard pooled/direct environment pair for a
+// locally linked development branch. An explicitly supplied FleetForge value
+// always takes precedence and is never silently replaced.
+func preferredPostgresDSN(lookup lookupEnv, preferredKey, fallbackKey string) (string, error) {
+	if value, ok := lookup(preferredKey); ok && strings.TrimSpace(value) != "" {
+		return validatePostgresDSN(preferredKey, value)
+	}
+	return requiredPostgresDSN(lookup, fallbackKey)
+}
+
+func validatePostgresDSN(key, value string) (string, error) {
 	parsed, err := url.Parse(value)
 	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Host == "" {
 		return "", &Error{Key: key, Reason: "must be a PostgreSQL URL"}

@@ -101,11 +101,13 @@ CREATE TABLE audit_events (
     CONSTRAINT audit_events_required_fields_nonempty CHECK (length(actor_id) > 0 AND length(action) > 0 AND length(reason_code) > 0)
 );
 
+-- +goose StatementBegin
 CREATE FUNCTION reject_audit_event_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION 'audit_events are append-only' USING ERRCODE = '55000';
 END;
 $$;
+-- +goose StatementEnd
 CREATE TRIGGER audit_events_append_only BEFORE UPDATE OR DELETE ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_audit_event_mutation();
 
 CREATE TABLE outbox_events (
