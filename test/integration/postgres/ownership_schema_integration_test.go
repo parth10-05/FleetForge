@@ -59,16 +59,17 @@ func TestAdmissionIsPermanentAndReservationSurvivesTargetTerminality(t *testing.
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	insertEnrollment(t, pool, ctx, "00000000-0000-0000-0000-000000000103", fixture)
-	insertAdmission(t, pool, ctx, "00000000-0000-0000-0000-000000000104", "00000000-0000-0000-0000-000000000105", fixture)
+	admissionID := "00000000-0000-0000-0000-000000000104"
+	insertAdmission(t, pool, ctx, admissionID, "00000000-0000-0000-0000-000000000105", fixture)
 	_, err := pool.Exec(ctx, admissionStatement("00000000-0000-0000-0000-000000000106", "00000000-0000-0000-0000-000000000107", fixture))
 	if !isUniqueViolation(err) {
 		t.Fatalf("duplicate submission admission error = %v, want unique violation", err)
 	}
-	_, err = pool.Exec(ctx, "INSERT INTO operation_reservations (id, admission_id, target_id, campaign_id, scope_level, scope_key, state) VALUES ('00000000-0000-0000-0000-000000000108', $1, $2, $3, 'GLOBAL', 'GLOBAL', 'ACTIVE')", fixture.admissionID, fixture.targetID, fixture.campaignID)
+	_, err = pool.Exec(ctx, "INSERT INTO operation_reservations (id, admission_id, target_id, campaign_id, scope_level, scope_key, state) VALUES ('00000000-0000-0000-0000-000000000108', $1, $2, $3, 'GLOBAL', 'GLOBAL', 'ACTIVE')", admissionID, fixture.targetID, fixture.campaignID)
 	if err != nil {
 		t.Fatalf("insert durable operation reservation: %v", err)
 	}
-	_, err = pool.Exec(ctx, "INSERT INTO operation_reservations (id, admission_id, target_id, campaign_id, scope_level, scope_key, state) VALUES ('00000000-0000-0000-0000-000000000109', $1, $2, $3, 'GLOBAL', 'GLOBAL', 'ACTIVE')", fixture.admissionID, fixture.targetID, fixture.campaignID)
+	_, err = pool.Exec(ctx, "INSERT INTO operation_reservations (id, admission_id, target_id, campaign_id, scope_level, scope_key, state) VALUES ('00000000-0000-0000-0000-000000000109', $1, $2, $3, 'GLOBAL', 'GLOBAL', 'ACTIVE')", admissionID, fixture.targetID, fixture.campaignID)
 	if !isUniqueViolation(err) {
 		t.Fatalf("duplicate active operation reservation error = %v, want unique violation", err)
 	}

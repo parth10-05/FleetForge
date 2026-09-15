@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -66,7 +67,24 @@ func OpenMigrationDB(ctx context.Context, settings config.PostgreSQL) (*sql.DB, 
 		_ = database.Close()
 		return nil, fmt.Errorf("%w: direct migration connection", ErrDatabaseUnavailable)
 	}
+	if searchPath := migrationSearchPath(settings.MigrationDSN); searchPath != "" {
+		// database/sql does not propagate pgx's search_path startup parameter to
+		// the stdlib connector. Apply it explicitly on this one-connection pool
+		// before goose creates or reads its version table.
+		if _, err := database.ExecContext(ctx, "SELECT set_config('search_path', $1, false)", searchPath); err != nil {
+			_ = database.Close()
+			return nil, fmt.Errorf("%w: configure migration schema", ErrDatabaseUnavailable)
+		}
+	}
 	return database, nil
+}
+
+func migrationSearchPath(dsn string) string {
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		return ""
+	}
+	return parsed.Query().Get("search_path")
 }
 
 // WithMigrationLock serializes migration runners with a PostgreSQL session

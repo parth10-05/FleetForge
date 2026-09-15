@@ -179,6 +179,9 @@ func applyAggregateRevisionUpdate(ctx context.Context, tx pgx.Tx, m AggregateMut
 		return fmt.Errorf("%w: aggregate_type %q", ErrCorruptPersistedValue, m.AggregateType)
 	}
 	if err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: concurrent aggregate update", ErrRevisionConflict)
+		}
 		return fmt.Errorf("update aggregate %s/%s: %w", m.AggregateType, m.AggregateID, err)
 	}
 	if tag.RowsAffected() == 0 {

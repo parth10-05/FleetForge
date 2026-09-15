@@ -62,6 +62,12 @@ func (h Harness) OpenPool(t testing.TB) *pgxpool.Pool {
 		poolConfig.ConnConfig.RuntimeParams = map[string]string{}
 	}
 	poolConfig.ConnConfig.RuntimeParams["search_path"] = h.Schema
+	poolConfig.AfterConnect = func(ctx context.Context, connection *pgx.Conn) error {
+		if _, err := connection.Exec(ctx, "SELECT set_config('search_path', $1, false)", h.Schema); err != nil {
+			return fmt.Errorf("configure isolated PostgreSQL test schema: %w", err)
+		}
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
