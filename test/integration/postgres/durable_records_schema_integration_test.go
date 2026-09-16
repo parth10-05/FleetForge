@@ -103,12 +103,13 @@ func TestDurableRecordsSchemaRejectsInvalidDeviceObservations(t *testing.T) {
 		fixture.targetID,
 	))
 
-	// observed_at more than 366 days before received_at must be rejected.
-	longAgo := time.Now().Add(-370 * 24 * time.Hour).Format(time.RFC3339)
+	// received_at more than 366 days before observed_at must be rejected.
+	observedAt := time.Now().UTC().Format(time.RFC3339)
+	tooEarlyReceivedAt := time.Now().Add(-370 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	assertConstraint(t, pool, ctx, fmt.Sprintf(
-		"INSERT INTO device_observations (id, target_id, kind, observed_at, normalized_data) "+
-			"VALUES ('00000000-0000-0000-1002-000000000005', '%s', 'BMC_VERSION', '%s', '{}')",
-		fixture.targetID, longAgo,
+		"INSERT INTO device_observations (id, target_id, kind, observed_at, received_at, normalized_data) "+
+			"VALUES ('00000000-0000-0000-1002-000000000005', '%s', 'BMC_VERSION', '%s', '%s', '{}')",
+		fixture.targetID, observedAt, tooEarlyReceivedAt,
 	))
 }
 

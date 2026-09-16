@@ -115,6 +115,9 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 		req.CampaignID, req.PolicyVersionID, req.FrozenPolicyHash, req.FrozenTargetSnapshotHash, req.ExpectedRevision,
 	)
 	if err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: serialization during readiness transition", ErrRevisionConflict)
+		}
 		return fmt.Errorf("transition campaign to READY: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
@@ -209,6 +212,9 @@ func checkAndEnroll(ctx context.Context, tx pgx.Tx, campaignID string, entry Tar
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return fmt.Errorf("%w: target %s enrollment raced another campaign", ErrEnrollmentBlocked, entry.TargetID)
+		}
+		if isSerialization(err) {
+			return fmt.Errorf("%w: target %s enrollment raced another campaign", ErrRevisionConflict, entry.TargetID)
 		}
 		return fmt.Errorf("insert enrollment for target %s: %w", entry.TargetID, err)
 	}

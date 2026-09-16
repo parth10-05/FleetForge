@@ -84,13 +84,14 @@ func TestReadinessEnrollmentBlockedByQuarantinedReservation(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	prepareReadinessCampaign(t, pool, ctx, fixture)
-	insertAdmission(t, pool, ctx, "00000000-0000-0000-9003-000000000001", "00000000-0000-0000-9003-000000000002", fixture)
+	admissionID := "00000000-0000-0000-9003-000000000001"
+	insertAdmission(t, pool, ctx, admissionID, "00000000-0000-0000-9003-000000000002", fixture)
 
 	// Insert a QUARANTINED operation reservation for the target.
 	if _, err := pool.Exec(ctx,
 		"INSERT INTO operation_reservations (id, admission_id, target_id, campaign_id, scope_level, scope_key, state) "+
 			"VALUES ('00000000-0000-0000-9003-000000000010', $1, $2, $3, 'GLOBAL', 'GLOBAL', 'QUARANTINED')",
-		fixture.admissionID, fixture.targetID, fixture.campaignID,
+		admissionID, fixture.targetID, fixture.campaignID,
 	); err != nil {
 		t.Fatalf("insert quarantined reservation: %v", err)
 	}
