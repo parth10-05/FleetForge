@@ -26,6 +26,7 @@ and must not leak into `internal/domain`.
 | P03-Q17 | `q17_insert_outbox_event.sql` | Insert outbox event in unit-of-work | Outbox PK |
 | P03-Q18 | `q18_insert_due_work.sql` | Schedule due-work in unit-of-work | `due_work_semantic_unique` |
 | P03-Q19 | `q19_insert_decision_input.sql` | Persist reducer evidence in unit-of-work | `decision_inputs_aggregate_revision_sequence_unique` |
+| P03-Q20 | `q20_lock_scope_capacity.sql` | Lock a durable scope capacity row during admission | `scope_capacities` primary key |
 
 ## Lock order reminder (ADR-021)
 

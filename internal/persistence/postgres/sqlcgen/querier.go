@@ -78,6 +78,10 @@ type Querier interface {
 	// Access pattern: load a target update by frozen campaign target identity.
 	// Index: target_updates_campaign_target_index ON target_updates (campaign_target_id)
 	LoadTargetUpdateByCampaignTarget(ctx context.Context, campaignTargetID pgtype.UUID) (TargetUpdate, error)
+	// P03-Q20: lock-scope-capacity.sql
+	// Access pattern: admission transaction locks one durable scope counter in the
+	// fixed GLOBAL -> SITE -> RACK order defined by ADR-021.
+	LockScopeCapacity(ctx context.Context, arg LockScopeCapacityParams) (ScopeCapacity, error)
 	// P03-Q12: resolve-idempotency-key.sql
 	// Access pattern: look up an idempotency record by actor, route, and key hash.
 	// Index: idempotency_records_actor_route_key_unique UNIQUE (actor_id, route, key_hash)

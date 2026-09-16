@@ -159,6 +159,15 @@ type OutboxEvent struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+// P03-Q20: durable GLOBAL/SITE/RACK physical-operation capacity accounting.
+type ScopeCapacity struct {
+	ScopeLevel             string             `json:"scope_level"`
+	ScopeKey               string             `json:"scope_key"`
+	CapacityLimit          int64              `json:"capacity_limit"`
+	ActiveReservationCount int64              `json:"active_reservation_count"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type StepAttempt struct {
 	ID                  pgtype.UUID        `json:"id"`
 	TargetUpdateID      pgtype.UUID        `json:"target_update_id"`
