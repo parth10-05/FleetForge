@@ -34,14 +34,23 @@ type Querier interface {
 	// Access pattern: ordered SKIP LOCKED claims for due work.
 	// Index: due_work_claimable_index ON due_work (not_before, created_at)
 	//        WHERE delivery_state = 'PENDING'
-	// Caller must UPDATE delivery_state = 'CLAIMED' + set lease fields after this SELECT.
-	ClaimDueWork(ctx context.Context, limit int32) ([]DueWork, error)
+	// The caller holds these rows in one short transaction, writes the supplied
+	// per-row fencing tokens, then commits before any external work begins.
+	ClaimDueWork(ctx context.Context, arg ClaimDueWorkParams) ([]DueWork, error)
 	// P03-Q09: claim-outbox-events.sql
 	// Access pattern: ordered SKIP LOCKED publisher claims for unpublished events.
 	// Index: outbox_events_publishable_index ON outbox_events (next_attempt_at, created_at)
 	//        WHERE delivery_state = 'PENDING'
 	// Caller must set delivery_state = 'CLAIMED' after this SELECT within the same transaction.
 	ClaimOutboxEvents(ctx context.Context, limit int32) ([]OutboxEvent, error)
+	// P03-Q21: complete-due-work.sql
+	// Access pattern: fenced result commit. Zero rows means stale ownership,
+	// aggregate revision, or command epoch and must fail closed.
+	CompleteDueWork(ctx context.Context, arg CompleteDueWorkParams) (int64, error)
+	// P03-Q22: fail-due-work.sql
+	// Access pattern: fenced non-success result commit. A worker can only return
+	// pending work while it still owns the token and captured aggregate fence.
+	FailDueWork(ctx context.Context, arg FailDueWorkParams) (int64, error)
 	// P03-Q02: find-target-campaign-membership.sql
 	// Access pattern: find a target's campaign memberships before enrollment and readiness decisions.
 	// Index: campaign_targets_target_index ON campaign_targets (target_id, campaign_id)
@@ -82,6 +91,10 @@ type Querier interface {
 	// Access pattern: admission transaction locks one durable scope counter in the
 	// fixed GLOBAL -> SITE -> RACK order defined by ADR-021.
 	LockScopeCapacity(ctx context.Context, arg LockScopeCapacityParams) (ScopeCapacity, error)
+	// P03-Q23: repair-expired-due-work.sql
+	// Access pattern: bounded, ordered repair candidates. The caller holds rows,
+	// then moves SUBMIT work to reconciliation or safe non-submit work to pending.
+	RepairExpiredDueWork(ctx context.Context, arg RepairExpiredDueWorkParams) ([]RepairExpiredDueWorkRow, error)
 	// P03-Q12: resolve-idempotency-key.sql
 	// Access pattern: look up an idempotency record by actor, route, and key hash.
 	// Index: idempotency_records_actor_route_key_unique UNIQUE (actor_id, route, key_hash)

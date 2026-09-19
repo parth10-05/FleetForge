@@ -2,7 +2,8 @@
 -- Access pattern: ordered SKIP LOCKED claims for due work.
 -- Index: due_work_claimable_index ON due_work (not_before, created_at)
 --        WHERE delivery_state = 'PENDING'
--- Caller must UPDATE delivery_state = 'CLAIMED' + set lease fields after this SELECT.
+-- The caller holds these rows in one short transaction, writes the supplied
+-- per-row fencing tokens, then commits before any external work begins.
 -- name: ClaimDueWork :many
 SELECT id,
        command_id,
@@ -22,7 +23,7 @@ SELECT id,
        updated_at
   FROM due_work
  WHERE delivery_state = 'PENDING'
-   AND not_before <= now()
- ORDER BY not_before ASC, created_at ASC
- LIMIT $1
+   AND not_before <= $1::timestamptz
+ORDER BY not_before ASC, created_at ASC
+LIMIT $2::integer
    FOR UPDATE SKIP LOCKED;

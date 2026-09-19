@@ -7,6 +7,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const claimDueWork = `-- name: ClaimDueWork :many
@@ -28,11 +30,16 @@ SELECT id,
        updated_at
   FROM due_work
  WHERE delivery_state = 'PENDING'
-   AND not_before <= now()
- ORDER BY not_before ASC, created_at ASC
- LIMIT $1
+   AND not_before <= $1::timestamptz
+ORDER BY not_before ASC, created_at ASC
+LIMIT $2::integer
    FOR UPDATE SKIP LOCKED
 `
+
+type ClaimDueWorkParams struct {
+	Column1 pgtype.Timestamptz `json:"column_1"`
+	Column2 int32              `json:"column_2"`
+}
 
 // P03-Q10: claim-due-work.sql
 // Access pattern: ordered SKIP LOCKED claims for due work.
@@ -40,9 +47,10 @@ SELECT id,
 //
 //	WHERE delivery_state = 'PENDING'
 //
-// Caller must UPDATE delivery_state = 'CLAIMED' + set lease fields after this SELECT.
-func (q *Queries) ClaimDueWork(ctx context.Context, limit int32) ([]DueWork, error) {
-	rows, err := q.db.Query(ctx, claimDueWork, limit)
+// The caller holds these rows in one short transaction, writes the supplied
+// per-row fencing tokens, then commits before any external work begins.
+func (q *Queries) ClaimDueWork(ctx context.Context, arg ClaimDueWorkParams) ([]DueWork, error) {
+	rows, err := q.db.Query(ctx, claimDueWork, arg.Column1, arg.Column2)
 	if err != nil {
 		return nil, err
 	}
