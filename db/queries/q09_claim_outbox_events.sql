@@ -2,7 +2,8 @@
 -- Access pattern: ordered SKIP LOCKED publisher claims for unpublished events.
 -- Index: outbox_events_publishable_index ON outbox_events (next_attempt_at, created_at)
 --        WHERE delivery_state = 'PENDING'
--- Caller must set delivery_state = 'CLAIMED' after this SELECT within the same transaction.
+-- The caller writes a fencing token and commits the claim before publisher
+-- invocation. The publisher receives the durable event_id unchanged.
 -- name: ClaimOutboxEvents :many
 SELECT event_id,
        aggregate_type,
@@ -19,7 +20,7 @@ SELECT event_id,
        created_at
   FROM outbox_events
  WHERE delivery_state = 'PENDING'
-   AND next_attempt_at <= now()
+   AND next_attempt_at <= $1::timestamptz
  ORDER BY next_attempt_at ASC, created_at ASC
- LIMIT $1
+LIMIT $2::integer
    FOR UPDATE SKIP LOCKED;

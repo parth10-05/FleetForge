@@ -157,6 +157,9 @@ type OutboxEvent struct {
 	LastErrorClass    pgtype.Text        `json:"last_error_class"`
 	PublishedAt       pgtype.Timestamptz `json:"published_at"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ClaimToken        pgtype.UUID        `json:"claim_token"`
+	ClaimOwner        pgtype.Text        `json:"claim_owner"`
+	ClaimExpiresAt    pgtype.Timestamptz `json:"claim_expires_at"`
 }
 
 // P03-Q20: durable GLOBAL/SITE/RACK physical-operation capacity accounting.

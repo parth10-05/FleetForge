@@ -41,8 +41,9 @@ type Querier interface {
 	// Access pattern: ordered SKIP LOCKED publisher claims for unpublished events.
 	// Index: outbox_events_publishable_index ON outbox_events (next_attempt_at, created_at)
 	//        WHERE delivery_state = 'PENDING'
-	// Caller must set delivery_state = 'CLAIMED' after this SELECT within the same transaction.
-	ClaimOutboxEvents(ctx context.Context, limit int32) ([]OutboxEvent, error)
+	// The caller writes a fencing token and commits the claim before publisher
+	// invocation. The publisher receives the durable event_id unchanged.
+	ClaimOutboxEvents(ctx context.Context, arg ClaimOutboxEventsParams) ([]ClaimOutboxEventsRow, error)
 	// P03-Q21: complete-due-work.sql
 	// Access pattern: fenced result commit. Zero rows means stale ownership,
 	// aggregate revision, or command epoch and must fail closed.

@@ -7,6 +7,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const claimOutboxEvents = `-- name: ClaimOutboxEvents :many
@@ -25,11 +27,32 @@ SELECT event_id,
        created_at
   FROM outbox_events
  WHERE delivery_state = 'PENDING'
-   AND next_attempt_at <= now()
+   AND next_attempt_at <= $1::timestamptz
  ORDER BY next_attempt_at ASC, created_at ASC
- LIMIT $1
+LIMIT $2::integer
    FOR UPDATE SKIP LOCKED
 `
+
+type ClaimOutboxEventsParams struct {
+	Column1 pgtype.Timestamptz `json:"column_1"`
+	Column2 int32              `json:"column_2"`
+}
+
+type ClaimOutboxEventsRow struct {
+	EventID           pgtype.UUID        `json:"event_id"`
+	AggregateType     string             `json:"aggregate_type"`
+	AggregateID       pgtype.UUID        `json:"aggregate_id"`
+	AggregateRevision int64              `json:"aggregate_revision"`
+	EventType         string             `json:"event_type"`
+	SchemaVersion     int32              `json:"schema_version"`
+	Payload           []byte             `json:"payload"`
+	DeliveryState     string             `json:"delivery_state"`
+	DeliveryAttempts  int64              `json:"delivery_attempts"`
+	NextAttemptAt     pgtype.Timestamptz `json:"next_attempt_at"`
+	LastErrorClass    pgtype.Text        `json:"last_error_class"`
+	PublishedAt       pgtype.Timestamptz `json:"published_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
 
 // P03-Q09: claim-outbox-events.sql
 // Access pattern: ordered SKIP LOCKED publisher claims for unpublished events.
@@ -37,16 +60,17 @@ SELECT event_id,
 //
 //	WHERE delivery_state = 'PENDING'
 //
-// Caller must set delivery_state = 'CLAIMED' after this SELECT within the same transaction.
-func (q *Queries) ClaimOutboxEvents(ctx context.Context, limit int32) ([]OutboxEvent, error) {
-	rows, err := q.db.Query(ctx, claimOutboxEvents, limit)
+// The caller writes a fencing token and commits the claim before publisher
+// invocation. The publisher receives the durable event_id unchanged.
+func (q *Queries) ClaimOutboxEvents(ctx context.Context, arg ClaimOutboxEventsParams) ([]ClaimOutboxEventsRow, error) {
+	rows, err := q.db.Query(ctx, claimOutboxEvents, arg.Column1, arg.Column2)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []OutboxEvent{}
+	items := []ClaimOutboxEventsRow{}
 	for rows.Next() {
-		var i OutboxEvent
+		var i ClaimOutboxEventsRow
 		if err := rows.Scan(
 			&i.EventID,
 			&i.AggregateType,
