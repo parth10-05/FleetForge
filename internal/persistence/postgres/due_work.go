@@ -128,24 +128,36 @@ func RepairExpiredDueWork(ctx context.Context, pool *pgxpool.Pool, now time.Time
 	if err != nil {
 		return nil, fmt.Errorf("lock expired due work: %w", err)
 	}
-	defer rows.Close()
-	ids := []string{}
+	type expiredDueWork struct {
+		id       string
+		workType string
+	}
+	expired := []expiredDueWork{}
 	for rows.Next() {
 		var id, workType string
 		if err := rows.Scan(&id, &workType); err != nil {
 			return nil, fmt.Errorf("scan expired due work: %w", err)
 		}
-		state := "PENDING"
-		if workType == "SUBMIT" {
-			state = "RECONCILIATION_REQUIRED"
-		}
-		if _, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state=$2, lease_token=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=$3 WHERE id=$1::uuid AND delivery_state='CLAIMED'`, id, state, now); err != nil {
-			return nil, classifyDueWorkError(err, "repair expired due work")
-		}
-		ids = append(ids, id)
+		expired = append(expired, expiredDueWork{id: id, workType: workType})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read expired due work: %w", err)
+	}
+	// pgx permits only one active command per connection. Release the locked
+	// result cursor before issuing the state-transition updates below; the
+	// transaction keeps its FOR UPDATE locks until commit.
+	rows.Close()
+
+	ids := make([]string, 0, len(expired))
+	for _, work := range expired {
+		state := "PENDING"
+		if work.workType == "SUBMIT" {
+			state = "RECONCILIATION_REQUIRED"
+		}
+		if _, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state=$2, lease_token=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=$3 WHERE id=$1::uuid AND delivery_state='CLAIMED'`, work.id, state, now); err != nil {
+			return nil, classifyDueWorkError(err, "repair expired due work")
+		}
+		ids = append(ids, work.id)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, classifyDueWorkError(err, "commit due-work repair")
