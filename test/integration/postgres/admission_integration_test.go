@@ -82,7 +82,14 @@ func TestAdmissionBlockedByCommittedPause(t *testing.T) {
 	}
 	result := make(chan error, 1)
 	go func() {
-		result <- persistence.AdmitOperation(context.Background(), pool, admissionRequest(fixture, "1004"))
+		request := admissionRequest(fixture, "1004")
+		err := persistence.AdmitOperation(context.Background(), pool, request)
+		// Serializable admission may abort after waiting for the pause writer.
+		// Retrying the same fenced command must then observe the committed pause.
+		if errors.Is(err, persistence.ErrRevisionConflict) {
+			err = persistence.AdmitOperation(context.Background(), pool, request)
+		}
+		result <- err
 	}()
 	if _, err := locker.Exec(ctx, "UPDATE campaigns SET state='PAUSED', command_epoch=8 WHERE id=$1::uuid", fixture.campaignID); err != nil {
 		t.Fatal(err)

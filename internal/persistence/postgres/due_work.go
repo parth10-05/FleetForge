@@ -51,7 +51,7 @@ func ClaimDueWork(ctx context.Context, pool *pgxpool.Pool, req ClaimDueWorkReque
 	rows, err := tx.Query(ctx, `SELECT id, command_id, subject_type, subject_id, work_type, expected_revision, expected_command_epoch, delivery_generation
 FROM due_work WHERE delivery_state='PENDING' AND not_before <= $1 ORDER BY not_before, created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED`, req.Now, len(req.Tokens))
 	if err != nil {
-		return nil, fmt.Errorf("lock due work: %w", err)
+		return nil, classifyDueWorkError(err, "lock due work")
 	}
 	defer rows.Close()
 	claimed := make([]ClaimedDueWork, 0, len(req.Tokens))
@@ -63,7 +63,7 @@ FROM due_work WHERE delivery_state='PENDING' AND not_before <= $1 ORDER BY not_b
 		claimed = append(claimed, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read due work: %w", err)
+		return nil, classifyDueWorkError(err, "read due work")
 	}
 	for i := range claimed {
 		claimed[i].LeaseToken = req.Tokens[i]
