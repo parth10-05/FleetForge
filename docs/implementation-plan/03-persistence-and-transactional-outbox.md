@@ -8,8 +8,10 @@ Create the PostgreSQL persistence layer that atomically stores aggregate transit
 
 - Phases 01 and 02 pass.
 - State/reason/event vocabulary is stable enough for migration version 1.
-- Neon development project or equivalent managed PostgreSQL endpoint is available.
-- CI is allowed to run an ephemeral PostgreSQL service container.
+- Pull-request CI runs an ephemeral real PostgreSQL service for persistence
+  integration tests; a laptop database is optional.
+- Neon pooled/direct endpoint smoke testing is an early cloud-bootstrap proof
+  after Phase 03, not an entry criterion or a Phase 03 correctness claim.
 - Migration tool and query-generation/typing approach are selected in an ADR.
 
 ## Non-goals
@@ -341,7 +343,9 @@ Run database tests with real PostgreSQL in CI and with the Neon development proj
 - The active-target uniqueness invariant is database-enforced.
 - Work-lease expiry cannot release a physical operation reservation, and campaign/target-update terminality cannot release unresolved target quarantine.
 - Migration from empty and previous snapshot passes.
-- Connection budget is compatible with selected Neon/ECS Fargate limits.
+- Connection-budget arithmetic is documented with explicit planned-instance and
+  pool variables. Compatibility with actual Neon/ECS limits remains a
+  cloud-bootstrap gate until pooled/direct endpoint smoke evidence exists.
 - No network I/O occurs inside repository transactions.
 
 ## Rollback and stop conditions

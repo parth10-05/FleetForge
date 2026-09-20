@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := verify
 
-.PHONY: format lint test test-race build domain-test domain-property-test web-typecheck web-lint web-test web-build container-build secret-scan verify
+.PHONY: format lint test test-race build domain-test domain-property-test postgres-integration-test sqlc-generate web-typecheck web-lint web-test web-build container-build secret-scan verify
 
 format:
 	go fmt ./...
@@ -19,6 +19,12 @@ domain-test:
 
 domain-property-test:
 	go test -count=1 ./test/domainmodel/... -args --rapid.checks=200
+
+postgres-integration-test:
+	go test -tags=postgresintegration -count=1 ./test/integration/postgres/...
+
+sqlc-generate:
+	CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
 
 build:
 	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator

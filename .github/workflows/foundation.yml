@@ -30,6 +30,9 @@ jobs:
               - 'go.sum'
               - 'cmd/**'
               - 'internal/**'
+              - 'db/queries/**'
+              - 'db/migrations/**'
+              - 'sqlc.yaml'
               - 'test/**'
               - 'Makefile'
               - '.gitleaks.toml'
@@ -44,23 +47,48 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17.4-alpine
+        env:
+          POSTGRES_DB: fleetforge_test
+          POSTGRES_USER: fleetforge_test
+          POSTGRES_PASSWORD: fleetforge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fleetforge_test -d fleetforge_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.27.0'
           cache-dependency-path: go.mod
+      - run: CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate && git diff --exit-code -- internal/persistence/postgres/sqlcgen
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: mkdir -p test-results && go test -json ./... > test-results/go-unit.json
       - run: go test -count=1 ./test/domainmodel/... -args --rapid.checks=200
+      - run: |
+          set -o pipefail
+          mkdir -p test-results
+          go test -json -tags=postgresintegration -count=1 ./test/integration/postgres/... | tee test-results/postgres-integration.json
+        env:
+          FLEETFORGE_TEST_POSTGRES_DSN: postgres://fleetforge_test:fleetforge_test@localhost:5432/fleetforge_test?sslmode=disable
+      - name: Confirm wrong PostgreSQL endpoint fails the integration gate
+        run: |
+          if FLEETFORGE_TEST_POSTGRES_DSN=postgres://fleetforge_test:fleetforge_test@localhost:1/fleetforge_test?sslmode=disable go test -tags=postgresintegration -count=1 ./test/integration/postgres/... -run TestDatabasePingUsesIsolatedSchema; then
+            echo "integration gate accepted an invalid PostgreSQL endpoint"
+            exit 1
+          fi
       - run: go test -race ./...
       - run: go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: go-test-results
-          path: test-results/go-unit.json
+          path: test-results/
           if-no-files-found: warn
 
   web:
