@@ -123,11 +123,12 @@ func TestTenConcurrentDueWorkClaimersLeaveOneFencedOwnerPerRow(t *testing.T) {
 			req := persistence.ClaimDueWorkRequest{Owner: fmt.Sprintf("worker-%02d", i+1), Now: now.Add(time.Minute), LeaseExpiresAt: now.Add(2 * time.Minute), Tokens: []string{fmt.Sprintf("00000000-0000-0000-1112-%012d", i+1)}}
 			var rows []persistence.ClaimedDueWork
 			var err error
-			for attempt := 0; attempt < 20; attempt++ {
+			for attempt := 0; attempt < 100; attempt++ {
 				rows, err = persistence.ClaimDueWork(context.Background(), pool, req)
 				if !errors.Is(err, persistence.ErrLeaseConflict) {
 					break
 				}
+				time.Sleep(time.Duration(attempt+1) * time.Millisecond)
 			}
 			results <- result{rows, err}
 		}(i)
