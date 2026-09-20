@@ -66,6 +66,36 @@ func TestAdmissionStaleEpochRollsBackCapacityAndEvidence(t *testing.T) {
 	assertAdmissionAbsent(t, pool, ctx)
 }
 
+// TestAdmissionBlockedByCommittedPauseForces the admission/pause boundary:
+// admission waits on the campaign lock, then observes the committed epoch.
+func TestAdmissionBlockedByCommittedPause(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	locker, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Rollback(ctx) //nolint:errcheck
+	if _, err := locker.Exec(ctx, "SELECT id FROM campaigns WHERE id=$1::uuid FOR UPDATE", fixture.campaignID); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		result <- persistence.AdmitOperation(context.Background(), pool, admissionRequest(fixture, "1004"))
+	}()
+	if _, err := locker.Exec(ctx, "UPDATE campaigns SET state='PAUSED', command_epoch=8 WHERE id=$1::uuid", fixture.campaignID); err != nil {
+		t.Fatal(err)
+	}
+	if err := locker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; !errors.Is(err, persistence.ErrAdmissionBlocked) {
+		t.Fatalf("admission after pause=%v, want ErrAdmissionBlocked", err)
+	}
+	assertAdmissionAbsent(t, pool, ctx)
+}
+
 func TestAdmissionDuplicateIdentityRollsBackTentativeCapacity(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)

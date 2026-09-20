@@ -49,6 +49,27 @@ func TestOutboxRetryQuarantinesAtBudget(t *testing.T) {
 	}
 }
 
+func TestOutboxSuccessThenCrashBeforeMarkIsReclaimedAtLeastOnce(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	now := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+	insertOutbox(t, pool, ctx, "00000000-0000-0000-1203-000000000001", now.Add(-time.Minute))
+	first, err := persistence.ClaimOutbox(ctx, pool, persistence.ClaimOutboxRequest{Owner: "publisher-a", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1203-000000000002"}})
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first claim=%v err=%v", first, err)
+	}
+	// The successful external call is deliberately represented by this durable
+	// test seam; process termination happens before MarkOutboxPublished.
+	delivered := first[0].EventID
+	repaired, err := persistence.RepairExpiredOutbox(ctx, pool, now.Add(2*time.Minute), 1)
+	if err != nil || len(repaired) != 1 || repaired[0] != delivered {
+		t.Fatalf("repair=%v err=%v", repaired, err)
+	}
+	second, err := persistence.ClaimOutbox(ctx, pool, persistence.ClaimOutboxRequest{Owner: "publisher-b", Now: now.Add(2 * time.Minute), LeaseExpiresAt: now.Add(3 * time.Minute), Tokens: []string{"00000000-0000-0000-1203-000000000003"}})
+	if err != nil || len(second) != 1 || second[0].EventID != delivered {
+		t.Fatalf("reclaim=%v err=%v; want redelivery of %s", second, err, delivered)
+	}
+}
+
 func insertOutbox(t *testing.T, pool *pgxpool.Pool, ctx context.Context, id string, next time.Time) {
 	t.Helper()
 	if _, err := pool.Exec(ctx, "INSERT INTO outbox_events (event_id,aggregate_type,aggregate_id,aggregate_revision,event_type,schema_version,payload,next_attempt_at) VALUES ($1::uuid,'CAMPAIGN','00000000-0000-0000-1200-000000000001',0,'campaign.ready',1,'{}',$2)", id, next); err != nil {

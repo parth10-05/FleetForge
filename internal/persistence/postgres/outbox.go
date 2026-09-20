@@ -142,6 +142,47 @@ func PublishClaimedOutbox(ctx context.Context, pool *pgxpool.Pool, publisher Eve
 	return nil
 }
 
+// RepairExpiredOutbox releases only expired delivery claims. It never marks an
+// event published and never invokes a publisher; a later claim may therefore
+// redeliver the same event ID, which is the explicit at-least-once boundary.
+func RepairExpiredOutbox(ctx context.Context, pool *pgxpool.Pool, now time.Time, limit int) ([]string, error) {
+	if now.IsZero() || limit <= 0 || limit > 100 {
+		return nil, fmt.Errorf("invalid outbox repair request")
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return nil, fmt.Errorf("begin outbox repair: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	rows, err := tx.Query(ctx, `SELECT event_id FROM outbox_events WHERE delivery_state='CLAIMED' AND claim_expires_at <= $1 ORDER BY claim_expires_at, created_at, event_id LIMIT $2 FOR UPDATE SKIP LOCKED`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("lock expired outbox: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan expired outbox: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("read expired outbox: %w", err)
+	}
+	rows.Close()
+	for _, id := range ids {
+		if _, err := tx.Exec(ctx, `UPDATE outbox_events SET delivery_state='PENDING', claim_token=NULL, claim_owner=NULL, claim_expires_at=NULL, next_attempt_at=$2 WHERE event_id=$1::uuid AND delivery_state='CLAIMED'`, id, now); err != nil {
+			return nil, classifyOutboxError(err, "repair expired outbox")
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, classifyOutboxError(err, "commit outbox repair")
+	}
+	return ids, nil
+}
+
 func classifyOutboxError(err error, operation string) error {
 	if isSerialization(err) {
 		return fmt.Errorf("%w: %s", ErrOutboxClaimConflict, operation)

@@ -64,6 +64,20 @@ func TestConcurrentAdmissionLeavesOneCoherentDurableHistory(t *testing.T) {
 	if active != 3 {
 		t.Fatalf("active reservation capacity = %d, want 3 from the one committed admission", active)
 	}
+	// Independent direct-row oracle: every committed admission evidence row
+	// shares the winning aggregate revision and audit identity is explicit.
+	var auditRevision int64
+	var correlation, causation string
+	if err := pool.QueryRow(ctx, "SELECT aggregate_revision,correlation_id::text,causation_id::text FROM audit_events WHERE aggregate_type='TARGET_UPDATE'").Scan(&auditRevision, &correlation, &causation); err != nil {
+		t.Fatalf("read audit history oracle: %v", err)
+	}
+	if auditRevision != 1 || correlation == "" || causation == "" {
+		t.Fatalf("audit history=%d/%q/%q, want revision 1 and immutable identities", auditRevision, correlation, causation)
+	}
+	var dueRevision int64
+	if err := pool.QueryRow(ctx, "SELECT expected_revision FROM due_work").Scan(&dueRevision); err != nil || dueRevision != auditRevision {
+		t.Fatalf("due-work revision=%d err=%v, want audit revision %d", dueRevision, err, auditRevision)
+	}
 }
 
 func assertHistoryCount(t *testing.T, pool *pgxpool.Pool, ctx context.Context, table string, want int) {

@@ -61,6 +61,10 @@ func TestExpiredSubmitRepairRequiresReconciliationAndRetainsReservation(t *testi
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM operation_reservations WHERE state='ACTIVE'").Scan(&reservations); err != nil || reservations != 1 {
 		t.Fatalf("active reservations=%d err=%v, want 1", reservations, err)
 	}
+	stale := persistence.DueWorkResult{ID: repaired[0], LeaseToken: "00000000-0000-0000-1102-000000000006", ExpectedRevision: 0, Now: now}
+	if err := persistence.CompleteDueWork(ctx, pool, stale); !errors.Is(err, persistence.ErrLeaseConflict) {
+		t.Fatalf("live stale worker completion=%v, want ErrLeaseConflict", err)
+	}
 }
 
 func TestConcurrentDueWorkClaimersDoNotCoOwnLease(t *testing.T) {
