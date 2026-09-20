@@ -67,6 +67,52 @@ func TestExpiredSubmitRepairRequiresReconciliationAndRetainsReservation(t *testi
 	}
 }
 
+// TestDueWorkCompletionRetryAndRepairRacePreservesFencing is P03-IT-17's
+// persistence-level schedule. A stale worker can neither complete nor retry
+// work after the sweeper observes its expired lease; no path releases the
+// durable operation reservation.
+func TestDueWorkCompletionRetryAndRepairRacePreservesFencing(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	insertAdmission(t, pool, ctx, "00000000-0000-0000-1120-000000000001", "00000000-0000-0000-1120-000000000002", fixture)
+	if _, err := pool.Exec(ctx, "INSERT INTO operation_reservations (id,admission_id,target_id,campaign_id,scope_level,scope_key) VALUES ('00000000-0000-0000-1120-000000000003',$1,$2,$3,'GLOBAL','GLOBAL')", "00000000-0000-0000-1120-000000000001", fixture.targetID, fixture.campaignID); err != nil {
+		t.Fatalf("insert reservation: %v", err)
+	}
+	now := time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)
+	insertDueWork(t, pool, ctx, "00000000-0000-0000-1120-000000000004", "00000000-0000-0000-1120-000000000005", fixture.targetUpdateID, "PRECHECK", now.Add(-time.Hour))
+	claimed, err := persistence.ClaimDueWork(ctx, pool, persistence.ClaimDueWorkRequest{Owner: "stale-worker", Now: now.Add(-time.Minute), LeaseExpiresAt: now, Tokens: []string{"00000000-0000-0000-1120-000000000006"}})
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim stale work=%v err=%v, want one", claimed, err)
+	}
+	result := persistence.DueWorkResult{ID: claimed[0].ID, LeaseToken: claimed[0].LeaseToken, ExpectedRevision: claimed[0].ExpectedRevision, ExpectedCommandEpoch: claimed[0].ExpectedCommandEpoch, Now: now, RetryAt: now.Add(time.Minute)}
+	start := make(chan struct{})
+	errs := make(chan error, 3)
+	go func() { <-start; errs <- persistence.CompleteDueWork(context.Background(), pool, result) }()
+	go func() { <-start; errs <- persistence.FailDueWork(context.Background(), pool, result) }()
+	go func() {
+		<-start
+		_, err := persistence.RepairExpiredDueWork(context.Background(), pool, now, 1)
+		errs <- err
+	}()
+	close(start)
+	for i := 0; i < 3; i++ {
+		if err := <-errs; err != nil && !errors.Is(err, persistence.ErrLeaseConflict) {
+			t.Fatalf("completion/retry/repair race error=%v", err)
+		}
+	}
+	var state string
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1", result.ID).Scan(&state); err != nil {
+		t.Fatalf("read raced work: %v", err)
+	}
+	if state != "COMPLETED" && state != "PENDING" {
+		t.Fatalf("raced work state=%q, want COMPLETED or PENDING", state)
+	}
+	var active int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM operation_reservations WHERE state='ACTIVE'").Scan(&active); err != nil || active != 1 {
+		t.Fatalf("active reservations=%d err=%v, want 1", active, err)
+	}
+}
+
 func TestConcurrentDueWorkClaimersDoNotCoOwnLease(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
