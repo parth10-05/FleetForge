@@ -134,9 +134,9 @@ func TestTenConcurrentDueWorkClaimersLeaveOneFencedOwnerPerRow(t *testing.T) {
 		}
 		for _, row := range result.rows {
 			if prior, exists := seen[row.ID]; exists {
-				t.Fatalf("due work %s co-owned by %s and %s", row.ID, prior, row.ClaimToken)
+				t.Fatalf("due work %s co-owned by %s and %s", row.ID, prior, row.LeaseToken)
 			}
-			seen[row.ID] = row.ClaimToken
+			seen[row.ID] = row.LeaseToken
 		}
 	}
 	if len(seen) != 10 {
