@@ -16,6 +16,18 @@ v2 turns the v1 simulator demo into a bounded AWS operator beta. It completes th
 - Implement the Phase 12 telemetry baseline: correlated traces, safe logs, bounded metrics, initial dashboards, alert wiring, and selected runbooks.
 - Implement Phase 13 hardening through reproducible staging deployment, OIDC, image provenance, migration compatibility, cost controls, and rollback rehearsal.
 
+## Implementation order
+
+| v2 phase | Source-phase mapping | Gate |
+| --- | --- | --- |
+| [V2-P00](00-v2-entry-and-staging-boundary.md) | v1 closeout, Phase 13 staging boundary | v2 operates from a reproducible staging baseline. |
+| [V2-P01](01-policy-inventory-and-artifact-completion.md) | Remaining Phases 05–07 | Inventory, artifact, and policy behavior is complete and replayable. |
+| [V2-P02](02-orchestration-and-control-api.md) | Remaining Phases 08–10 | Queue execution and authenticated API semantics are complete. |
+| [V2-P03](03-operator-console.md) | Phase 11 | The browser console accurately represents and controls server truth. |
+| [V2-P04](04-observability-and-staging-hardening.md) | Phase 12 baseline and Phase 13 hardening | A staging operator can detect, diagnose, and safely roll back defined failures. |
+
+v2 is an operator beta. It must not claim release-scale load results, restore proof, QEMU update compatibility, or public portfolio completeness until v3 evidence exists.
+
 ## v2 exit evidence
 
 - A Cognito-authenticated operator can complete normal, pause/abort, stale-revision, and attention workflows through the console.
