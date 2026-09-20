@@ -108,6 +108,9 @@ func admitOperationInTx(ctx context.Context, tx pgx.Tx, r AdmissionRequest) erro
 	var campaignState string
 	var epoch int64
 	if err := tx.QueryRow(ctx, "SELECT state, command_epoch FROM campaigns WHERE id=$1::uuid FOR UPDATE", r.CampaignID).Scan(&campaignState, &epoch); err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: lock campaign for admission", ErrRevisionConflict)
+		}
 		return fmt.Errorf("lock campaign for admission: %w", err)
 	}
 	if epoch != r.CapturedCommandEpoch || (campaignState != "RUNNING_CANARY" && campaignState != "RUNNING_WAVES") {
@@ -120,6 +123,9 @@ func admitOperationInTx(ctx context.Context, tx pgx.Tx, r AdmissionRequest) erro
 FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id
 WHERE ct.id=$1::uuid AND ct.campaign_id=$2::uuid AND ct.target_id=$3::uuid AND ct.artifact_id=$4::uuid AND tu.id=$5::uuid FOR UPDATE`, r.CampaignTargetID, r.CampaignID, r.TargetID, r.ArtifactID, r.TargetUpdateID).Scan(&targetState, &targetRevision, &targetEpoch)
 	if err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: lock frozen target update for admission", ErrRevisionConflict)
+		}
 		return fmt.Errorf("lock frozen target update for admission: %w", err)
 	}
 	if targetState != r.ExpectedTargetState || targetRevision != r.ExpectedTargetRevision || targetEpoch != r.CapturedCommandEpoch {
