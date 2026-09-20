@@ -193,6 +193,8 @@ func enrollmentRequest(fixture ownershipFixture, enrollmentID, outboxEventID str
 			CampaignTargetID: fixture.campaignTargetID,
 		}},
 		ActorID:             "system",
+		CorrelationID:       "00000000-0000-0000-9000-000000000001",
+		CausationID:         "00000000-0000-0000-9000-000000000001",
 		Action:              "READINESS_ACQUIRED",
 		ReasonCode:          "campaign.validation.accepted",
 		EventSequence:       0,

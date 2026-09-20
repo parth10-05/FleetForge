@@ -234,8 +234,8 @@ func TestDurableRecordsSchemaAuditEventsAreAppendOnly(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 
 	mustExecute(t, pool, ctx,
-		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, actor_id, action, reason_code) "+
-			"VALUES ('CAMPAIGN', '00000000-0000-0000-5005-000000000001', 0, 0, 'system', 'CREATED', 'campaign.validation.accepted')",
+		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, actor_id, correlation_id, causation_id, action, reason_code) "+
+			"VALUES ('CAMPAIGN', '00000000-0000-0000-5005-000000000001', 0, 0, 'system', '00000000-0000-0000-5005-000000000011', '00000000-0000-0000-5005-000000000011', 'CREATED', 'campaign.validation.accepted')",
 	)
 
 	// UPDATE must be rejected by the trigger (SQLSTATE 55000 — object not in prerequisite state).
@@ -252,20 +252,20 @@ func TestDurableRecordsSchemaAuditEventsAreAppendOnly(t *testing.T) {
 
 	// Unknown aggregate_type must be rejected by check constraint.
 	assertConstraint(t, pool, ctx,
-		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, actor_id, action, reason_code) "+
-			"VALUES ('UNKNOWN', '00000000-0000-0000-5005-000000000002', 0, 0, 'system', 'CREATED', 'campaign.validation.accepted')",
+		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, actor_id, correlation_id, causation_id, action, reason_code) "+
+			"VALUES ('UNKNOWN', '00000000-0000-0000-5005-000000000002', 0, 0, 'system', '00000000-0000-0000-5005-000000000012', '00000000-0000-0000-5005-000000000012', 'CREATED', 'campaign.validation.accepted')",
 	)
 
 	// Negative aggregate_revision must be rejected.
 	assertConstraint(t, pool, ctx,
-		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, actor_id, action, reason_code) "+
-			"VALUES ('CAMPAIGN', '00000000-0000-0000-5005-000000000003', -1, 0, 'system', 'CREATED', 'campaign.validation.accepted')",
+		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, actor_id, correlation_id, causation_id, action, reason_code) "+
+			"VALUES ('CAMPAIGN', '00000000-0000-0000-5005-000000000003', -1, 0, 'system', '00000000-0000-0000-5005-000000000013', '00000000-0000-0000-5005-000000000013', 'CREATED', 'campaign.validation.accepted')",
 	)
 
 	// Duplicate (aggregate_type, aggregate_id, aggregate_revision, event_sequence) must be rejected.
 	assertSQLState(t, pool, ctx,
-		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, actor_id, action, reason_code) "+
-			"VALUES ('CAMPAIGN', '00000000-0000-0000-5005-000000000001', 0, 0, 'system', 'CREATED', 'campaign.validation.accepted')",
+		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, actor_id, correlation_id, causation_id, action, reason_code) "+
+			"VALUES ('CAMPAIGN', '00000000-0000-0000-5005-000000000001', 0, 0, 'system', '00000000-0000-0000-5005-000000000011', '00000000-0000-0000-5005-000000000011', 'CREATED', 'campaign.validation.accepted')",
 		"23505",
 	)
 }

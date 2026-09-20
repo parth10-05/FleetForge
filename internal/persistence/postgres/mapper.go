@@ -110,6 +110,8 @@ type AuditEventRow struct {
 	EventSequence     int64
 	ActorID           string
 	CommandID         *string
+	CorrelationID     string
+	CausationID       string
 	Action            string
 	ReasonCode        string
 	BeforeHash        *string

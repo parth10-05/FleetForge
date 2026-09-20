@@ -20,7 +20,7 @@ type Querier interface {
 	// Access pattern: reconstruct an immutable aggregate audit timeline.
 	// Index: audit_events_timeline_index ON audit_events
 	//        (aggregate_type, aggregate_id, aggregate_revision, event_sequence)
-	AuditTimeline(ctx context.Context, arg AuditTimelineParams) ([]AuditEvent, error)
+	AuditTimeline(ctx context.Context, arg AuditTimelineParams) ([]AuditTimelineRow, error)
 	// P03-Q04: check-active-enrollment.sql
 	// Access pattern: readiness ownership gate — find the active enrollment for a target.
 	// Index: target_enrollments_one_active_target (partial unique on target_id WHERE state='ACTIVE')
@@ -92,10 +92,22 @@ type Querier interface {
 	// Access pattern: admission transaction locks one durable scope counter in the
 	// fixed GLOBAL -> SITE -> RACK order defined by ADR-021.
 	LockScopeCapacity(ctx context.Context, arg LockScopeCapacityParams) (ScopeCapacity, error)
+	// P03-Q25: oldest-due-work.sql
+	// Access pattern: inspect oldest claimable due-work rows for planning and
+	// query-plan evidence without scanning completed history.
+	OldestDueWork(ctx context.Context, dollar_1 int32) ([]OldestDueWorkRow, error)
+	// P03-Q26: oldest-outbox.sql
+	// Access pattern: inspect oldest publishable outbox rows for planning and
+	// query-plan evidence without scanning published history.
+	OldestOutbox(ctx context.Context, dollar_1 int32) ([]OldestOutboxRow, error)
 	// P03-Q23: repair-expired-due-work.sql
 	// Access pattern: bounded, ordered repair candidates. The caller holds rows,
 	// then moves SUBMIT work to reconciliation or safe non-submit work to pending.
 	RepairExpiredDueWork(ctx context.Context, arg RepairExpiredDueWorkParams) ([]RepairExpiredDueWorkRow, error)
+	// P03-Q24: repair-expired-outbox.sql
+	// Access pattern: bounded, ordered expired outbox claims for safe retry by a
+	// future publisher repairer. This query does not publish or mutate rows.
+	RepairExpiredOutbox(ctx context.Context, arg RepairExpiredOutboxParams) ([]RepairExpiredOutboxRow, error)
 	// P03-Q12: resolve-idempotency-key.sql
 	// Access pattern: look up an idempotency record by actor, route, and key hash.
 	// Index: idempotency_records_actor_route_key_unique UNIQUE (actor_id, route, key_hash)

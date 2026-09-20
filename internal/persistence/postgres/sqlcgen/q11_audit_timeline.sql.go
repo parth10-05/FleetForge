@@ -35,20 +35,35 @@ type AuditTimelineParams struct {
 	AggregateID   pgtype.UUID `json:"aggregate_id"`
 }
 
+type AuditTimelineRow struct {
+	ID                int64              `json:"id"`
+	AggregateType     string             `json:"aggregate_type"`
+	AggregateID       pgtype.UUID        `json:"aggregate_id"`
+	AggregateRevision int64              `json:"aggregate_revision"`
+	EventSequence     int64              `json:"event_sequence"`
+	ActorID           string             `json:"actor_id"`
+	CommandID         pgtype.UUID        `json:"command_id"`
+	Action            string             `json:"action"`
+	ReasonCode        string             `json:"reason_code"`
+	BeforeHash        pgtype.Text        `json:"before_hash"`
+	AfterHash         pgtype.Text        `json:"after_hash"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 // P03-Q11: audit-timeline.sql
 // Access pattern: reconstruct an immutable aggregate audit timeline.
 // Index: audit_events_timeline_index ON audit_events
 //
 //	(aggregate_type, aggregate_id, aggregate_revision, event_sequence)
-func (q *Queries) AuditTimeline(ctx context.Context, arg AuditTimelineParams) ([]AuditEvent, error) {
+func (q *Queries) AuditTimeline(ctx context.Context, arg AuditTimelineParams) ([]AuditTimelineRow, error) {
 	rows, err := q.db.Query(ctx, auditTimeline, arg.AggregateType, arg.AggregateID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AuditEvent{}
+	items := []AuditTimelineRow{}
 	for rows.Next() {
-		var i AuditEvent
+		var i AuditTimelineRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.AggregateType,

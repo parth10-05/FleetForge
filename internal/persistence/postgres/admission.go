@@ -39,7 +39,7 @@ type AdmissionRequest struct {
 	CommandID, Step, AdmissionID, StepAttemptID                        string
 	Global, Site, Rack                                                 ScopeCapacity
 	ReservationIDs                                                     [3]string // GLOBAL, SITE, RACK
-	ActorID, Action, ReasonCode                                        string
+	ActorID, CorrelationID, CausationID, Action, ReasonCode            string
 	AuditEventSequence                                                 int64
 	OutboxEventID, OutboxEventType                                     string
 	OutboxSchemaVersion                                                int
@@ -80,7 +80,7 @@ func AdmitOperation(ctx context.Context, pool *pgxpool.Pool, req AdmissionReques
 }
 
 func validateAdmissionRequest(r AdmissionRequest) error {
-	for _, v := range []string{r.CampaignID, r.CampaignTargetID, r.TargetID, r.ArtifactID, r.TargetUpdateID, r.CommandID, r.Step, r.AdmissionID, r.StepAttemptID, r.ActorID, r.Action, r.ReasonCode, r.OutboxEventID, r.OutboxEventType, r.DueWorkID, r.DueWorkWorkType, r.DecisionInputID, r.ReducerVersion, r.DecisionPolicyVersion, r.DecisionResult} {
+	for _, v := range []string{r.CampaignID, r.CampaignTargetID, r.TargetID, r.ArtifactID, r.TargetUpdateID, r.CommandID, r.Step, r.AdmissionID, r.StepAttemptID, r.ActorID, r.CorrelationID, r.CausationID, r.Action, r.ReasonCode, r.OutboxEventID, r.OutboxEventType, r.DueWorkID, r.DueWorkWorkType, r.DecisionInputID, r.ReducerVersion, r.DecisionPolicyVersion, r.DecisionResult} {
 		if v == "" {
 			return fmt.Errorf("admission request contains required empty field")
 		}
@@ -180,7 +180,7 @@ WHERE ct.id=$1::uuid AND ct.campaign_id=$2::uuid AND ct.target_id=$3::uuid AND c
 	if _, err = tx.Exec(ctx, "INSERT INTO decision_inputs (id,aggregate_type,aggregate_id,aggregate_revision,decision_sequence,logical_time,reducer_version,policy_version,normalized_facts,result,reason_code) VALUES ($1::uuid,'TARGET_UPDATE',$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10)", r.DecisionInputID, r.TargetUpdateID, newRevision, r.DecisionSequence, r.DecisionLogicalTime, r.ReducerVersion, r.DecisionPolicyVersion, r.NormalizedFacts, r.DecisionResult, r.ReasonCode); err != nil {
 		return classifyAdmissionWrite(err, "insert admission decision input")
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,command_id,action,reason_code) VALUES ('TARGET_UPDATE',$1::uuid,$2,$3,$4,$5::uuid,$6,$7)", r.TargetUpdateID, newRevision, r.AuditEventSequence, r.ActorID, r.CommandID, r.Action, r.ReasonCode); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,command_id,correlation_id,causation_id,action,reason_code) VALUES ('TARGET_UPDATE',$1::uuid,$2,$3,$4,$5::uuid,$6::uuid,$7::uuid,$8,$9)", r.TargetUpdateID, newRevision, r.AuditEventSequence, r.ActorID, r.CommandID, r.CorrelationID, r.CausationID, r.Action, r.ReasonCode); err != nil {
 		return classifyAdmissionWrite(err, "append admission audit")
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO outbox_events (event_id,aggregate_type,aggregate_id,aggregate_revision,event_type,schema_version,payload) VALUES ($1::uuid,'TARGET_UPDATE',$2::uuid,$3,$4,$5,$6)", r.OutboxEventID, r.TargetUpdateID, newRevision, r.OutboxEventType, r.OutboxSchemaVersion, r.OutboxPayload); err != nil {

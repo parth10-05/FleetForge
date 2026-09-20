@@ -13,7 +13,7 @@ import (
 
 func TestRolesEnforceAuditAndDiagnosticBoundaries(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
-	if _, err := pool.Exec(ctx, "INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,action,reason_code) VALUES ('CAMPAIGN','00000000-0000-0000-1500-000000000001',0,0,'role-test','TEST','OK')"); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,correlation_id,causation_id,action,reason_code) VALUES ('CAMPAIGN','00000000-0000-0000-1500-000000000001',0,0,'role-test','00000000-0000-0000-1500-000000000011','00000000-0000-0000-1500-000000000011','TEST','OK')"); err != nil {
 		t.Fatalf("seed audit row: %v", err)
 	}
 	connection, err := pool.Acquire(ctx)
@@ -39,7 +39,7 @@ func TestRolesEnforceAuditAndDiagnosticBoundaries(t *testing.T) {
 	if _, err := connection.Exec(ctx, "SET SESSION AUTHORIZATION fleetforge_diagnostic"); err != nil {
 		t.Fatalf("assume diagnostic role: %v", err)
 	}
-	if _, err := connection.Exec(ctx, "INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,action,reason_code) VALUES ('CAMPAIGN','00000000-0000-0000-1500-000000000002',0,0,'diagnostic','TEST','OK')"); err == nil {
+	if _, err := connection.Exec(ctx, "INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,correlation_id,causation_id,action,reason_code) VALUES ('CAMPAIGN','00000000-0000-0000-1500-000000000002',0,0,'diagnostic','00000000-0000-0000-1500-000000000012','00000000-0000-0000-1500-000000000012','TEST','OK')"); err == nil {
 		t.Fatal("diagnostic role mutated operational data")
 	}
 }

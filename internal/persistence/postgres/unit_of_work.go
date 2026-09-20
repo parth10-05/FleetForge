@@ -49,6 +49,8 @@ type AggregateMutation struct {
 	// Audit event fields (required).
 	ActorID       string
 	CommandID     *string // nullable — background tasks may omit
+	CorrelationID string
+	CausationID   string
 	Action        string
 	ReasonCode    string
 	BeforeHash    *string
@@ -194,10 +196,10 @@ func appendAuditEvent(ctx context.Context, tx pgx.Tx, m AggregateMutation) error
 	// Q16: insert audit event (append-only trigger enforced by database).
 	_, err := tx.Exec(ctx,
 		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, "+
-			"actor_id, command_id, action, reason_code, before_hash, after_hash) "+
-			"VALUES ($1, $2::uuid, $3, $4, $5, $6::uuid, $7, $8, $9, $10)",
+			"actor_id, command_id, correlation_id, causation_id, action, reason_code, before_hash, after_hash) "+
+			"VALUES ($1, $2::uuid, $3, $4, $5, $6::uuid, $7::uuid, $8::uuid, $9, $10, $11, $12)",
 		m.AggregateType, m.AggregateID, m.ExpectedRevision+1, m.EventSequence,
-		m.ActorID, m.CommandID, m.Action, m.ReasonCode, m.BeforeHash, m.AfterHash,
+		m.ActorID, m.CommandID, m.CorrelationID, m.CausationID, m.Action, m.ReasonCode, m.BeforeHash, m.AfterHash,
 	)
 	if err != nil {
 		return fmt.Errorf("append audit event for %s/%s: %w", m.AggregateType, m.AggregateID, err)

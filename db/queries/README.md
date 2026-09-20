@@ -27,10 +27,18 @@ and must not leak into `internal/domain`.
 | P03-Q18 | `q18_insert_due_work.sql` | Schedule due-work in unit-of-work | `due_work_semantic_unique` |
 | P03-Q19 | `q19_insert_decision_input.sql` | Persist reducer evidence in unit-of-work | `decision_inputs_aggregate_revision_sequence_unique` |
 | P03-Q20 | `q20_lock_scope_capacity.sql` | Lock a durable scope capacity row during admission | `scope_capacities` primary key |
+| P03-Q21 | `q21_complete_due_work.sql` | Fence a due-work completion by token/revision/epoch | due-work primary key |
+| P03-Q22 | `q22_fail_due_work.sql` | Fence a due-work retry by token/revision/epoch | due-work primary key |
+| P03-Q23 | `q23_repair_expired_due_work.sql` | Select expired due-work leases for bounded repair | `due_work` expiry claim index |
+| P03-Q24 | `q24_repair_expired_outbox.sql` | Select expired outbox claims for bounded repair | `outbox_events_expired_claim_index` |
+| P03-Q25 | `q25_oldest_due_work.sql` | Inspect oldest pending due work | `due_work_oldest_pending_index` |
+| P03-Q26 | `q26_oldest_outbox.sql` | Inspect oldest pending outbox work | `outbox_events_oldest_pending_index` |
 
 ## Lock order reminder (ADR-021)
 
-All multi-row writers acquire rows in this order:
-`campaign → wave → enrollment/target → operation-reservation → aggregate → due-work`
+All multi-row writers acquire present row families in this exact ADR-021 order:
+`campaign → campaign-target/target-update → target-enrollment → global/site/rack capacity → submission-admission → operation-reservation → due-work/outbox → audit/decision-input`.
 
-No query file may add a `FOR UPDATE` that violates this order.
+Within a family writers sort by stable UUID or subject key. A writer skips a row
+family it does not need; it never reorders remaining families. No query file may
+add a `FOR UPDATE` that violates this order.

@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -93,6 +94,53 @@ func TestConcurrentDueWorkClaimersDoNotCoOwnLease(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("claimed rows=%d, want exactly one", count)
+	}
+}
+
+// TestTenConcurrentDueWorkClaimersLeaveOneFencedOwnerPerRow is P03-IT-06.
+func TestTenConcurrentDueWorkClaimersLeaveOneFencedOwnerPerRow(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	now := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 10; i++ {
+		insertDueWork(t, pool, ctx, fmt.Sprintf("00000000-0000-0000-1110-%012d", i+1), fmt.Sprintf("00000000-0000-0000-1111-%012d", i+1), fixture.targetUpdateID, "PRECHECK", now.Add(time.Duration(i)*time.Second))
+	}
+	type result struct {
+		rows []persistence.ClaimedDueWork
+		err  error
+	}
+	results, start := make(chan result, 10), make(chan struct{})
+	var wait sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wait.Add(1)
+		go func(i int) {
+			defer wait.Done()
+			<-start
+			rows, err := persistence.ClaimDueWork(context.Background(), pool, persistence.ClaimDueWorkRequest{Owner: fmt.Sprintf("worker-%02d", i+1), Now: now.Add(time.Minute), LeaseExpiresAt: now.Add(2 * time.Minute), Tokens: []string{fmt.Sprintf("00000000-0000-0000-1112-%012d", i+1)}})
+			results <- result{rows, err}
+		}(i)
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+	seen := map[string]string{}
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("ten-claimer schedule: %v", result.err)
+		}
+		for _, row := range result.rows {
+			if prior, exists := seen[row.ID]; exists {
+				t.Fatalf("due work %s co-owned by %s and %s", row.ID, prior, row.ClaimToken)
+			}
+			seen[row.ID] = row.ClaimToken
+		}
+	}
+	if len(seen) != 10 {
+		t.Fatalf("unique claimed rows=%d, want 10", len(seen))
+	}
+	var claimed int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE delivery_state='CLAIMED' AND lease_token IS NOT NULL AND lease_owner IS NOT NULL").Scan(&claimed); err != nil || claimed != 10 {
+		t.Fatalf("fenced claimed rows=%d err=%v, want 10", claimed, err)
 	}
 }
 

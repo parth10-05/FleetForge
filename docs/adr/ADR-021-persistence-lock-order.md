@@ -24,6 +24,10 @@ within each family by stable UUID/subject key:
 7. due-work and outbox rows;
 8. audit and decision-input append rows.
 
+Writers skip row families that are not part of their operation; skipped rows do
+not permit reordering of the remaining families. The query catalog repeats this
+sequence verbatim and must be updated with this ADR.
+
 Readiness locks its campaign before sorted targets and enrollment claims.
 Admission locks campaign, target update, enrollment, scope capacity, admission,
 and reservation in the listed order. Pause/abort locks the campaign first.

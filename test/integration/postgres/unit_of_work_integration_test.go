@@ -182,6 +182,8 @@ func campaignMutation(fixture ownershipFixture, revision int64, newState, eventI
 		PolicyVersionID:       "00000000-0000-0000-0000-000000000207",
 		ActorID:               "system",
 		CommandID:             &cmdID,
+		CorrelationID:         commandID,
+		CausationID:           commandID,
 		Action:                "TRANSITION",
 		ReasonCode:            "campaign.validation.accepted",
 		EventSequence:         0,

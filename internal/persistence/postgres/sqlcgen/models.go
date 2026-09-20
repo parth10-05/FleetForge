@@ -21,6 +21,8 @@ type AuditEvent struct {
 	BeforeHash        pgtype.Text        `json:"before_hash"`
 	AfterHash         pgtype.Text        `json:"after_hash"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	CorrelationID     pgtype.UUID        `json:"correlation_id"`
+	CausationID       pgtype.UUID        `json:"causation_id"`
 }
 
 type Campaign struct {

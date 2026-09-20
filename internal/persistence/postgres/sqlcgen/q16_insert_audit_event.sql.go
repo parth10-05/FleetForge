@@ -14,8 +14,8 @@ import (
 const insertAuditEvent = `-- name: InsertAuditEvent :exec
 INSERT INTO audit_events
     (aggregate_type, aggregate_id, aggregate_revision, event_sequence,
-     actor_id, command_id, action, reason_code, before_hash, after_hash)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     actor_id, command_id, correlation_id, causation_id, action, reason_code, before_hash, after_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 `
 
 type InsertAuditEventParams struct {
@@ -25,6 +25,8 @@ type InsertAuditEventParams struct {
 	EventSequence     int64       `json:"event_sequence"`
 	ActorID           string      `json:"actor_id"`
 	CommandID         pgtype.UUID `json:"command_id"`
+	CorrelationID     pgtype.UUID `json:"correlation_id"`
+	CausationID       pgtype.UUID `json:"causation_id"`
 	Action            string      `json:"action"`
 	ReasonCode        string      `json:"reason_code"`
 	BeforeHash        pgtype.Text `json:"before_hash"`
@@ -42,6 +44,8 @@ func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventPara
 		arg.EventSequence,
 		arg.ActorID,
 		arg.CommandID,
+		arg.CorrelationID,
+		arg.CausationID,
 		arg.Action,
 		arg.ReasonCode,
 		arg.BeforeHash,

@@ -54,6 +54,8 @@ type ReadinessEnrollmentRequest struct {
 
 	// Audit event fields.
 	ActorID       string
+	CorrelationID string
+	CausationID   string
 	Action        string
 	ReasonCode    string
 	EventSequence int64
@@ -127,10 +129,10 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 	// Step 4: Append audit event.
 	if _, err := tx.Exec(ctx,
 		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, "+
-			"actor_id, action, reason_code, after_hash) "+
-			"VALUES ('CAMPAIGN', $1::uuid, $2, $3, $4, $5, $6, $7)",
+			"actor_id, correlation_id, causation_id, action, reason_code, after_hash) "+
+			"VALUES ('CAMPAIGN', $1::uuid, $2, $3, $4, $5::uuid, $6::uuid, $7, $8, $9)",
 		req.CampaignID, req.ExpectedRevision+1, req.EventSequence,
-		req.ActorID, req.Action, req.ReasonCode, req.AfterHash,
+		req.ActorID, req.CorrelationID, req.CausationID, req.Action, req.ReasonCode, req.AfterHash,
 	); err != nil {
 		return fmt.Errorf("append readiness audit event: %w", err)
 	}
