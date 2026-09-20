@@ -141,5 +141,9 @@ SELECT COALESCE(string_agg(definition, E'\n' ORDER BY definition), '') FROM defi
 	if err := pool.QueryRow(ctx, catalog).Scan(&definitions); err != nil {
 		t.Fatalf("read schema catalog: %v", err)
 	}
+	// PostgreSQL includes the generated test schema name in index definitions.
+	// The compatibility oracle compares schema shape, not each harness's random
+	// namespace, so canonicalize that identifier before hashing.
+	definitions = strings.ReplaceAll(definitions, harness.Schema, "<test-schema>")
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSpace(definitions))))
 }
