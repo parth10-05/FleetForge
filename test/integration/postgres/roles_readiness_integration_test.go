@@ -58,7 +58,7 @@ func TestReadinessProbeSeparatesUnavailableFromSchemaMismatch(t *testing.T) {
 	if err := probe.Check(ctx); err != nil {
 		t.Fatalf("compatible schema readiness: %v", err)
 	}
-	probe.ExpectedVersion = 7
+	probe.ExpectedVersion = 8
 	err := probe.Check(ctx)
 	if !errors.Is(err, persistence.ErrDatabaseSchemaIncompatible) || probe.ReadinessReason(err) != "database_schema_incompatible" {
 		t.Fatalf("schema mismatch = %v, want incompatible classification", err)
