@@ -68,3 +68,13 @@ module "qemu_lab" {
   instance_count    = var.qemu_instance_count
   tags              = local.required_tags
 }
+
+module "cognito" {
+  count  = var.enable_cognito_google ? 1 : 0
+  source = "../../modules/cognito"
+
+  name_prefix   = local.name_prefix
+  callback_urls = var.cognito_callback_urls
+  logout_urls   = var.cognito_logout_urls
+  tags          = local.required_tags
+}

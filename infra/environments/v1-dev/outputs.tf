@@ -37,3 +37,11 @@ output "qemu_resources" {
     security_group_id = module.qemu_lab[0].security_group_id
   } : null
 }
+
+output "authentication_resources" {
+  description = "Cognito identifiers emitted only when authentication is explicitly enabled."
+  value = var.enable_cognito_google ? {
+    user_pool_id  = module.cognito[0].user_pool_id
+    web_client_id = module.cognito[0].web_client_id
+  } : null
+}

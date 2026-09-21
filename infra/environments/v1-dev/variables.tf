@@ -102,6 +102,18 @@ variable "enable_cognito_google" {
   description = "Reserved for a later Cognito/Google federation module."
 }
 
+variable "cognito_callback_urls" {
+  description = "Approved HTTPS application callback URLs. Replace placeholders only during the credentialed configuration run."
+  type        = list(string)
+  default     = ["https://example.invalid/auth/callback"]
+}
+
+variable "cognito_logout_urls" {
+  description = "Approved HTTPS application logout URLs. Replace placeholders only during the credentialed configuration run."
+  type        = list(string)
+  default     = ["https://example.invalid/logout"]
+}
+
 variable "qemu_instance_count" {
   type        = number
   default     = 0
