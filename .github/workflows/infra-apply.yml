@@ -1,0 +1,37 @@
+name: Apply approved infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type APPLY-SYNTHETIC-FLEETFORGE after reviewing the plan.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  apply:
+    if: inputs.confirmation == 'APPLY-SYNTHETIC-FLEETFORGE'
+    environment: infrastructure-apply
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.16.3
+          terraform_wrapper: false
+      - name: Require configured federated role
+        run: test -n "${{ vars.AWS_ROLE_TO_ASSUME }}"
+      - uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5c7b76b1ba0cb13f89f5f5d # v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-east-1
+      - name: Plan and apply reviewed configuration
+        working-directory: infra/environments/v1-dev
+        run: |
+          terraform init
+          terraform plan -out=approved.tfplan
+          terraform apply approved.tfplan
