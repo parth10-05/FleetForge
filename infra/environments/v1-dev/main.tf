@@ -58,6 +58,19 @@ module "runtime_identity" {
   tags                = local.required_tags
 }
 
+module "runtime_shells" {
+  count  = var.enable_runtime ? 1 : 0
+  source = "../../modules/runtime_shells"
+
+  name_prefix          = local.name_prefix
+  region               = var.region
+  api_image            = var.api_image
+  worker_image         = var.worker_image
+  api_task_role_arn    = module.runtime_identity[0].api_role_arn
+  worker_task_role_arn = module.runtime_identity[0].worker_role_arn
+  tags                 = local.required_tags
+}
+
 module "qemu_lab" {
   count  = var.enable_qemu ? 1 : 0
   source = "../../modules/qemu_lab"

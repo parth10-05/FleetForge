@@ -27,6 +27,7 @@ output "runtime_resources" {
     registry_url    = module.container_registry[0].repository_url
     api_role_arn    = module.runtime_identity[0].api_role_arn
     worker_role_arn = module.runtime_identity[0].worker_role_arn
+    cluster_arn     = module.runtime_shells[0].cluster_arn
   } : null
 }
 

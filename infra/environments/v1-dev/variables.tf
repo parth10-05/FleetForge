@@ -84,6 +84,18 @@ variable "registry_maximum_images" {
   default     = 10
 }
 
+variable "api_image" {
+  description = "Immutable API image reference. Set to an approved digest only during a runtime enablement."
+  type        = string
+  default     = "registry.invalid/fleetforge/api@sha256:pending"
+}
+
+variable "worker_image" {
+  description = "Immutable worker image reference. Set to an approved digest only during a runtime enablement."
+  type        = string
+  default     = "registry.invalid/fleetforge/worker@sha256:pending"
+}
+
 variable "enable_scheduler" {
   type        = bool
   default     = false
