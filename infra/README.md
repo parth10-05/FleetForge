@@ -1,8 +1,9 @@
 # FleetForge infrastructure
 
-This directory begins the **plan-only Terraform foundation**. It is safe to
-review and validate without AWS access. The default `v1-dev` root enables no
-runtime feature and declares no customer-managed AWS resources.
+This directory contains a Terraform foundation that can be reviewed and
+validated without AWS access. The default `v1-dev` root enables no runtime
+feature and therefore declares no customer-managed AWS resources in its
+default plan.
 
 ## Safety boundary
 
@@ -13,9 +14,9 @@ runtime feature and declares no customer-managed AWS resources.
 - The pull-request workflow has read-only repository permission only. It has
   no AWS credentials, GitHub OIDC token, environment access, apply, or destroy
   step.
-- Terraform provider/resource modules are deliberately deferred. Run 02 owns
-  state and GitHub OIDC; resource modules begin only in their assigned gated
-  runs.
+- Reusable state, federated identity, storage, queue, and registry modules do
+  not authorize a live apply. Root composition is guarded by feature flags and
+  a bounded expiry check.
 
 ## Local static validation
 
@@ -39,6 +40,6 @@ All future resources use the `ps-fleetforge-v1-dev-` naming contract and the
 required ownership tags described in [naming.md](naming.md). Feature flags are
 off by default; enabling one requires a future apply-specific expiry record.
 
-This foundation does not prove AWS permissions, remote state, billing, live resources,
-or QEMU behavior. Those claims require dedicated identity, cost, and provider
-evidence in later provider-gated work.
+This code does not prove AWS permissions, remote state access, billing, live
+resources, or QEMU behavior. Capture those claims only after the corresponding
+administrative execution and evidence review.
