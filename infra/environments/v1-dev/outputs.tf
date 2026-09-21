@@ -28,6 +28,7 @@ output "runtime_resources" {
     api_role_arn    = module.runtime_identity[0].api_role_arn
     worker_role_arn = module.runtime_identity[0].worker_role_arn
     cluster_arn     = module.runtime_shells[0].cluster_arn
+    secret_arns     = module.secret_placeholders[0].secret_arns
   } : null
 }
 

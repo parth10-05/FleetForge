@@ -71,6 +71,14 @@ module "runtime_shells" {
   tags                 = local.required_tags
 }
 
+module "secret_placeholders" {
+  count  = var.enable_runtime ? 1 : 0
+  source = "../../modules/secret_placeholders"
+
+  name_prefix = local.name_prefix
+  tags        = local.required_tags
+}
+
 module "qemu_lab" {
   count  = var.enable_qemu ? 1 : 0
   source = "../../modules/qemu_lab"
