@@ -47,3 +47,13 @@ module "container_registry" {
   maximum_images = var.registry_maximum_images
   tags           = local.required_tags
 }
+
+module "runtime_identity" {
+  count  = var.enable_runtime ? 1 : 0
+  source = "../../modules/runtime_identity"
+
+  name_prefix         = local.name_prefix
+  artifact_bucket_arn = module.artifact_store[0].bucket_arn
+  queue_arn           = module.operation_queue[0].queue_arn
+  tags                = local.required_tags
+}

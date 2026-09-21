@@ -25,5 +25,7 @@ output "runtime_resources" {
     artifact_bucket = module.artifact_store[0].bucket_name
     queue_url       = module.operation_queue[0].queue_url
     registry_url    = module.container_registry[0].repository_url
+    api_role_arn    = module.runtime_identity[0].api_role_arn
+    worker_role_arn = module.runtime_identity[0].worker_role_arn
   } : null
 }
