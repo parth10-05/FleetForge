@@ -113,6 +113,23 @@ variable "qemu_instance_count" {
   }
 }
 
+variable "qemu_availability_zone" {
+  description = "Availability Zone for the isolated simulator subnet; set only during a reviewed QEMU enablement."
+  type        = string
+  default     = "us-east-1a"
+}
+
+variable "qemu_ami_id" {
+  description = "Reviewed AMI ID for the synthetic QEMU host. This must never be a production image."
+  type        = string
+  default     = "ami-00000000000000000"
+
+  validation {
+    condition     = can(regex("^ami-[0-9a-f]{17}$", var.qemu_ami_id))
+    error_message = "qemu_ami_id must be an AMI identifier."
+  }
+}
+
 check "feature_enablement_requires_bounded_expiry" {
   assert {
     condition = !local.feature_enabled || (

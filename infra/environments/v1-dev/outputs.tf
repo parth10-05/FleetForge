@@ -29,3 +29,11 @@ output "runtime_resources" {
     worker_role_arn = module.runtime_identity[0].worker_role_arn
   } : null
 }
+
+output "qemu_resources" {
+  description = "Simulator identifiers emitted only when the isolated QEMU feature is enabled."
+  value = var.enable_qemu ? {
+    instance_ids      = module.qemu_lab[0].instance_ids
+    security_group_id = module.qemu_lab[0].security_group_id
+  } : null
+}

@@ -57,3 +57,14 @@ module "runtime_identity" {
   queue_arn           = module.operation_queue[0].queue_arn
   tags                = local.required_tags
 }
+
+module "qemu_lab" {
+  count  = var.enable_qemu ? 1 : 0
+  source = "../../modules/qemu_lab"
+
+  name_prefix       = local.name_prefix
+  availability_zone = var.qemu_availability_zone
+  ami_id            = var.qemu_ami_id
+  instance_count    = var.qemu_instance_count
+  tags              = local.required_tags
+}
