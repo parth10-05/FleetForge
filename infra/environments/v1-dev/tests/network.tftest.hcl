@@ -1,3 +1,5 @@
+mock_provider "aws" {}
+
 run "run_one_has_plan_only_output" {
   command = plan
 

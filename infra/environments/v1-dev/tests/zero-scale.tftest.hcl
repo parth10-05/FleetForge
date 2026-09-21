@@ -1,3 +1,5 @@
+mock_provider "aws" {}
+
 run "default_features_are_disabled" {
   command = plan
 

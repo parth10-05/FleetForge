@@ -1,3 +1,5 @@
+mock_provider "aws" {}
+
 run "default_naming_is_owned" {
   command = plan
 

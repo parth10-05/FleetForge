@@ -4,6 +4,7 @@ owner               = "ps"
 region              = "us-east-1"
 environment         = "v1-dev"
 enable_runtime      = false
+account_suffix      = "replace-with-account-suffix"
 enable_scheduler    = false
 enable_qemu         = false
 enable_cognito_google = false

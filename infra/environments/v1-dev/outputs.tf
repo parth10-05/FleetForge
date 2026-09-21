@@ -18,3 +18,12 @@ output "enabled_features" {
     qemu_instances = var.qemu_instance_count
   }
 }
+
+output "runtime_resources" {
+  description = "Identifiers emitted only when the reviewed runtime feature is explicitly enabled."
+  value = var.enable_runtime ? {
+    artifact_bucket = module.artifact_store[0].bucket_name
+    queue_url       = module.operation_queue[0].queue_url
+    registry_url    = module.container_registry[0].repository_url
+  } : null
+}

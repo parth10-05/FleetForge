@@ -49,6 +49,41 @@ variable "enable_runtime" {
   description = "Reserved for a later reviewed ECS/runtime module."
 }
 
+variable "account_suffix" {
+  description = "Non-secret lowercase account discriminator included in globally unique bucket names."
+  type        = string
+  default     = "unconfigured"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]{1,30}$", var.account_suffix))
+    error_message = "account_suffix must be a lowercase identifier containing letters, digits, and hyphens."
+  }
+}
+
+variable "abort_incomplete_upload_days" {
+  description = "Bound for aborting partial uploads to the private artifact bucket."
+  type        = number
+  default     = 1
+}
+
+variable "queue_visibility_timeout_seconds" {
+  description = "SQS operation visibility timeout; tune only after measured worker execution evidence."
+  type        = number
+  default     = 120
+}
+
+variable "queue_max_receive_count" {
+  description = "Maximum receives before an operation moves to the dead-letter queue."
+  type        = number
+  default     = 5
+}
+
+variable "registry_maximum_images" {
+  description = "Maximum immutable image revisions retained by the registry lifecycle policy."
+  type        = number
+  default     = 10
+}
+
 variable "enable_scheduler" {
   type        = bool
   default     = false
