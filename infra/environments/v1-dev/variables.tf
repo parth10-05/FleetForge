@@ -171,3 +171,13 @@ check "qemu_count_requires_feature" {
     error_message = "A nonzero qemu_instance_count requires enable_qemu=true."
   }
 }
+
+check "runtime_requires_immutable_images" {
+  assert {
+    condition = !var.enable_runtime || (
+      can(regex("^.+@sha256:[0-9a-f]{64}$", var.api_image)) &&
+      can(regex("^.+@sha256:[0-9a-f]{64}$", var.worker_image))
+    )
+    error_message = "An enabled runtime requires API and worker image references pinned to SHA-256 digests."
+  }
+}
