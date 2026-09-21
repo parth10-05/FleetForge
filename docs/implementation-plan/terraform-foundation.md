@@ -154,14 +154,14 @@ separation makes an untrusted PR incapable of obtaining a cloud session.
 
 | Test ID | Mechanism | Expected result |
 | --- | --- | --- |
-| `V1P00-PLAN-01` | Terraform test plus Conftest fixture with a non-`ps-` name | Fails with ownership/naming violation. |
-| `V1P00-PLAN-02` | One fixture per forbidden service family | Each plan is denied. |
-| `V1P00-PLAN-03` | Non-zero scale without expiry fixture | Denied before a provider call. |
-| `V1P00-PLAN-04` | IPv4 and IPv6 public-ingress fixtures | Denied. |
-| `V1P00-PLAN-05` | Default `terraform test` | Passes while planning zero runtime resources. |
-| `V1P00-PLAN-06` | Invalid/too-distant expiry values | Terraform variable validation fails. |
-| `V1P00-SECRET-01` | Canary fixture and repository secret scan | Canary fails scanning; normal examples remain clean. |
-| `V1P00-CI-01` | Workflow inspection/test | Workflow has `contents: read` only, no `id-token`, no environment, apply, or destroy step. |
+| `INFRA-PLAN-01` | Terraform test plus Conftest fixture with a non-`ps-` name | Fails with ownership/naming violation. |
+| `INFRA-PLAN-02` | One fixture per forbidden service family | Each plan is denied. |
+| `INFRA-PLAN-03` | Non-zero scale without expiry fixture | Denied before a provider call. |
+| `INFRA-PLAN-04` | IPv4 and IPv6 public-ingress fixtures | Denied. |
+| `INFRA-PLAN-05` | Default `terraform test` | Passes while planning zero runtime resources. |
+| `INFRA-PLAN-06` | Invalid/too-distant expiry values | Terraform variable validation fails. |
+| `INFRA-SECRET-01` | Canary fixture and repository secret scan | Canary fails scanning; normal examples remain clean. |
+| `INFRA-CI-01` | Workflow inspection/test | Workflow has `contents: read` only, no `id-token`, no environment, apply, or destroy step. |
 
 Local verification is limited to `terraform fmt -check`, backend-free init,
 `terraform validate`, `terraform test`, TFLint, the chosen IaC scanner,
