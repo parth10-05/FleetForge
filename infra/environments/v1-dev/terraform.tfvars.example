@@ -1,0 +1,10 @@
+# Synthetic example only. Do not copy a real account ID, secret, DSN, or
+# backend configuration into this repository.
+owner               = "ps"
+region              = "us-east-1"
+environment         = "v1-dev"
+enable_runtime      = false
+enable_scheduler    = false
+enable_qemu         = false
+enable_cognito_google = false
+qemu_instance_count = 0

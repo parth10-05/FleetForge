@@ -21,11 +21,25 @@ web/coverage/
 *.p12
 *.pfx
 
-# Terraform and cloud tooling
+# Terraform and cloud tooling. Keep reviewed lock files and named examples.
+.terraform/
 *.tfstate
 *.tfstate.*
-.terraform/
+*.tfplan
+*.tfplan.json
 crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+backend.hcl
+backend.hcl.*
+*.auto.tfvars
+*.auto.tfvars.json
+terraform.tfvars
+terraform.tfvars.json
+infra/evidence-scratch/
 
 # Generated evidence and local simulator state
 docs/evidence/generated/

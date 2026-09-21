@@ -1,0 +1,9 @@
+{
+  "resource_changes": [
+    {
+      "address": "aws_nat_gateway.forbidden",
+      "type": "aws_nat_gateway",
+      "change": {"after": {"name": "ps-fleetforge-v1-dev-forbidden", "tags": {}}}
+    }
+  ]
+}

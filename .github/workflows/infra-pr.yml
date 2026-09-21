@@ -1,0 +1,70 @@
+name: IaC static verification
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - 'scripts/infra/**'
+      - 'docs/evidence/infrastructure/**'
+      - '.github/workflows/infra-pr.yml'
+      - '.tflint.hcl'
+      - 'trivy.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.16.3
+          terraform_wrapper: false
+      - uses: terraform-linters/setup-tflint@90f302c255ef959cbfb4bd10581afecdb7ece3e6 # v4.1.1
+      - name: Install Conftest 0.63.0
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/open-policy-agent/conftest/releases/download/v0.63.0/conftest_0.63.0_Linux_x86_64.tar.gz \
+            --output /tmp/conftest.tar.gz
+          tar -xzf /tmp/conftest.tar.gz -C /tmp conftest
+          sudo install -m 0755 /tmp/conftest /usr/local/bin/conftest
+      - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: config
+          scan-ref: infra
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+      - name: Verify Terraform formatting
+        run: terraform fmt -check -recursive infra
+      - name: Initialize without a backend
+        working-directory: infra/environments/v1-dev
+        run: terraform init -backend=false
+      - name: Validate the plan-only root
+        working-directory: infra/environments/v1-dev
+        run: terraform validate
+      - name: Test safe defaults
+        working-directory: infra/environments/v1-dev
+        run: terraform test
+      - name: Lint Terraform
+        working-directory: infra/environments/v1-dev
+        run: tflint --init && tflint --recursive
+      - name: Enforce IaC deny policies
+        run: |
+          conftest test --all-namespaces --policy infra/policy infra/policy/testdata/safe-plan.json
+          if conftest test --all-namespaces --policy infra/policy infra/policy/testdata/forbidden-nat-plan.json; then
+            echo 'forbidden NAT fixture was accepted'
+            exit 1
+          fi
+          if conftest test --all-namespaces --policy infra/policy infra/policy/testdata/public-ingress-plan.json; then
+            echo 'public ingress fixture was accepted'
+            exit 1
+          fi
+      - name: Assert workflow cannot obtain a cloud identity
+        run: |
+          if grep -R --line-number --fixed-strings 'id-token: write' .github/workflows/infra-pr.yml; then exit 1; fi
+          if grep -R --line-number --regexp='terraform \(apply\|destroy\)' .github/workflows/infra-pr.yml; then exit 1; fi
+      - name: Validate synthetic preflight fixture
+        shell: pwsh
+        run: scripts/infra/preflight.ps1 -FixturePath docs/evidence/infrastructure/account-preflight.example.json
