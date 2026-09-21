@@ -42,8 +42,8 @@ resource "aws_ecs_task_definition" "api" {
   memory                   = "512"
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = var.api_task_role_arn
-  container_definitions = jsonencode([{ name = "api", image = var.api_image, essential = true, logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.runtime.name, awslogs-region = var.region, awslogs-stream-prefix = "api" } } }])
-  tags = var.tags
+  container_definitions    = jsonencode([{ name = "api", image = var.api_image, essential = true, logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.runtime.name, awslogs-region = var.region, awslogs-stream-prefix = "api" } } }])
+  tags                     = var.tags
 }
 
 resource "aws_ecs_task_definition" "worker" {
@@ -54,6 +54,6 @@ resource "aws_ecs_task_definition" "worker" {
   memory                   = "512"
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = var.worker_task_role_arn
-  container_definitions = jsonencode([{ name = "worker", image = var.worker_image, essential = true, logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.runtime.name, awslogs-region = var.region, awslogs-stream-prefix = "worker" } } }])
-  tags = var.tags
+  container_definitions    = jsonencode([{ name = "worker", image = var.worker_image, essential = true, logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.runtime.name, awslogs-region = var.region, awslogs-stream-prefix = "worker" } } }])
+  tags                     = var.tags
 }
