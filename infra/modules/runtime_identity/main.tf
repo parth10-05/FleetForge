@@ -21,6 +21,12 @@ resource "aws_iam_role" "worker" {
   tags               = var.tags
 }
 
+resource "aws_iam_role" "migration" {
+  name               = "${var.name_prefix}migration-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
+  tags               = var.tags
+}
+
 resource "aws_iam_role_policy" "worker_queue" {
   name = "operation-queue-consumer"
   role = aws_iam_role.worker.id
