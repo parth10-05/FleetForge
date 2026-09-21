@@ -25,6 +25,15 @@ resource "aws_iam_role_policy" "run_task" {
       Effect   = "Allow"
       Action   = ["ecs:RunTask"]
       Resource = var.task_definition_arn
+    }, {
+      Effect   = "Allow"
+      Action   = ["iam:PassRole"]
+      Resource = var.task_role_arns
+      Condition = {
+        StringEquals = {
+          "iam:PassedToService" = "ecs-tasks.amazonaws.com"
+        }
+      }
     }]
   })
 }
