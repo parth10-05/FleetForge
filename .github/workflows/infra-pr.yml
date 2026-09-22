@@ -63,8 +63,8 @@ jobs:
           fi
       - name: Assert workflow cannot obtain a cloud identity
         run: |
-          if grep -R --line-number --fixed-strings 'id-token: write' .github/workflows/infra-pr.yml; then exit 1; fi
-          if grep -R --line-number --regexp='terraform \(apply\|destroy\)' .github/workflows/infra-pr.yml; then exit 1; fi
+          if grep -nE '^[[:space:]]*id-token:[[:space:]]*write[[:space:]]*$' .github/workflows/infra-pr.yml; then exit 1; fi
+          if grep -nE 'terraform[[:space:]]+(apply|destroy)([[:space:]]|$)' .github/workflows/infra-pr.yml; then exit 1; fi
       - name: Validate synthetic preflight fixture
         shell: pwsh
         run: scripts/infra/preflight.ps1 -FixturePath docs/evidence/infrastructure/account-preflight.example.json
