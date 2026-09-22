@@ -1,6 +1,0 @@
-misconfiguration:
-  scanners:
-    - misconfig
-  severity:
-    - HIGH
-    - CRITICAL
