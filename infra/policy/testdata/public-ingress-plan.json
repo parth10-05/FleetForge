@@ -1,0 +1,9 @@
+{
+  "resource_changes": [
+    {
+      "address": "aws_security_group_rule.public",
+      "type": "aws_security_group_rule",
+      "change": {"after": {"type": "ingress", "cidr_blocks": ["0.0.0.0/0"]}}
+    }
+  ]
+}
