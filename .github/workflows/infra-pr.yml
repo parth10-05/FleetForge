@@ -33,6 +33,7 @@ jobs:
         with:
           scan-type: config
           scan-ref: infra
+          version: v0.74.0
           severity: HIGH,CRITICAL
           exit-code: '1'
       - name: Verify Terraform formatting
