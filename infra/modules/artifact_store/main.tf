@@ -3,6 +3,18 @@ resource "aws_s3_bucket" "artifact" {
   tags   = var.tags
 }
 
+resource "aws_kms_key" "artifact" {
+  description             = "Encrypts FleetForge artifact objects."
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+  tags                    = var.tags
+}
+
+resource "aws_kms_alias" "artifact" {
+  name          = "alias/${var.bucket_name}-artifacts"
+  target_key_id = aws_kms_key.artifact.key_id
+}
+
 resource "aws_s3_bucket_public_access_block" "artifact" {
   bucket                  = aws_s3_bucket.artifact.id
   block_public_acls       = true
@@ -24,7 +36,10 @@ resource "aws_s3_bucket_versioning" "artifact" {
 resource "aws_s3_bucket_server_side_encryption_configuration" "artifact" {
   bucket = aws_s3_bucket.artifact.id
   rule {
-    apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.artifact.arn
+      sse_algorithm     = "aws:kms"
+    }
     bucket_key_enabled = true
   }
 }
