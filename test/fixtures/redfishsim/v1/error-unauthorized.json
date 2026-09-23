@@ -1,0 +1,1 @@
+{"route":"*","method":"*","status":401,"schema":"redfish-schema-v1.json","nonMutating":true,"fields":{"standard":["error.code","error.message"],"extension":[],"adminOnly":[]},"body":{"error":{"code":"Base.1.0.NoValidSession","message":"Target authentication is required."}}}

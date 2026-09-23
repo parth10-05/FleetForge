@@ -1,0 +1,1 @@
+{"route":"/virtual-bmcs/alpha-001/redfish/v1/Chassis/1","method":"GET","status":200,"schema":"Chassis.v1_9_9.json","fields":{"standard":["@odata.type","Id","Name","Status"],"extension":[],"adminOnly":[]},"body":{"@odata.type":"#Chassis.v1_9_9.Chassis","Id":"1","Name":"Synthetic Chassis","Status":{"State":"Enabled","Health":"OK"}}}

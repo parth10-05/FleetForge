@@ -1,0 +1,1 @@
+{"route":"/virtual-bmcs/alpha-001/redfish/v1/UpdateService/update","method":"POST","status":413,"schema":"redfish-schema-v1.json","nonMutating":true,"fields":{"standard":["error.code","error.message"],"extension":[],"adminOnly":[]},"body":{"error":{"code":"Base.1.0.RequestEntityTooLarge","message":"The synthetic artifact exceeds the configured request limit."}}}

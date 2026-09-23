@@ -1,0 +1,1 @@
+{"route":"/virtual-bmcs/alpha-001/redfish/v1/EventService/Subscriptions","method":"GET","status":200,"schema":"EventDestinationCollection.json","fields":{"standard":["Members","Members@odata.count"],"extension":[],"adminOnly":[]},"body":{"Members":[],"Members@odata.count":0}}

@@ -1,19 +1,18 @@
 # Supported resource matrix
 
-Status: **synthetic contract refreeze approved; exact selected fields and
-fixtures must be completed before route implementation.** This matrix defines
+Status: **frozen before route implementation.** This matrix defines
 the repository-owned target boundary and is not an external compatibility
 claim.
 
 | Surface | Pinned DMTF source/version | Selected fields | Simulator extension | Status |
 | --- | --- | --- | --- | --- |
-| Service Root | Pending Run 01 pin | Links to supported collections/services | Target prefix for multi-target process | Refreeze required |
-| Manager, System, Chassis identity | Pending Run 01 pin | Stable identity, reachability, status, health | Deterministic synthetic model/family values | Refreeze required |
-| UpdateService discovery/action | Pending Run 01 pin | Service state, inventory link, `HttpPushUri` | Digest/version/attempt headers for synthetic artifacts | Refreeze required |
-| TaskService | Pending Run 01 pin | Task state/status/percent/messages and collection | Deterministic operation correlation fingerprint | Refreeze required |
-| Software/Firmware Inventory | Pending Run 01 pin | Current version, updateable flag, state, health | Scenario-declared expected synthetic version | Refreeze required |
-| EventService | Pending Run 01 pin | Subscription and event payload fields consumed by adapter | Deterministic loss/duplicate/reorder controls | Refreeze required |
-| Authentication | HTTP Basic boundary | `401` challenge and authenticated requests | Local credential injection; separate admin credential | Refreeze required |
+| Service Root | ServiceRoot.v1_9_4 | Links to supported collections/services | Target prefix for multi-target process | `service-root.json` |
+| Manager, System, Chassis identity | Manager.v1_9_8, ComputerSystem.v1_9_9, Chassis.v1_9_9 | Stable identity, reachability, status, health | Deterministic synthetic model/family values | `manager.json`, `system.json`, `chassis-1.json` |
+| UpdateService discovery/action | UpdateService.v1_9_8 | Service state, inventory link, `HttpPushUri` | Digest/version/attempt headers for synthetic artifacts | `update-service.json`, `update-accepted.json` |
+| TaskService | TaskService.v1_3_0, Task.v1_7_4 | Task state/status/percent/messages and collection | Deterministic operation correlation fingerprint | `task-service.json`, `task.json` |
+| Software/Firmware Inventory | SoftwareInventory.v1_9_2 | Current version, updateable flag, state, health | Scenario-declared expected synthetic version | `firmware-inventory.json`, `firmware-item.json` |
+| EventService | EventService.v1_9_4, EventDestination.v1_9_9 | Subscription and event payload fields consumed by adapter | Deterministic loss/duplicate/reorder controls | `event-service.json`, `subscription-created.json` |
+| Authentication | HTTP Basic boundary | `401` challenge and authenticated requests | Local credential injection; separate admin credential | `error-unauthorized.json` |
 
 Before any Redfish handler is implemented, each row must identify:
 
