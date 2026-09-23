@@ -1,17 +1,19 @@
-# Deferred simulator and Phase 04 work
+# Remaining simulator and Phase 04 work
 
-The following claims and work remain deferred until the QEMU/OpenBMC capability
-spike supplies a redacted fixture and ADR-039/ADR-032 are accepted for one
-exact update route:
+The external capability gate has been removed. The following work remains
+ordered behind the accepted synthetic contract fixtures and recovery design:
 
-- Redfish listener routes, resource properties, schema contracts, update media
-  type, task shape, firmware inventory evidence, and authentication subset.
+- Redfish-shaped listener routes, selected properties, schema contracts,
+  update media type, task shape, inventory evidence, and Basic authentication.
 - Any accepted simulated firmware update, reboot lifecycle, callback protocol,
   or update-specific fault injection.
-- QEMU image provenance, reversible update, recovery, and compatibility proof.
-- EC2 deployment/start/stop, AWS resource provisioning, or cloud smoke tests.
+- Pinned DMTF schema/fixture provenance, synthetic update replay, recovery, and
+  independent-oracle proof.
+- Optional container deployment and local/CI smoke tests; no simulator cloud VM
+  is required.
 - RF-F09, RF-F12, RF-F13, RF-F14, RF-F15, full 1,000-target measurement, and
   Phase 04 load proof.
 
-Preparation may proceed only where it cannot invent the missing route. A
-simulator-only test cannot establish vendor, QEMU, or physical-device behavior.
+Implementation proceeds only from the accepted contract and canonical
+fixtures. Virtual-BMC evidence cannot establish vendor, external-device, or
+complete Redfish behavior.

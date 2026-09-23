@@ -9,7 +9,9 @@ This is the flagship phase. It should receive the strongest review and fault tes
 ## Entry criteria
 
 - Phases 04–08 pass.
-- The early QEMU capability spike has frozen one OpenBMC update mechanism, apply-time behavior, artifact data path, image format/size, Redfish resources, task/inventory evidence, and recovery procedure.
+- The virtual-BMC contract spike has frozen one synthetic update mechanism,
+  timing behavior, artifact data path, body limits, selected Redfish-shaped
+  resources, task/inventory evidence, faults, and recovery procedure.
 - Simulator supports pre-accept and post-accept connection faults, task loss, reboot, contradictory success, and health failure.
 - Artifact URL/access strategy from worker/device is accepted.
 - `INV-02`, `INV-03`, `INV-05`, `INV-09`, `INV-11`, and `INV-12` have executable tests planned.
@@ -107,7 +109,8 @@ Absence of a task URI, staged image, or version change alone is never proof that
 - [ ] **P09-T03** Capture safe response fingerprint, task URI, message IDs/codes, and timestamps without raw secrets/firmware.
 - [ ] **P09-T04** Define task observation and normalized terminal/progress states.
 - [ ] **P09-T05** Define firmware inventory/activation and health observations with freshness/source.
-- [ ] **P09-T06** Add vendor/OpenBMC strategy boundary; default path remains explicit and contract-tested.
+- [ ] **P09-T06** Add an explicit target-contract strategy boundary; the V1
+  path remains synthetic, narrow, and contract-tested.
 - [ ] **P09-T06A** Implement the frozen artifact transfer mechanism. For push upload, stream the exact S3 version ID through the worker to the BMC with byte/deadline bounds; do not route bytes through the Control API.
 
 ### Precheck
@@ -223,7 +226,7 @@ Instrument the simulator with a per-target accepted-operation journal. Run rando
 - Accepted-operation journal proving no blind duplicates.
 - Example `NEEDS_ATTENTION` operator evidence bundle.
 - Lost-event and task-disappearance recovery transcripts.
-- Known differences between simulator and OpenBMC to be closed in Phase 14.
+- Selected schema limitations, simulator extensions, and external-device behavior that remains untested.
 
 ## Exit criteria
 
@@ -240,4 +243,5 @@ Instrument the simulator with a per-target accepted-operation journal. Run rando
 
 - Stop immediately if any crash schedule produces two accepted operations without a persisted proof-of-absence retry.
 - Disable update submission and retain inventory/preflight mode if ambiguity handling is incomplete.
-- Do not weaken safety to make QEMU behavior convenient; add a target-specific evidence strategy or retain manual attention.
+- Do not weaken safety to make a synthetic scenario convenient; add explicit
+  evidence or retain manual attention.

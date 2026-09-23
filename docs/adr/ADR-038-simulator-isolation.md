@@ -1,24 +1,32 @@
-# ADR-038 — Simulator isolation and single-owner runtime
+# ADR-038 — Virtual-BMC isolation and single-owner runtime
 
 ## Status
 
-Accepted for code preparation; live capability proof is pending.
+Accepted.
 
 ## Decision
 
-The QEMU simulator runs only in a dedicated network with no inbound security
-group rule. Operator access is Session Manager only. The simulator has an
-independent EC2 role and cannot receive real-target credentials or production
-routes. Instance count defaults to zero and the environment may contain at
-most one simulator instance. A retained simulator run is owned by exactly one
-process. A partial, corrupt, forked, or multiply owned run is not a clean BMC
-and must fail readiness until it is explicitly recovered or invalidated.
+The virtual-BMC backend runs locally or as an explicitly deployed simulator
+role. Local development binds its Redfish-shaped, admin, and health listeners
+to loopback by default. A deployed simulator uses a separate service identity,
+network policy, state location, and credentials from the API and worker roles.
+It cannot receive external-target credentials or unrestricted destination
+routes.
+
+A retained simulator run is owned by exactly one process. A partial, corrupt,
+forked, or multiply owned run is not valid target truth and must fail readiness
+until it is explicitly recovered or invalidated. Admin reset, logical-time,
+fault, and journal-export controls use a separate listener and credential and
+are never reachable through the Redfish-shaped target surface.
 
 ## Consequences
 
-Any future need for target allowlisting, inbound traffic, a persistent host, or
-additional instances requires a new review and a measured cost record.
+One process may host many virtual targets, but only one process may own a
+retained run. HTTP parsing and callbacks may be concurrent while one bounded
+engine command stream owns mutable target state. Callback destinations are
+allowlisted, redirects are disabled, and worker/queue/connection counts are
+bounded.
 
-This decision prepares only the simulator isolation boundary. It does not
-prove an AWS network, EC2 instance, QEMU image, firmware-update route, or
-physical-device behavior.
+This decision proves only the repository-owned synthetic target boundary. It
+does not prove vendor, external-device, production-network, or complete
+Redfish behavior.

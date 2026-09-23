@@ -155,9 +155,10 @@ Test-first does not require writing every assertion before any design. It requir
 ## Cloud and laptop contract
 
 - The laptop may run the editor, browser, frontend, lightweight Go processes, and focused unit tests.
-- PostgreSQL, queues, object storage, telemetry backend, and the default simulator VM remain cloud-hosted.
+- PostgreSQL, queues, object storage, and the telemetry backend remain cloud-hosted when their phases require them.
 - GitHub-hosted CI may run ephemeral PostgreSQL containers; this does not burden the laptop.
-- OpenBMC image builds use a remote environment or prebuilt image. The laptop is not a supported full Yocto builder.
+- The repository-owned virtual-BMC backend runs locally or in its release
+  container; no specialized firmware-image build is part of the project.
 - Every billable cloud resource has an owner, maximum instance/dispatch/storage setting, budget alert, retention rule, and teardown path.
 - Free-tier limits are rechecked before the infrastructure phase and recorded with date/source.
 - Free development resources are session-based where periodic work would otherwise prevent scale-to-zero. Retained demo state has an explicit paid budget and restore window.

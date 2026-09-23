@@ -1,19 +1,20 @@
 # Deterministic simulator evidence
 
 This directory contains redacted, reproducible simulator evidence and contract
-templates. It contains no QEMU response, credential, session token, firmware
-image, signed URL, real endpoint, or AWS account data.
+templates. It contains no live credential, session token, executable firmware
+image, signed URL, external endpoint, or AWS account data.
 
-Current status: **preparation only**. The pinned QEMU/OpenBMC capability
-fixture and accepted update route have not been supplied, so this directory
-does not establish Redfish/OpenBMC compatibility or a firmware-update claim.
+Current status: **route-independent preparation implemented; synthetic
+contract refreeze approved.** Canonical route fixtures and the accepted update
+path must now be completed. This directory establishes only repository-owned
+virtual-target behavior and no external-device compatibility claim.
 
 | Artifact | Purpose | Current status |
 | --- | --- | --- |
-| `supported-resource-matrix.md` | Route/property contract and source classification | Blocked pending fixture |
-| `fixture-provenance.md` | Redacted fixture identity and license record | Blocked pending selected image |
+| `supported-resource-matrix.md` | Route/property contract and source classification | Refreeze required |
+| `fixture-provenance.md` | Selected schema and canonical fixture provenance | Refreeze required |
 | `scenario-and-fault-catalog.md` | Simulator-only scenario and fault boundary | Prepared |
-| `deferred-phase04-work.md` | Explicitly deferred simulator and Phase 04 claims | Active |
+| `deferred-phase04-work.md` | Remaining route-specific implementation and claim limits | Active |
 | `implementation-status.md` | Requirement-level implementation and blocking record | Current |
 
 Each later evidence report must name the repository commit, Go version,

@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted for deterministic simulator preparation. It does not select a
-Redfish/OpenBMC update route.
+Accepted for the deterministic virtual-BMC backend and its synthetic
+Redfish-shaped update route.
 
 ## Context
 
@@ -29,8 +29,8 @@ unstructured test setup cannot provide a replayable independent journal.
 The simulator can make a reproducibility claim only for a saved scenario,
 seed, initial state, and ordered command trace. It does not claim deterministic
 ordering for unspecified simultaneous network arrivals, full Redfish
-conformance, vendor behavior, or physical-device behavior.
+conformance, vendor behavior, or external-device behavior.
 
-The future accepted update route remains gated by ADR-039 and ADR-032 evidence.
-No simulator handler may invent that route before the pinned QEMU/OpenBMC
-capability fixture exists.
+ADR-039 and ADR-032 freeze the accepted synthetic update route. No simulator
+handler may invent behavior outside that contract and its supported-resource
+matrix.

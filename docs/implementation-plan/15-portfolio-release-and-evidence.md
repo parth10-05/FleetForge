@@ -9,7 +9,7 @@ Package FleetForge as a reproducible, technically honest portfolio project that 
 - Phases 01–14 pass or any unresolved external blocker is explicitly accepted and scoped.
 - Public/private data, credentials, licenses, and artifact redistribution rights are reviewed.
 - Stable demo environment or reproducible on-demand deployment exists.
-- Load/fault/restore/QEMU reports are finalized.
+- Load, parallel-efficiency, fault, restore, and deterministic-replay reports are finalized.
 
 ## Non-goals
 
@@ -27,7 +27,7 @@ flowchart TD
   Design --> Implementation[Focused production-grade implementation]
   Implementation --> Tests[Invariant, contract, integration, fault tests]
   Tests --> Operations[CI/CD, traces, dashboards, runbooks, restore]
-  Operations --> Measurement[Load, bottleneck, cost, QEMU evidence]
+  Operations --> Measurement[Load, parallelism, bottleneck, cost, and replay evidence]
   Measurement --> Narrative[Demo, README, case study, résumé claims]
 ```
 
@@ -44,7 +44,7 @@ flowchart TD
 | Load report | What scale was measured, in what environment, with what bottleneck? |
 | Chaos/fault report | What failures were injected and what recovered? |
 | Restore report | Can durable state be reconstructed safely? |
-| QEMU/OpenBMC report | What real protocol/device behavior was tested? |
+| Virtual-BMC contract report | Which synthetic routes, fields, extensions, faults, and limits were tested? |
 | Security model | How are auth, secrets, SSRF, artifact integrity, and audit handled? |
 | Operations guide | Which SLOs, alerts, dashboards, and runbooks exist? |
 | Limitations | What does the project not prove? |
@@ -61,7 +61,7 @@ The portfolio demo should remain under approximately 10–15 minutes and expose 
 6. Inject post-accept connection loss; show one accepted operation and adoption/attention rather than blind retry.
 7. Inject a canary-wide bad result; show the pause commit blocks new admission and display any operations admitted before that boundary as residual exposure.
 8. Show audit/decision replay, SLO dashboard, fault test evidence, and declared load result.
-9. Briefly show the QEMU/OpenBMC compatibility record.
+9. Show the independent acceptance journal, deterministic replay record, and serial-versus-parallel measurement.
 10. End with limitations and what would change for vendor fleets/multi-region operation.
 
 ## Micro-task checklist
@@ -78,7 +78,10 @@ The portfolio demo should remain under approximately 10–15 minutes and expose 
 
 - [ ] **P15-T06** Write outcome-first README with problem, demo, architecture, difficult invariants, quick start, evidence, limitations.
 - [ ] **P15-T07** Include architecture and state/ambiguity diagrams rendered from Mermaid source.
-- [ ] **P15-T08** Explain why Go, Neon PostgreSQL, Amazon SQS Standard plus Amazon EventBridge Scheduler, the persistent simulator VM, and QEMU were selected; state that no event broker is used in v1 because it carried no correctness-critical role.
+- [ ] **P15-T08** Explain why Go, Neon PostgreSQL, Amazon SQS Standard plus
+  Amazon EventBridge Scheduler, and the local/containerized virtual-BMC backend
+  were selected; state that no event broker is used in v1 because it carried
+  no correctness-critical role.
 - [ ] **P15-T09** Explain modular-monolith/deployable-role choice and rejected Kubernetes/Kafka/Temporal alternatives.
 - [ ] **P15-T10** Link the approved RFC and implementation-plan index.
 
@@ -104,7 +107,9 @@ The portfolio demo should remain under approximately 10–15 minutes and expose 
 - [ ] **P15-T22** Explain the ambiguous side-effect impossibility boundary and conservative resolution.
 - [ ] **P15-T23** Explain transactional outbox, generic due-work repair, delivery generations, short work leases, durable physical-operation reservations, submission admission epochs, target enrollment, and failure-domain budgets with measured examples.
 - [ ] **P15-T24** Explain first bottleneck and why unused scale technologies were intentionally excluded.
-- [ ] **P15-T25** Explain simulator-vs-QEMU tradeoff and validation limitations.
+- [ ] **P15-T25** Explain the synthetic target boundary, why it supports
+  deterministic fault/scale proof, and why external-device behavior remains
+  outside the evidence.
 - [ ] **P15-T26** Include one postmortem from a real fault discovered during implementation.
 
 ### Operations/security presentation
@@ -148,7 +153,7 @@ Only use this pattern after every clause is evidenced. Replace numbers/results w
 | Secret/privacy scan | No credential/token/private target/user data in publishable content/history |
 | License/provenance | All redistributed assets permitted/attributed |
 | Hosted demo | Health, auth, budgets, telemetry, reset/teardown verified |
-| QEMU claim review | Wording matches the pinned image and exact update/task/reboot/version subset actually exercised; simulator evidence is labeled separately |
+| Device-boundary claim review | Wording matches the exact synthetic update/task/reboot/version subset exercised and explicitly excludes external-device compatibility |
 | Resume claim review | No unsupported metric or result |
 
 ## Exit criteria
@@ -158,7 +163,7 @@ Only use this pattern after every clause is evidenced. Replace numbers/results w
 - Demo covers normal, lost-event, ambiguity, and canary-stop scenarios.
 - Evidence manifest supports every important claim.
 - Architecture, tests, CI/CD, observability, security, scale, cost, and limitations are visible.
-- QEMU/OpenBMC claim is precise and sourced.
+- The virtual-BMC claim is precise, measured, sourced, and limited to the accepted synthetic contract.
 - External reviewer feedback is incorporated or documented.
 - Project owner approves portfolio publication.
 

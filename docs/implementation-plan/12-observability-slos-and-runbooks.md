@@ -46,7 +46,7 @@ Correlation fields belong primarily in logs/traces: correlation ID, causation ID
 | SLO-02 | Runnable due-work start delay | 99% within 60 s in staging profile | Eligibility excludes paused/capacity-blocked work by explicit rule; every eligible item, including never-started items, remains in the denominator |
 | SLO-03 | Duplicate destructive submissions | Zero in deterministic fault suite, including stale-live-worker and false-proof-of-absence schedules | Independent device journal is the oracle; FleetForge state cannot waive a duplicate |
 | SLO-04 | Audit completeness | 100% lifecycle mutations with required evidence in tests | Audit unavailable causes mutation failure |
-| SLO-05 | Reconciliation freshness | Page if oldest overdue target > 5 min in demo production | Threshold revisited from measured QEMU behavior |
+| SLO-05 | Reconciliation freshness | Page if oldest overdue target > 5 min in demo production | Threshold revisited from measured virtual-target workloads |
 | SLO-06 | Outbox publication health | Alert if oldest unpublished > 2 min | Workflow remains durable in DB |
 | SLO-07 | Restore readiness | Isolated restore passes integrity checks | Required before portfolio-complete label |
 
@@ -59,8 +59,8 @@ Targets remain marked `design target` until measured. Published evidence states 
 3. **Device/Redfish:** request latency/error class, task/reboot/verification age, capability/reachability, correlated faults.
 4. **Persistence:** pool use/wait, transaction latency/conflicts/deadlocks, outbox age, integrity failures.
 5. **API/web:** route latency/errors, auth/rate limits, SSE connections/gaps, client stale mode.
-6. **Cost/capacity:** ECS Fargate instances/time, simulator/QEMU VM time, queue/scheduler operations, database CU/storage, object bytes, telemetry usage.
-7. **Test/demo:** simulator seed/faults, accepted-operation counts, load profile, QEMU target status.
+6. **Cost/capacity:** ECS Fargate instances/time, simulator container/process resources, queue/scheduler operations, database CU/storage, object bytes, telemetry usage.
+7. **Test/demo:** simulator seed/faults, accepted-operation counts, load profile, virtual-target run status.
 
 ## Alert policy
 

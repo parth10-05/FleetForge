@@ -4,7 +4,10 @@
 
 v1 delivers a small, authenticated, API-driven FleetForge demonstration: an operator registers deterministic simulated targets, registers a verified synthetic artifact, freezes a canary-and-one-wave campaign, starts it through durable queue work, and observes success or a conservative `NEEDS_ATTENTION` outcome in an immutable audit timeline.
 
-The control plane runs against PostgreSQL, SQS Standard, S3, AWS Secrets Manager, Cognito, and an EC2-hosted deterministic Redfish simulator in a cost-capped development environment. It deliberately supports a small seeded demonstration fleet, not a scale claim.
+The control plane uses PostgreSQL, SQS Standard, S3, AWS Secrets Manager, and
+Cognito when the application stack is deployed. Its deterministic virtual-BMC
+backend runs locally or as a container and does not require a cloud VM. V1
+deliberately supports a small seeded demonstration fleet, not a scale claim.
 
 ```mermaid
 flowchart LR
@@ -24,7 +27,7 @@ flowchart LR
 | Included | Deferred to later version |
 | --- | --- |
 | One AWS development environment with strict budget/teardown controls. | Staging/demo-production promotion and rollback rehearsal. |
-| One frozen QEMU/OpenBMC capability decision before simulator contracts. | QEMU firmware update proof. |
+| One frozen synthetic virtual-BMC contract before route implementation. | External-device and vendor compatibility proof. |
 | Simulator scenarios for a small fleet, healthy campaign, lost event, post-accept disconnect, and canary stop. | 1,000-target load/soak, broad fault matrix, and vendor claims. |
 | Target discovery/preflight, immutable synthetic artifact identity, deterministic plan, queue-driven work, one supported firmware update path, and reconciliation. | Full selector language, signature formats, vendor extensions, and all long-tail policy options. |
 | Cognito-authenticated API/CLI demo with target, artifact, campaign, attention, and audit endpoints. | Browser console, SSE, complete OpenAPI surface, and full Phase 10 authorization matrix. |
@@ -35,7 +38,7 @@ v1 must never take a retry shortcut after a possibly accepted update request. Th
 
 | v1 phase | Source-phase mapping | Gate |
 | --- | --- | --- |
-| [V1-P00](00-bootstrap-and-capability-spike.md) | Phase 13-B01–B06 and Pre-04 | Provider boundaries and one QEMU update path are frozen. |
+| [V1-P00](00-bootstrap-and-capability-spike.md) | Phase 13-B01–B06 and Pre-04 | Provider boundaries and one synthetic update contract are frozen. |
 | [V1-P01](01-deterministic-simulator.md) | Phase 04 | The simulator is deterministic and exposes duplicate requests independently. |
 | [V1-P02](02-inventory-and-artifact-trust.md) | Focused Phase 05 + Phase 06 | Target snapshot and exact artifact identity are immutable. |
 | [V1-P03](03-campaign-planning.md) | Focused Phase 07 | Deterministic canary/one-wave plan can become `READY`. |

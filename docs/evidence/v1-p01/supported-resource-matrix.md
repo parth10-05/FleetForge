@@ -1,27 +1,29 @@
 # Supported resource matrix
 
-Status: **blocked pending the selected QEMU/OpenBMC capability fixture and an
-accepted update contract.** This matrix is deliberately not a guessed Redfish
-implementation contract.
+Status: **synthetic contract refreeze approved; exact selected fields and
+fixtures must be completed before route implementation.** This matrix defines
+the repository-owned target boundary and is not an external compatibility
+claim.
 
-| Surface | Standard source/version | Pinned QEMU fixture field | Synthetic contract | Status |
+| Surface | Pinned DMTF source/version | Selected fields | Simulator extension | Status |
 | --- | --- | --- | --- | --- |
-| Service Root | Pending recorded DMTF release | Pending | No route until fixture comparison | Blocked |
-| Manager, System, Chassis identity | Pending recorded DMTF release | Pending | No properties frozen | Blocked |
-| UpdateService discovery/action | Pending recorded DMTF release | Pending route, media type, and apply behavior | No request accepted | Blocked |
-| TaskService | Pending recorded DMTF release | Pending task representation/lifecycle | No task representation frozen | Blocked |
-| Software/Firmware Inventory | Pending recorded DMTF release | Pending inventory path/version fields | No inventory fields frozen | Blocked |
-| EventService | Pending recorded DMTF release | Pending subscription/callback behavior | Fault catalog only; no HTTP contract | Blocked |
-| Session/auth subset | Pending recorded DMTF release | Pending trust/auth observation | No auth mode frozen | Blocked |
+| Service Root | Pending Run 01 pin | Links to supported collections/services | Target prefix for multi-target process | Refreeze required |
+| Manager, System, Chassis identity | Pending Run 01 pin | Stable identity, reachability, status, health | Deterministic synthetic model/family values | Refreeze required |
+| UpdateService discovery/action | Pending Run 01 pin | Service state, inventory link, `HttpPushUri` | Digest/version/attempt headers for synthetic artifacts | Refreeze required |
+| TaskService | Pending Run 01 pin | Task state/status/percent/messages and collection | Deterministic operation correlation fingerprint | Refreeze required |
+| Software/Firmware Inventory | Pending Run 01 pin | Current version, updateable flag, state, health | Scenario-declared expected synthetic version | Refreeze required |
+| EventService | Pending Run 01 pin | Subscription and event payload fields consumed by adapter | Deterministic loss/duplicate/reorder controls | Refreeze required |
+| Authentication | HTTP Basic boundary | `401` challenge and authenticated requests | Local credential injection; separate admin credential | Refreeze required |
 
 Before any Redfish handler is implemented, each row must identify:
 
-1. the exact DMTF schema/release used for validation;
-2. the separately observed schema/version advertised by the pinned image;
-3. one redacted fixture field or response reference;
-4. whether the field is standard, QEMU/OpenBMC-specific, or simulator-only;
-5. the accepted ADR-039/ADR-032 evidence reference.
+1. the exact DMTF schema/release and downloaded-schema checksum;
+2. every selected field and canonical fixture reference;
+3. whether each value is selected-standard, simulator-extension, or admin-only;
+4. limits, unsupported methods/options, and non-mutating error behavior;
+5. the accepted ADR-032/038/039 evidence reference.
 
-Using the latest DMTF release as a substitute for a missing observed target is
-forbidden. Unsupported resources, actions, methods, media types, and query
-options must remain non-mutating.
+Mutable “latest” references are forbidden after the matrix is frozen.
+Unsupported resources, actions, methods, media types, and query options remain
+non-mutating. Schema validation establishes selected-field discipline, not
+complete Redfish conformance.

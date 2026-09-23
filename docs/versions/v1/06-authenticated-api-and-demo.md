@@ -16,7 +16,9 @@ Expose only the operator flows required for the v1 demo through a versioned, Cog
 - [ ] **V1-P06-T08** Ensure successful mutations produce same-transaction lifecycle audit evidence and denied high-risk attempts produce safe audit metadata where required.
 - [ ] **V1-P06-T09** Create a seed-driven CLI/demo script that obtains a test identity, provisions only synthetic credential references, runs the v1 demonstration, exports redacted audit/journal evidence, and tears down synthetic state safely.
 - [ ] **V1-P06-T10** Add a v1 evidence record with commit SHA, scenario seed, exact API/image/schema/IaC versions, hosted CI links, test outputs, cloud cost snapshot, and limitations.
-- [ ] **V1-P06-T11** Add README instructions for an independent developer to run the safe simulator demo; do not publish credentials, signed URLs, or QEMU administration paths.
+- [ ] **V1-P06-T11** Add README instructions for an independent developer to
+  run the safe local simulator demo; do not publish credentials, signed URLs,
+  admin secrets, or retained-run control paths.
 
 ## Required proof
 
@@ -27,4 +29,7 @@ Expose only the operator flows required for the v1 demo through a versioned, Cog
 
 ## v1 release gate
 
-All v1 phase gates and applicable CI tests pass. The release statement says `simulator-backed v1 demonstration` and links to retained evidence. It must not claim browser-console completeness, production deployment, 1,000-target performance, QEMU update compatibility, or vendor support.
+All v1 phase gates and applicable CI tests pass. The release statement says
+`virtual-BMC-backed v1 demonstration` and links to retained evidence. It must
+not claim browser-console completeness, production deployment, 1,000-target
+performance, external-device compatibility, or vendor support.

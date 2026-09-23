@@ -4,7 +4,7 @@
 
 **Gate status:** passed — [Foundation verification #25](https://github.com/parth10-05/FleetForge/actions/runs/35492849379), 2026-09-20, 1m29s.
 This document is not a claim of a provider deployment, queue delivery,
-firmware execution, 1,000-target throughput, or QEMU/OpenBMC compatibility.
+firmware execution, 1,000-target throughput, or virtual-target contract proof.
 
 ## Scope and migration inventory
 
@@ -100,7 +100,7 @@ The generated schema fingerprint compares normalized tables, columns, indexes,
 constraints, and Goose history, not a vendor-specific physical plan.
 
 Neon pooled/direct endpoint smoke, actual provider limits, backup export and
-isolated restore rehearsal, SQS redelivery, Redfish side effects, QEMU/OpenBMC
+isolated restore rehearsal, SQS redelivery, Redfish-shaped side effects, virtual-target
 compatibility, and 1,000-target performance remain pending their named future
 phases. The PostgreSQL CI service is correctness evidence, not Neon evidence.
 

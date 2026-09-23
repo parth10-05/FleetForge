@@ -34,7 +34,7 @@ Terraform against AWS, create a state bucket, or provision a resource.
 - Every `terraform apply`, `destroy`, import, state migration, or backend
   creation.
 - AWS IAM, GitHub OIDC provider/roles, S3, SQS, EventBridge, ECR, ECS, VPC,
-  EC2/QEMU, Cognito, Secrets Manager, Neon, or Google OAuth resources.
+  Cognito, Secrets Manager, Neon, or Google OAuth resources.
 - Cloud credentials, account IDs, billing data, live screenshots, DSNs,
   client secrets, API tokens, and unredacted fixtures.
 - Changes to the merged Phase 03 persistence semantics or its PostgreSQL CI.
@@ -73,17 +73,19 @@ Terraform against AWS, create a state bucket, or provision a resource.
 ### Terraform root
 
 Use one `v1-dev` environment root but no resource module invocation in its
-default configuration. `enable_runtime`, `enable_scheduler`, `enable_qemu`,
-and `enable_cognito_google` are booleans and default to `false`. A future
+default configuration. `enable_runtime`, `enable_scheduler`, and
+`enable_cognito_google` are booleans and default to `false`. The virtual-BMC
+backend has no cloud-infrastructure feature flag because it is locally runnable;
+a future optional container deployment belongs to the runtime module. A future
 module must be conditionally instantiated only after its matching gated run;
 this pass must not add placeholder AWS resources merely to make a plan look
 complete.
 
 The root requires non-empty `owner`, `environment`, `region`, and
 `apply_expires_at` for any non-default feature activation. `apply_expires_at`
-must parse as UTC, be in the future, and be at most seven days ahead. QEMU
-count is constrained to zero or one. Non-zero desired ECS scale must require a
-session expiry, but the actual ECS resource is a later-run concern.
+must parse as UTC, be in the future, and be at most seven days ahead. Non-zero
+desired ECS scale must require a session expiry, but the actual ECS resource is
+a later-run concern.
 
 ### Provider and lock policy
 
@@ -175,7 +177,7 @@ This foundation is complete only when all static checks pass, the default enviro
 remains zero-scale and provider-unauthenticated, no sensitive or account
 material is tracked, and the PR visibly establishes that untrusted PR CI cannot
 obtain AWS credentials. It does **not** prove AWS provider behavior, billing,
-IAM permissions, remote state, QEMU capability, or any runtime resource.
+IAM permissions, remote state, virtual-target behavior, or any runtime resource.
 
 ## Later-run handoff
 

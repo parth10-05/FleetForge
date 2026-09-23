@@ -11,7 +11,9 @@ Promote the v1 simulator demonstration into a controlled staging baseline withou
 - [ ] **V2-P00-T03** Create/review a staging environment separate from disposable development: distinct Neon roles/database, S3 namespace, queues, Cognito app configuration, Secrets Manager references, simulator run store, and cost caps.
 - [ ] **V2-P00-T04** Enforce GitHub Actions OIDC claims, protected environment rules, environment-specific configuration validation, and no-long-lived cloud credential policy.
 - [ ] **V2-P00-T05** Build and publish immutable API, worker, and simulator image digests from CI; record SBOM, vulnerability, license, and provenance inputs before deployment.
-- [ ] **V2-P00-T06** Deploy only synthetic targets/artifacts to staging and prove test/demo routes cannot reach a real BMC endpoint or live credential reference.
+- [ ] **V2-P00-T06** Deploy only synthetic targets/artifacts to staging and
+  prove test/demo routes cannot escape the configured virtual-target origin or
+  resolve a live credential reference.
 - [ ] **V2-P00-T07** Run a baseline healthy and post-accept-ambiguity v1 scenario in staging. Record environment, seed, time window, durable evidence, cost, and known limitations.
 - [ ] **V2-P00-T08** Define v2 compatibility policy for OpenAPI, database expand/migrate/contract, queue envelope versions, event schemas, and simulator scenario versions.
 - [ ] **V2-P00-T09** Add a staging reset/cleanup path that protects audit evidence and referenced object versions while deleting only synthetic test state.

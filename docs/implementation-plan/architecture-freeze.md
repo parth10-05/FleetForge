@@ -9,7 +9,7 @@ This document records the service and correctness decisions approved after the p
 | Need | Frozen choice | Scope and deciding rule |
 |---|---|---|
 | Control API and task handlers | Amazon ECS services on AWS Fargate | Request-driven, stateless roles with minimum instances zero, bounded maximum instances, and connection/concurrency budgets |
-| Deterministic Redfish simulator | One on-demand Amazon EC2 VM | A test run requires one stable owner for mutable virtual-device state, timers, callbacks, and the independent accepted-operation journal |
+| Deterministic virtual-BMC backend | Local/containerized Go simulator role | One process hosts many isolated targets; one stable owner controls mutable state, logical timers, callbacks, and the independent accepted-operation journal |
 | Workflow database | Neon PostgreSQL | Pooled endpoint for application roles; direct endpoint for migrations and transaction-level/session-sensitive administration; Free only for disposable sessions and Launch with a seven-day restore window for retained demo state |
 | Delayed work | Amazon SQS Standard | At-least-once queue wakeups; PostgreSQL remains authoritative, and SQS message IDs or delivery counts are never correctness mechanisms |
 | Repair wakeup | Amazon EventBridge Scheduler | Launches an IAM-authorized bounded publisher/sweeper ECS task; this is the external clock that recovers durable work when worker capacity is zero |
@@ -19,7 +19,7 @@ This document records the service and correctness decisions approved after the p
 | Telemetry | OpenTelemetry to Grafana Cloud Free | One destination, bounded labels, sampling/retention budgets, and retained release evidence outside the live backend |
 | Runtime secrets | AWS Secrets Manager | Worker-task-role least privilege for BMC credentials; a separate administrative CLI provisions and rotates values without passing them through FleetForge API, browser, database, GitHub Actions, or Terraform state |
 | CI deployment identity | GitHub Actions OIDC to AWS IAM | Short-lived credentials restricted by immutable repository/owner identity plus protected ref, workflow, and environment claims |
-| OpenBMC compatibility target | One on-demand EC2 VM running a pinned prebuilt QEMU/OpenBMC image | Capability spike occurs before simulator and adapter contracts freeze; full update proof remains a release gate |
+| Device test boundary | Repository-owned Redfish-shaped virtual-BMC contract | Exact selected DMTF fields and simulator extensions are frozen in ADR-032/039; no external-device compatibility claim is part of the release |
 
 ## Correctness contract
 
@@ -29,7 +29,7 @@ This document records the service and correctness decisions approved after the p
 
 ### Stale workers and ambiguous submissions
 
-An expired lease fences database ownership but cannot cancel or prove the absence of a BMC request. Any expired `SUBMITTING` attempt becomes reconciliation-only. Automatic retry is permitted only after a durable transport result proves that the original request was not written, or after a target-specific absence/fencing mechanism also excludes a late original request. Generic absence of task, staged-image, or version evidence is inconclusive and moves the target to `NEEDS_ATTENTION`.
+An expired lease fences database ownership but cannot cancel or prove the absence of a virtual-target request. Any expired `SUBMITTING` attempt becomes reconciliation-only. Automatic retry is permitted only after a durable transport result proves that the original request was not written, or after a target-specific absence/fencing mechanism also excludes a late original request. Generic absence of task, staged-image, or version evidence is inconclusive and moves the target to `NEEDS_ATTENTION`.
 
 ### Work leases and operation reservations
 
@@ -68,18 +68,26 @@ The implementation order is:
 1. Foundation and contracts.
 2. Domain state machines and independent sequential model.
 3. Persistence, generic due work, leases, enrollment claims, audit, and outbox.
-4. Cloud development bootstrap: Neon, ECS Fargate service shells, Amazon SQS Standard, Amazon EventBridge Scheduler, S3, AWS Secrets Manager, OIDC, and the simulator/QEMU VM boundary.
-5. QEMU/OpenBMC capability spike that freezes one update mechanism, apply-time behavior, image format/size, task/inventory evidence, and recovery procedure.
-6. Deterministic persistent simulator and its independent oracle.
+4. Cloud development bootstrap for provider-dependent application services;
+   the virtual-BMC backend remains locally runnable and cloud-independent.
+5. Virtual-BMC contract spike that freezes selected DMTF fields, explicit
+   simulator extensions, update/task/inventory behavior, limits, faults, and
+   recovery evidence.
+6. Deterministic persistent virtual-BMC backend and independent oracle.
 7. Inventory/preflight and artifact integrity.
 8. Campaign planning.
 9. Generic orchestration, delivery generations, durable operation reservations, and deterministic concurrent model.
-10. Firmware execution and reconciliation.
+10. Firmware execution and reconciliation against the accepted synthetic contract.
 11. API/auth, console, observability, and cloud hardening.
-12. Load, fault, restore, QEMU proof, and portfolio release.
+12. Load, fault, restore, deterministic replay, and portfolio release.
 
 The existing numbered phase files remain stable for navigation, but their entry criteria and tasks must follow these dependencies. Phase 13 therefore has an early bootstrap slice required before provider-dependent gates and a later hardening/promotion slice.
 
 ## Claim boundary
 
-The portfolio may claim compatibility only with the pinned QEMU/OpenBMC image and tested resource/update subset. Simulator-only failure behaviors, vendor-wide behavior, physical flash/power-loss resilience, and management-network behavior remain explicitly unverified. A blocked real update gate is reported as blocked; discovery-only integration is not a completed firmware-update proof.
+The portfolio may claim only the accepted repository-owned virtual-BMC
+contract and its measured scenarios. Vendor behavior, external-device
+interoperability, real firmware installation, flash/power-loss resilience, and
+management-network behavior remain explicitly unverified. Selected DMTF fields
+and schema checks establish fixture discipline; they do not establish complete
+Redfish conformance.
