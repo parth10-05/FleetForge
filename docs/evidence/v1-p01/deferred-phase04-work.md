@@ -1,7 +1,7 @@
 # Deferred simulator and Phase 04 work
 
 The following claims and work remain deferred until the QEMU/OpenBMC capability
-spike supplies a redacted fixture and ADR-013/ADR-032 are accepted for one
+spike supplies a redacted fixture and ADR-039/ADR-032 are accepted for one
 exact update route:
 
 - Redfish listener routes, resource properties, schema contracts, update media

@@ -31,6 +31,6 @@ seed, initial state, and ordered command trace. It does not claim deterministic
 ordering for unspecified simultaneous network arrivals, full Redfish
 conformance, vendor behavior, or physical-device behavior.
 
-The future accepted update route remains gated by ADR-013 and ADR-032 evidence.
+The future accepted update route remains gated by ADR-039 and ADR-032 evidence.
 No simulator handler may invent that route before the pinned QEMU/OpenBMC
 capability fixture exists.

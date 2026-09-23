@@ -20,7 +20,7 @@ Before any Redfish handler is implemented, each row must identify:
 2. the separately observed schema/version advertised by the pinned image;
 3. one redacted fixture field or response reference;
 4. whether the field is standard, QEMU/OpenBMC-specific, or simulator-only;
-5. the accepted ADR-013/ADR-032 evidence reference.
+5. the accepted ADR-039/ADR-032 evidence reference.
 
 Using the latest DMTF release as a substitute for a missing observed target is
 forbidden. Unsupported resources, actions, methods, media types, and query

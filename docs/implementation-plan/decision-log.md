@@ -38,7 +38,7 @@ This log tracks implementation decisions that must remain explicit. Create one A
 | ADR-010 | State storage representation: text checks vs PostgreSQL enums | Accepted 2026-09-14 | Evolution/rollback/validation | Bounded text plus named checks and strict domain parsing |
 | ADR-011 | Idempotency in-progress/concurrent caller behavior | Accepted 2026-09-14 | Stable response, bounded waiting, failure recovery | Durable lease-owned claim; bounded in-progress response; completed replay |
 | ADR-012 | Audit append-only enforcement boundary | Accepted 2026-09-14 | Tamper resistance vs operational simplicity | Separate migration/application/diagnostic roles with application update/delete denied |
-| ADR-013 | Selected Redfish/OpenBMC firmware update mechanism/version | Pre-04 capability spike/09 | Official support, pinned QEMU feasibility, upload/data path, apply-time, task/evidence behavior | One explicit supported path before simulator contract freezes |
+| ADR-013 | Infrastructure state and federated delivery | Accepted for code preparation; administrative execution pending | Remote-state protection, credential-free PR validation, protected OIDC apply/teardown | Terraform modules with provider execution deferred |
 | ADR-014 | Simulator scenario schema and controllable clock | Accepted for deterministic preparation | Determinism, scale, fault composability | Seeded declarative scenarios |
 | ADR-015 | Selector grammar and query compilation | 05 | Safety, bounded complexity, indexability | Whitelisted expression grammar |
 | ADR-016 | Object-storage artifact identity and signed upload | 06 | Generation immutability, digest, cloud support | Bind bucket/key/version ID+SHA-256 |
@@ -59,6 +59,7 @@ This log tracks implementation decisions that must remain explicit. Create one A
 | ADR-031 | Load tool/scenario/report format | 14 | Reproducibility, distributed load need, cost | Small Go/k6 harness selected from requirements |
 | ADR-032 | QEMU/OpenBMC image/source, early capability spike, and final update proof | Pre-04/14 | Provenance, support, recovery, data path, cost | Prebuilt verified image on on-demand EC2 VM |
 | ADR-033 | Public demo/repository/evidence retention | 15 | Security, cost, reviewer reproducibility | Simulator-first public demo; QEMU evidence retained, VM off |
+| ADR-039 | Selected Redfish/OpenBMC firmware update mechanism/version | Pre-04 capability spike/09 | Official support, pinned QEMU feasibility, upload/data path, apply-time, task/evidence behavior | One explicit supported path before simulator contract freezes |
 
 ## ADR template
 
@@ -87,6 +88,7 @@ Avoid long implementation code. Small diagrams, contract fragments, or benchmark
 - [ADR-014 — Simulator scenarios and logical time](../adr/ADR-014-simulator-scenarios-and-logical-time.md)
 - [ADR-021 — Deterministic lock order for persistence writers](../adr/ADR-021-persistence-lock-order.md)
 - [ADR-038 — Simulator isolation and single-owner runtime](../adr/ADR-038-simulator-isolation.md)
+- [ADR-039 — Selected Redfish/OpenBMC firmware update contract](../adr/ADR-039-redfish-openbmc-update-contract.md)
 
 ## Decision gates
 

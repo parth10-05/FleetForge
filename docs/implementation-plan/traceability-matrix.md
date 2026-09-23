@@ -83,7 +83,7 @@ This matrix ensures that every architecture invariant and major non-functional r
 
 The deterministic simulator's logical-time/scenario boundary is accepted in
 ADR-014 and isolation/single-owner preparation is recorded in ADR-038. The
-QEMU/OpenBMC update contract remains blocked until ADR-013 and ADR-032 have
+QEMU/OpenBMC update contract remains blocked until ADR-039 and ADR-032 have
 accepted evidence. Therefore this matrix does not treat simulator preparation
 as proof of P04-LT-01, P04-LT-02, full Phase 04 completion, Redfish/OpenBMC
 compatibility, or a 1,000-target measurement.
