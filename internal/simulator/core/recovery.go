@@ -1,12 +1,28 @@
 package core
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 
 	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 )
+
+// SnapshotBytes obtains an immutable engine projection and serializes it for a
+// durable snapshot caller. The core package never writes the resulting bytes.
+func SnapshotBytes(ctx context.Context, engine *Engine) ([]byte, Result, error) {
+	result, err := engine.Submit(ctx, Snapshot{})
+	if err != nil {
+		return nil, Result{}, err
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return nil, Result{}, err
+	}
+	return raw, result, nil
+}
 
 // RecoveredAcceptance is the trusted core representation reconstructed from a
 // validated durable acceptance record. It deliberately has no artifact bytes.

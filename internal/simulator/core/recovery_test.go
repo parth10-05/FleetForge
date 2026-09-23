@@ -75,6 +75,18 @@ func TestSnapshotIsReadOnlyCompleteProjection(t *testing.T) {
 	}
 }
 
+func TestSnapshotBytesReturnsSerializableImmutableState(t *testing.T) {
+	engine, err := Start(testScenario(), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	raw, result, err := SnapshotBytes(context.Background(), engine)
+	if err != nil || len(raw) == 0 || len(result.State) != len(testScenario().Targets) {
+		t.Fatalf("snapshot bytes = %q, %#v, %v", raw, result, err)
+	}
+}
+
 func TestRecoverAcceptedOperationsRejectsUnknownTarget(t *testing.T) {
 	input := testScenario()
 	entry, err := journal.New("run-1", 1, 0, journal.UpdateAccepted, "target-not-in-scenario", "attempt", "digest", "")
