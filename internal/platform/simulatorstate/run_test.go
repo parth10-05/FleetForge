@@ -38,6 +38,11 @@ func TestCreateRecoverAndOwnRun(t *testing.T) {
 	if err := release(); err != nil {
 		t.Fatal(err)
 	}
+	// The metadata file remains, but OS ownership has been released and a new
+	// live owner may acquire the run without treating the old file as a lock.
+	if _, err := os.Stat(run.OwnerPath); err != nil {
+		t.Fatalf("missing diagnostic owner metadata: %v", err)
+	}
 	if release, err := run.AcquireOwner(); err != nil {
 		t.Fatal(err)
 	} else if err := release(); err != nil {

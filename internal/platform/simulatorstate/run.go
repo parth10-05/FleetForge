@@ -51,7 +51,7 @@ func CreateRun(root string, input scenario.Scenario) (Run, error) {
 	if err := writeExclusive(run.JournalPath, nil); err != nil {
 		return Run{}, err
 	}
-	if err := journal.WriteSnapshot(run.SnapshotPath, 0, ""); err != nil {
+	if err := journal.WriteSnapshot(run.SnapshotPath, journal.Snapshot{}); err != nil {
 		return Run{}, err
 	}
 	return run, nil
@@ -90,19 +90,37 @@ func RecoverRun(root, id string) (Run, error) {
 }
 
 func (r Run) AcquireOwner() (func() error, error) {
-	file, err := os.OpenFile(r.OwnerPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	file, err := os.OpenFile(r.OwnerPath, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("%w: owner", ErrInvalidRun)
 	}
-	if _, err := file.WriteString("owned\n"); err != nil {
+	if err := lockExclusive(file); err != nil {
 		file.Close()
-		os.Remove(r.OwnerPath)
+		return nil, fmt.Errorf("%w: owner", ErrInvalidRun)
+	}
+	if err := file.Truncate(0); err != nil {
+		_ = unlockExclusive(file)
+		_ = file.Close()
 		return nil, err
 	}
-	if err := file.Close(); err != nil {
+	if _, err := file.WriteString("active-owner\n"); err != nil {
+		_ = unlockExclusive(file)
+		_ = file.Close()
 		return nil, err
 	}
-	return func() error { return os.Remove(r.OwnerPath) }, nil
+	if err := file.Sync(); err != nil {
+		_ = unlockExclusive(file)
+		_ = file.Close()
+		return nil, err
+	}
+	return func() error {
+		unlockErr := unlockExclusive(file)
+		closeErr := file.Close()
+		if unlockErr != nil {
+			return unlockErr
+		}
+		return closeErr
+	}, nil
 }
 
 func paths(root, id string) Run {
