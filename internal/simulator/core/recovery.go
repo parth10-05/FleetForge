@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,13 @@ import (
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 )
 
+const SnapshotSchemaVersion = "fleetforge.simulator.core-snapshot/v1"
+
+type PersistedSnapshot struct {
+	SchemaVersion string `json:"schema_version"`
+	Result        Result `json:"result"`
+}
+
 // SnapshotBytes obtains an immutable engine projection and serializes it for a
 // durable snapshot caller. The core package never writes the resulting bytes.
 func SnapshotBytes(ctx context.Context, engine *Engine) ([]byte, Result, error) {
@@ -17,11 +25,28 @@ func SnapshotBytes(ctx context.Context, engine *Engine) ([]byte, Result, error) 
 	if err != nil {
 		return nil, Result{}, err
 	}
-	raw, err := json.Marshal(result)
+	raw, err := json.Marshal(PersistedSnapshot{SchemaVersion: SnapshotSchemaVersion, Result: result})
 	if err != nil {
 		return nil, Result{}, err
 	}
 	return raw, result, nil
+}
+
+func DecodeSnapshot(raw []byte) (Result, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var snapshot PersistedSnapshot
+	if err := decoder.Decode(&snapshot); err != nil {
+		return Result{}, fmt.Errorf("invalid core snapshot")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err == nil {
+		return Result{}, fmt.Errorf("invalid core snapshot")
+	}
+	if snapshot.SchemaVersion != SnapshotSchemaVersion {
+		return Result{}, fmt.Errorf("invalid core snapshot")
+	}
+	return snapshot.Result, nil
 }
 
 // RecoveredAcceptance is the trusted core representation reconstructed from a
