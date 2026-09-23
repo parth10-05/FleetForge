@@ -127,3 +127,32 @@ func TestTypedRecordsRejectUnsafePayloadAndPartialFinalLine(t *testing.T) {
 		t.Fatalf("partial line error = %v", err)
 	}
 }
+
+func TestReplayAcceptedRetainsEveryDurableAcceptance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.jsonl")
+	writer, err := OpenWriter(path, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []Record{
+		{Kind: RequestReceived, TargetID: "target-1", Payload: Payload{CorrelationID: "same-attempt"}},
+		{Kind: UpdateAccepted, TargetID: "target-1", Payload: Payload{CorrelationID: "same-attempt"}},
+		{Kind: RequestReceived, TargetID: "target-1", Payload: Payload{CorrelationID: "same-attempt"}},
+		{Kind: UpdateAccepted, TargetID: "target-1", Payload: Payload{CorrelationID: "same-attempt"}},
+	} {
+		if _, err := writer.Append(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := ReplayAccepted(entries)
+	if err != nil || len(accepted) != 2 || accepted[0].Sequence != 2 || accepted[1].Sequence != 4 {
+		t.Fatalf("accepted replay = %#v, %v", accepted, err)
+	}
+}

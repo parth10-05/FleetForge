@@ -111,6 +111,22 @@ func Load(path string) ([]Entry, error) {
 	return DecodeLines(raw)
 }
 
+// ReplayAccepted projects only durable acceptance truth from an already
+// validated chain. Each record remains distinct even when correlation inputs
+// match; callers must not use this projection for deduplication.
+func ReplayAccepted(entries []Entry) ([]Entry, error) {
+	if err := Validate(entries); err != nil {
+		return nil, err
+	}
+	accepted := make([]Entry, 0)
+	for _, entry := range entries {
+		if entry.Kind == UpdateAccepted {
+			accepted = append(accepted, entry)
+		}
+	}
+	return accepted, nil
+}
+
 type Snapshot struct {
 	SchemaVersion string          `json:"schema_version"`
 	Sequence      uint64          `json:"sequence"`
