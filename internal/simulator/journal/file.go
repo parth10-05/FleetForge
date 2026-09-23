@@ -140,6 +140,10 @@ func WriteSnapshot(path string, s Snapshot) error {
 	if s.SchemaVersion == "" {
 		s.SchemaVersion = SchemaVersionV2
 	}
+	if len(s.State) > 0 && s.StateDigest == "" {
+		digest := sha256.Sum256(s.State)
+		s.StateDigest = hex.EncodeToString(digest[:])
+	}
 	if s.SchemaVersion != SchemaVersionV2 || (s.Sequence == 0 && s.Hash != "") || (s.Sequence > 0 && len(s.Hash) != 64) || len(s.StateDigest) > 64 || (len(s.StateDigest) > 0 && len(s.StateDigest) != 64) {
 		return fmt.Errorf("invalid simulator snapshot")
 	}

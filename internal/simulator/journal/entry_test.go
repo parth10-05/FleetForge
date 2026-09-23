@@ -51,6 +51,18 @@ func TestSnapshotRejectsTamperedState(t *testing.T) {
 	}
 }
 
+func TestWriteSnapshotDerivesStateDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	state := []byte(`{"tasks":[]}`)
+	if err := WriteSnapshot(path, Snapshot{State: state}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := ReadSnapshot(path)
+	if err != nil || snapshot.StateDigest == "" {
+		t.Fatalf("snapshot = %#v, %v", snapshot, err)
+	}
+}
+
 func TestAppendAndReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.jsonl")
 	first, _ := New("run-1", 1, 0, RequestReceived, "target-1", "request-1", "sha256-abc", "")
