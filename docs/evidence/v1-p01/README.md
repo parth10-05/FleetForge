@@ -14,6 +14,7 @@ does not establish Redfish/OpenBMC compatibility or a firmware-update claim.
 | `fixture-provenance.md` | Redacted fixture identity and license record | Blocked pending selected image |
 | `scenario-and-fault-catalog.md` | Simulator-only scenario and fault boundary | Prepared |
 | `deferred-phase04-work.md` | Explicitly deferred simulator and Phase 04 claims | Active |
+| `implementation-status.md` | Requirement-level implementation and blocking record | Current |
 
 Each later evidence report must name the repository commit, Go version,
 scenario digest, seed, trace digest, test command, execution environment, and
