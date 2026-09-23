@@ -49,6 +49,71 @@ func DecodeSnapshot(raw []byte) (Result, error) {
 	return snapshot.Result, nil
 }
 
+// StartFromSnapshot restores immutable state only after decoding its versioned
+// envelope and validating every target against the scenario.
+func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Engine, error) {
+	result, err := DecodeSnapshot(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := input.Validate(); err != nil {
+		return nil, err
+	}
+	m := model{input: input, targets: map[string]target{}, operations: map[string]OperationState{}, tasks: map[string]TaskState{}, subscriptions: map[string]SubscriptionState{}, events: map[string]EventState{}, faults: map[string]FaultState{}}
+	expected := map[string]scenario.Target{}
+	for _, value := range input.Targets {
+		id, err := scenario.ID(input, "target", value.Index)
+		if err != nil {
+			return nil, err
+		}
+		expected[id] = value
+	}
+	if len(result.State) != len(expected) {
+		return nil, fmt.Errorf("invalid core snapshot")
+	}
+	for _, state := range result.State {
+		value, found := expected[state.ID]
+		if !found || state.Site != value.Site || state.Rack != value.Rack {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
+		m.targets[state.ID] = target{TargetState: state, ExpectedVersion: value.ExpectedVersion}
+	}
+	for _, value := range result.Operations {
+		if _, ok := m.targets[value.TargetID]; !ok || value.ID == "" {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
+		m.operations[value.ID] = value
+		if value.Ordinal > m.acceptanceOrdinal {
+			m.acceptanceOrdinal = value.Ordinal
+		}
+	}
+	for _, value := range result.Tasks {
+		if _, ok := m.operations[value.OperationID]; !ok || value.ID == "" {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
+		m.tasks[value.ID] = value
+	}
+	for _, value := range result.Subscriptions {
+		if _, ok := m.targets[value.TargetID]; !ok || value.ID == "" {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
+		m.subscriptions[value.ID] = value
+		if value.Ordinal > m.subscriptionOrdinal {
+			m.subscriptionOrdinal = value.Ordinal
+		}
+	}
+	for _, value := range result.Events {
+		if _, ok := m.targets[value.TargetID]; !ok || value.ID == "" {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
+		m.events[value.ID] = value
+	}
+	for _, value := range input.Faults {
+		m.faults[value.FaultID] = FaultState{ID: value.FaultID, Name: value.Name, Scope: value.Scope, ScopeKey: value.ScopeKey, Remaining: value.Consumption, Priority: value.Priority}
+	}
+	return startModel(m, queueSize)
+}
+
 // RecoveredAcceptance is the trusted core representation reconstructed from a
 // validated durable acceptance record. It deliberately has no artifact bytes.
 type RecoveredAcceptance struct {

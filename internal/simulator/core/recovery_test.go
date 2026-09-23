@@ -96,6 +96,28 @@ func TestDecodeSnapshotRejectsUnknownAndIncompatibleShapes(t *testing.T) {
 	}
 }
 
+func TestStartFromSnapshotRestoresImmutableProjection(t *testing.T) {
+	input := testScenario()
+	source, err := Start(input, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, before, err := SnapshotBytes(context.Background(), source)
+	source.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := StartFromSnapshot(input, raw, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	after, err := restored.Submit(context.Background(), Snapshot{})
+	if err != nil || len(after.State) != len(before.State) || len(after.Tasks) != len(before.Tasks) {
+		t.Fatalf("restored snapshot = %#v, %v", after, err)
+	}
+}
+
 func TestRecoverAcceptedOperationsRejectsUnknownTarget(t *testing.T) {
 	input := testScenario()
 	entry, err := journal.New("run-1", 1, 0, journal.UpdateAccepted, "target-not-in-scenario", "attempt", "digest", "")
