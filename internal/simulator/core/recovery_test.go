@@ -87,6 +87,15 @@ func TestSnapshotBytesReturnsSerializableImmutableState(t *testing.T) {
 	}
 }
 
+func TestDecodeSnapshotRejectsUnknownAndIncompatibleShapes(t *testing.T) {
+	if _, err := DecodeSnapshot([]byte(`{"schema_version":"unknown","result":{}}`)); err == nil {
+		t.Fatal("incompatible snapshot was accepted")
+	}
+	if _, err := DecodeSnapshot([]byte(`{"schema_version":"fleetforge.simulator.core-snapshot/v1","result":{},"unexpected":true}`)); err == nil {
+		t.Fatal("unknown snapshot field was accepted")
+	}
+}
+
 func TestRecoverAcceptedOperationsRejectsUnknownTarget(t *testing.T) {
 	input := testScenario()
 	entry, err := journal.New("run-1", 1, 0, journal.UpdateAccepted, "target-not-in-scenario", "attempt", "digest", "")
