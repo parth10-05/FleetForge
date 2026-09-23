@@ -1,6 +1,8 @@
 package journal
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -28,6 +30,24 @@ func TestHashChainRejectsGapsAndTampering(t *testing.T) {
 	gap.Sequence = 3
 	if err := Validate([]Entry{first, gap}); !errors.Is(err, ErrInvalidChain) {
 		t.Fatalf("gap error = %v", err)
+	}
+}
+
+func TestSnapshotRejectsTamperedState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	state := []byte(`{"targets":[]}`)
+	digest := sha256.Sum256(state)
+	if err := WriteSnapshot(path, Snapshot{State: state, StateDigest: hex.EncodeToString(digest[:])}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"schema_version":"fleetforge.simulator.journal/v2","sequence":0,"hash":"","logical_time":0,"state_digest":"`+hex.EncodeToString(digest[:])+`","state":{"targets":["tampered"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshot(path); err == nil {
+		t.Fatal("tampered snapshot was accepted")
 	}
 }
 

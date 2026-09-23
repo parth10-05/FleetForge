@@ -1,6 +1,9 @@
 package journal
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -121,7 +124,7 @@ func WriteSnapshot(path string, s Snapshot) error {
 	if s.SchemaVersion == "" {
 		s.SchemaVersion = SchemaVersionV2
 	}
-	if s.SchemaVersion != SchemaVersionV2 || (s.Sequence == 0 && s.Hash != "") || (s.Sequence > 0 && len(s.Hash) != 64) || len(s.StateDigest) > 64 {
+	if s.SchemaVersion != SchemaVersionV2 || (s.Sequence == 0 && s.Hash != "") || (s.Sequence > 0 && len(s.Hash) != 64) || len(s.StateDigest) > 64 || (len(s.StateDigest) > 0 && len(s.StateDigest) != 64) {
 		return fmt.Errorf("invalid simulator snapshot")
 	}
 	raw, err := json.Marshal(s)
@@ -147,4 +150,31 @@ func WriteSnapshot(path string, s Snapshot) error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+func ReadSnapshot(path string) (Snapshot, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var snapshot Snapshot
+	if err := decoder.Decode(&snapshot); err != nil {
+		return Snapshot{}, fmt.Errorf("invalid simulator snapshot")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err == nil {
+		return Snapshot{}, fmt.Errorf("invalid simulator snapshot")
+	}
+	if snapshot.SchemaVersion != SchemaVersionV2 || (snapshot.Sequence == 0 && snapshot.Hash != "") || (snapshot.Sequence > 0 && len(snapshot.Hash) != 64) {
+		return Snapshot{}, fmt.Errorf("invalid simulator snapshot")
+	}
+	if len(snapshot.StateDigest) > 0 {
+		digest := sha256.Sum256(snapshot.State)
+		if snapshot.StateDigest != hex.EncodeToString(digest[:]) {
+			return Snapshot{}, fmt.Errorf("invalid simulator snapshot")
+		}
+	}
+	return snapshot, nil
 }

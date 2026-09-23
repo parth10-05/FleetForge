@@ -19,11 +19,6 @@ type manifest struct {
 	RunID          string `json:"run_id"`
 	ScenarioDigest string `json:"scenario_digest"`
 }
-type snapshot struct {
-	SchemaVersion string `json:"schema_version"`
-	Sequence      uint64 `json:"sequence"`
-	Hash          string `json:"hash"`
-}
 
 func CreateRun(root string, input scenario.Scenario) (Run, error) {
 	canonical, err := scenario.CanonicalBytes(input)
@@ -79,8 +74,8 @@ func RecoverRun(root, id string) (Run, error) {
 	if err != nil {
 		return invalidate(run, "journal")
 	}
-	var checkpoint snapshot
-	if err := readJSON(run.SnapshotPath, &checkpoint); err != nil || checkpoint.SchemaVersion != journal.SchemaVersionV1 || checkpoint.Sequence > uint64(len(entries)) {
+	checkpoint, err := journal.ReadSnapshot(run.SnapshotPath)
+	if err != nil || checkpoint.Sequence > uint64(len(entries)) {
 		return invalidate(run, "snapshot")
 	}
 	if checkpoint.Sequence > 0 && entries[checkpoint.Sequence-1].Hash != checkpoint.Hash {
