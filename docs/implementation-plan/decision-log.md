@@ -26,6 +26,7 @@ This log tracks implementation decisions that must remain explicit. Create one A
 | ADR-035 | Work leases and durable physical-operation reservations have separate lifecycles | Accepted | Lease expiry or attention cannot free physical capacity |
 | ADR-036 | Queue envelopes include delivery generation while command identity remains stable | Accepted | Repair must survive Amazon SQS Standard duplicate receipt, visibility expiry, and uncertain publish |
 | ADR-037 | Target enrollment claims persist for the parent campaign and unresolved operations retain quarantine | Accepted | Target-update terminality alone cannot release ownership |
+| ADR-038 | Simulator isolation and single-owner retained-run runtime | Accepted for code preparation; live capability proof pending | Any added ingress, route, credential, or concurrent owner requires review |
 
 ## Required implementation ADRs
 
@@ -38,7 +39,7 @@ This log tracks implementation decisions that must remain explicit. Create one A
 | ADR-011 | Idempotency in-progress/concurrent caller behavior | Accepted 2026-09-14 | Stable response, bounded waiting, failure recovery | Durable lease-owned claim; bounded in-progress response; completed replay |
 | ADR-012 | Audit append-only enforcement boundary | Accepted 2026-09-14 | Tamper resistance vs operational simplicity | Separate migration/application/diagnostic roles with application update/delete denied |
 | ADR-013 | Selected Redfish/OpenBMC firmware update mechanism/version | Pre-04 capability spike/09 | Official support, pinned QEMU feasibility, upload/data path, apply-time, task/evidence behavior | One explicit supported path before simulator contract freezes |
-| ADR-014 | Simulator scenario schema and controllable clock | 04 | Determinism, scale, fault composability | Seeded declarative scenarios |
+| ADR-014 | Simulator scenario schema and controllable clock | Accepted for deterministic preparation | Determinism, scale, fault composability | Seeded declarative scenarios |
 | ADR-015 | Selector grammar and query compilation | 05 | Safety, bounded complexity, indexability | Whitelisted expression grammar |
 | ADR-016 | Object-storage artifact identity and signed upload | 06 | Generation immutability, digest, cloud support | Bind bucket/key/version ID+SHA-256 |
 | ADR-017 | Signature/manifest verification scope | 06 | Honest supported formats, key management | One optional declared format; fail closed when required |
@@ -83,7 +84,9 @@ Avoid long implementation code. Small diagrams, contract fragments, or benchmark
 - [ADR-010 — PostgreSQL states use text with named checks](../adr/ADR-010-postgresql-text-state-checks.md)
 - [ADR-011 — Durable, lease-owned idempotency claims](../adr/ADR-011-durable-idempotency-claims.md)
 - [ADR-012 — Database-enforced audit append-only boundary](../adr/ADR-012-audit-immutability-roles.md)
+- [ADR-014 — Simulator scenarios and logical time](../adr/ADR-014-simulator-scenarios-and-logical-time.md)
 - [ADR-021 — Deterministic lock order for persistence writers](../adr/ADR-021-persistence-lock-order.md)
+- [ADR-038 — Simulator isolation and single-owner runtime](../adr/ADR-038-simulator-isolation.md)
 
 ## Decision gates
 

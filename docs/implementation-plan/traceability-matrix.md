@@ -22,6 +22,7 @@ This matrix ensures that every architecture invariant and major non-functional r
 | INV-12 | Retries are finite, multi-scope budgeted, and resume the correct step | 02, 08, 09, 14 | Attempt/deadline/domain counters + jitter + explicit resume step | P02-PT-05, P08-RT-01, P09-FT-12/19, L5 report |
 | INV-13 | Physical operation concurrency survives handler lease expiry and ambiguity | 08, 09, 14 | Durable operation reservation independent of work lease | P08-CT-03, P09-FT-17, L3/L5 active-operation series |
 | INV-14 | Target ownership survives target-update terminality and unresolved operations | 03, 05, 07, 09 | Readiness enrollment claim and unresolved-operation quarantine | P03-IT-15, P05-IT-05, P09-FT-20 |
+| INV-15 | Simulator acceptance truth is independent, durable, and never hides duplicate requests | 04, 09, 14 | Seeded scenario, single-owner engine, append-only acceptance journal, and independent oracle | V1 simulator journal/oracle mutation tests; P14-T21/T21A/T21B |
 
 ## Functional requirements
 
@@ -77,3 +78,12 @@ This matrix ensures that every architecture invariant and major non-functional r
 - A requirement cannot be marked complete without an evidence location.
 - If a requirement is deferred, record scope/reason/risk in the Decision Log and Risk Register.
 - If an invariant is weakened, architecture approval is required before implementation.
+
+## Simulator preparation status
+
+The deterministic simulator's logical-time/scenario boundary is accepted in
+ADR-014 and isolation/single-owner preparation is recorded in ADR-038. The
+QEMU/OpenBMC update contract remains blocked until ADR-013 and ADR-032 have
+accepted evidence. Therefore this matrix does not treat simulator preparation
+as proof of P04-LT-01, P04-LT-02, full Phase 04 completion, Redfish/OpenBMC
+compatibility, or a 1,000-target measurement.
