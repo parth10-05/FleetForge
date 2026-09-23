@@ -6,7 +6,9 @@ Implement the narrow Redfish subset frozen by V1-P00 with persistent seeded scen
 
 ## Tasks
 
-- [ ] **V1-P01-T01** Record the exact supported DMTF/OpenBMC resource subset, schema references, fixture provenance, and simulator-only control-plane boundary.
+- [ ] **V1-P01-T01** Record the exact selected DMTF resource subset, schema
+  checksums, canonical synthetic fixture provenance, explicit simulator
+  extensions, and admin control-plane boundary.
 - [ ] **V1-P01-T02** Define a versioned scenario format containing seed, 6–10 targets, at least two racks, initial versions, capabilities, timing, and a bounded fault schedule.
 - [ ] **V1-P01-T03** Implement injected logical time for tests, a real-time demo adapter, deterministic target identity derivation, and input validation with bounded target/fault counts.
 - [ ] **V1-P01-T04** Persist per-run target state and an immutable append-only request/acceptance journal. Enforce one active process owner per retained run and fail closed on unrecoverable recovery.
@@ -27,4 +29,6 @@ Implement the narrow Redfish subset frozen by V1-P00 with persistent seeded scen
 
 ## Exit gate
 
-Every v1 fault can be reproduced from a saved seed and the simulator can independently prove when FleetForge sent duplicate update requests. Do not claim full Redfish or OpenBMC compliance.
+Every v1 fault can be reproduced from a saved seed and the simulator can
+independently prove when FleetForge sent duplicate update requests. Do not
+claim full Redfish, vendor, or external-device compliance.

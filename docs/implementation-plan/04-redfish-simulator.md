@@ -2,19 +2,27 @@
 
 ## Outcome
 
-Build an isolated Go service on one on-demand EC2 VM that exposes the minimum Redfish resources required by FleetForge and can model hundreds or thousands of virtual BMC identities with reproducible timing and fault behavior. The simulator is a test instrument, not a convenient fake: each run is seeded, observable, resettable, contract-checked, and backed by persistent test-run state and an independent request/acceptance journal.
+Build a locally runnable, containerized Go service that exposes the minimum
+Redfish-shaped resources required by FleetForge and can model hundreds or
+thousands of isolated virtual BMC identities with reproducible timing and fault
+behavior. The backend is a test instrument: each run is seeded, observable,
+resettable, contract-checked, and backed by persistent state and an independent
+request/acceptance journal.
 
 ## Entry criteria
 
 - Phase 01 passes; Phase 02 value/evidence vocabulary is available.
-- Exact Redfish resources and versions required by the architecture are enumerated from current DMTF/OpenBMC references.
-- The pre-Phase-04 QEMU capability spike has frozen the pinned image, update mechanism, apply-time behavior, image format/size, task/inventory evidence, and recovery procedure.
+- Exact selected fields and schema versions are enumerated from one pinned
+  official DMTF release.
+- The pre-Phase-04 virtual-BMC contract spike has frozen target addressing,
+  update shape, selected fields, explicit extensions, task/inventory evidence,
+  limits, faults, and recovery ordering.
 - Simulator trust boundary and isolation from any real-target environment are accepted.
 - Fixture licensing/provenance is recorded.
 
 ## Non-goals
 
-- No attempt to emulate all OpenBMC services or hardware.
+- No attempt to emulate external devices or the complete Redfish standard.
 - No vendor-specific behavior without a named fixture and rationale.
 - No production credentials or routes.
 - No simulator behavior that reads FleetForge database state.
@@ -27,7 +35,7 @@ Build an isolated Go service on one on-demand EC2 VM that exposes the minimum Re
 |---|---|
 | Service root | Advertise supported Redfish version and links |
 | Managers/Systems/Chassis subset | Stable identity, model/manufacturer, power/reachability, health inputs |
-| UpdateService | Capability discovery and firmware update action used by selected OpenBMC path |
+| UpdateService | Capability discovery and the accepted synthetic `HttpPushUri` update action |
 | TaskService | Long-running task identity, progress, completion, failure, disappearance behavior |
 | SoftwareInventory | Current/staged firmware versions and activation state |
 | EventService | Subscription registration and callback delivery with duplicate/loss/reorder controls |
@@ -77,7 +85,9 @@ Each target holds simulator state: current/staged version, task state, reboot/re
 ### Standards and fixtures
 
 - [ ] **P04-T01** Record exact DMTF Redfish schema/release references used.
-- [ ] **P04-T02** Import the pinned QEMU capability-spike fixture and record the exact OpenBMC endpoint, upload/data path, apply-time, task/inventory, authentication, image, and recovery behavior targeted for integration.
+- [ ] **P04-T02** Import the accepted virtual-BMC contract fixtures and record
+  the exact target prefix, upload/data path, timing, task/inventory,
+  authentication, extension, limit, and recovery behavior.
 - [ ] **P04-T03** Create minimal conformance fixture set with provenance and schema validation.
 - [ ] **P04-T04** Separate normative Redfish fields from simulator-only control fields/endpoints.
 - [ ] **P04-T05** Make simulator-control endpoints unavailable on the Redfish listener or protected by a separate admin secret/network.
@@ -114,7 +124,7 @@ Each target holds simulator state: current/staged version, task state, reboot/re
 
 ### Scale and isolation
 
-- [ ] **P04-T27** Use lazy/compact target state so 1,000 targets fit comfortably in the frozen EC2 VM memory/disk budget.
+- [ ] **P04-T27** Use lazy/compact target state so 1,000 targets fit within the recorded local/CI memory and disk budget.
 - [ ] **P04-T28** Bound goroutines, callback workers, in-memory queues, journal size, and open connections.
 - [ ] **P04-T29** Add max target count and max fault/event rate configuration.
 - [ ] **P04-T30** Expose readiness only after scenario validation, persistent-store recovery, target initialization, and journal consistency checks.
@@ -151,9 +161,9 @@ Each target holds simulator state: current/staged version, task state, reboot/re
 
 The simulator must not be changed merely to make a FleetForge adapter test pass. When a mismatch occurs:
 
-1. Compare with the selected Redfish schema and OpenBMC behavior.
+1. Compare with the pinned selected schema, accepted synthetic contract, and canonical fixtures.
 2. Decide whether simulator, adapter, fixture, or assumption is wrong.
-3. Record a decision when behavior is ambiguous/vendor-specific.
+3. Record a decision when behavior is ambiguous or outside the frozen contract.
 4. Add a regression fixture.
 
 ## Evidence artifacts
@@ -163,13 +173,13 @@ The simulator must not be changed merely to make a FleetForge adapter test pass.
 - Determinism hash report for repeated traces.
 - 1,000-target memory/concurrency measurement.
 - Journal from ambiguous post-accept connection loss.
-- List of known differences from QEMU/OpenBMC.
+- Explicit list of unsupported external-device behavior and simulator extensions.
 
 ## Exit criteria
 
 - Required Redfish subset passes contract checks.
 - All fifteen fault profiles are deterministic and independently testable.
-- 1,000 virtual targets run within declared EC2 VM memory, disk, and request limits.
+- 1,000 virtual targets run within declared local/CI memory, disk, connection, and request limits.
 - Admin controls are isolated from the Redfish interface.
 - Scenario replay reproduces failures.
 - A deliberate duplicate submission and false proof-of-absence classification fail the independent oracle.
@@ -177,6 +187,7 @@ The simulator must not be changed merely to make a FleetForge adapter test pass.
 
 ## Rollback and stop conditions
 
-- Stop if a simulator behavior cannot be traced to a standard, OpenBMC observation, or explicit synthetic-fault purpose.
+- Stop if a simulator behavior cannot be traced to the selected schema,
+  accepted synthetic contract, or explicit fault purpose.
 - Stop if scale relies on disabling journals/visibility needed for fault proof; redesign compact evidence instead.
 - Do not call the simulator Redfish-compliant beyond the tested subset.

@@ -78,6 +78,36 @@ func TestDomainDoesNotImportInfrastructure(t *testing.T) {
 	}
 }
 
+func TestSimulatorDoesNotImportFleetForgePersistence(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller() failed")
+	}
+	simulatorPath := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "simulator"))
+	err := filepath.WalkDir(simulatorPath, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return fmt.Errorf("parse %q: %w", path, err)
+		}
+		for _, imported := range parsed.Imports {
+			importPath := strings.Trim(imported.Path.Value, "\"")
+			if strings.HasPrefix(importPath, "github.com/parth10-05/fleetforge/internal/persistence/") {
+				return fmt.Errorf("%s imports FleetForge persistence package %q", path, importPath)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("simulator dependency boundary: %v", err)
+	}
+}
+
 func validateDomainImport(packageName, imported string) error {
 	if _, known := allowedDomainImports[packageName]; !known {
 		return fmt.Errorf("domain package %q has no declared import policy", packageName)

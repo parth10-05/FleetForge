@@ -20,7 +20,8 @@ Provision reproducible development bootstrap, staging, and demo-production envir
 - No long-lived GitHub AWS access key.
 - No building separate binaries from different commits per environment.
 - No automatic production firmware campaign during application deployment.
-- No permanent QEMU VM unless cost/need is justified.
+- No EC2 simulator host; the custom backend remains locally runnable and any
+  staging deployment is a bounded container task that can scale to zero.
 
 ## Environment model
 
@@ -28,8 +29,8 @@ Provision reproducible development bootstrap, staging, and demo-production envir
 |---|---|---|---|
 | Developer | Unit/UI/light process work | No required local DB; cloud dev resources optional | Personal, minimum privileges, easy reset |
 | CI | Deterministic verification | Ephemeral PostgreSQL, in-process/container simulator | No production secrets/routes |
-| Staging | Full cloud integration/fault drills | Persistent simulator VM and synthetic artifacts only | Automatic deploy after main; destructive tests allowed only against simulator |
-| Demo production | Stable portfolio demo | On-demand simulator VM plus isolated QEMU VM | Protected approval, strict budgets, no destructive fault injection by default |
+| Staging | Full cloud integration/fault drills | Custom virtual-BMC container and synthetic artifacts only | Automatic deploy after main; destructive tests allowed only against simulator |
+| Demo production | Stable portfolio demo | Scale-to-zero virtual-BMC container using the accepted synthetic contract | Protected approval, strict budgets, no destructive fault injection by default |
 
 ## Deployment flow
 
@@ -59,7 +60,7 @@ flowchart TD
 |---|---|
 | ECS Fargate API service | ALB/private-ingress decision, desired/min/max tasks, CPU/memory, health check, task role, readiness |
 | ECS Fargate worker service/task | SQS polling only, desired/min/max tasks, task deadline, no public ingress, dedicated task role |
-| EC2 simulator VM | one active owner, persistent run store/journal, explicit simulated banner, start/stop/teardown, no real credentials/routes |
+| Virtual-BMC simulator role | locally runnable; optional scale-to-zero Fargate task; one run owner, bounded state/journal, explicit synthetic banner, no external credentials/routes |
 | EventBridge Scheduler + publisher/sweeper ECS task | IAM-invoked bounded batches, external wakeup at zero worker capacity, same immutable worker image/task role |
 | SQS Standard queues | per-class visibility/redrive/backlog/retry policy, worker IAM role, delivery-generation envelope, quarantine policy |
 | S3 with Versioning | non-public bucket, exact version ID, lifecycle, CORS only if needed, signed upload identity |
@@ -76,10 +77,14 @@ flowchart TD
 ### Early development bootstrap
 
 - [ ] **P13-B01** Provision a disposable AWS development account/environment, Neon project, SQS Standard queues, EventBridge Scheduler repair task, private versioned S3 bucket, AWS Secrets Manager resources, ECR repository, and minimal ECS Fargate API/worker shells after Phase 03.
-- [ ] **P13-B02** Provision the isolated EC2 simulator/QEMU VPC, security groups, launch templates, start/stop, disk persistence, cost tags, and teardown controls.
+- [ ] **P13-B02** Package the virtual-BMC backend as the same immutable
+  container used locally. If staging needs remote access, deploy one
+  scale-to-zero private Fargate task with bounded storage/export and teardown;
+  do not provision an EC2 simulator host.
 - [ ] **P13-B03** Prove the worker ECS task role can receive/delete only its SQS queue messages, EventBridge Scheduler can launch a zero-worker-capacity repair pass, and duplicate/uncertain SQS delivery is repaired through a new delivery generation.
 - [ ] **P13-B04** Prove pooled application and direct migration Neon connections, record connection budgets, and stop scheduler work when the disposable session ends.
-- [ ] **P13-B05** Complete the early QEMU capability spike before Phase 04 consumes an update contract.
+- [ ] **P13-B05** Complete the virtual-BMC contract spike before Phase 04
+  implements Redfish-shaped routes.
 - [ ] **P13-B06** Store a dated cost/source ledger and capture a bootstrap exit report; defer public promotion permissions until the hardening slice.
 
 ### IaC foundation
@@ -93,10 +98,14 @@ flowchart TD
 
 ### Identity and access
 
-- [ ] **P13-T07** Create separate IAM task roles for API, worker, simulator, migration, and CI deployer where privilege differs.
+- [ ] **P13-T07** Create separate IAM task roles for API, worker, an optionally
+  deployed simulator container, migration, and CI deployer where privilege
+  differs.
 - [ ] **P13-T08** Grant API only needed DB/object metadata/auth permissions.
 - [ ] **P13-T09** Grant worker queue invocation, secret access, object read/signing path, and telemetry permissions at minimum scope.
-- [ ] **P13-T10** Isolate the simulator VM from real credential secrets and real-target routing; mount a persistent run store/journal and enforce one active owner per run.
+- [ ] **P13-T10** Isolate any deployed simulator task from external credential
+  secrets and unrestricted routing; configure bounded retained-run
+  state/journal export and enforce one active owner per run.
 - [ ] **P13-T11** Configure GitHub OIDC trust to AWS IAM roles, restricted by immutable repository/owner IDs plus branch/ref, workflow, and protected environment claims.
 - [ ] **P13-T12** Prove a fork/untrusted PR cannot obtain cloud credentials.
 - [ ] **P13-T13** Add periodic IAM review and credential/key rotation runbook.
@@ -105,7 +114,10 @@ flowchart TD
 
 - [ ] **P13-T14** Configure API ingress/TLS/custom domain decision and CORS allowlist.
 - [ ] **P13-T15** Configure worker task roles and SQS queue policies so only the worker can receive/delete queue messages; expose no public worker endpoint.
-- [ ] **P13-T16** Configure target endpoint egress and allowlist strategy. If the QEMU target requires source allowlisting, route ECS Fargate through private subnets, a NAT Gateway, and an Elastic IP and include that cost; validate every returned device URI and connection address.
+- [ ] **P13-T16** Configure workers to reach only the accepted private
+  virtual-BMC origin in staging. Validate every returned URI and resolved
+  connection address; no NAT Gateway or fixed public egress is required for
+  the synthetic boundary.
 - [ ] **P13-T17** Configure per-service min/max instances, concurrency, CPU/memory, deadlines, and startup probes from measured staging behavior.
 - [ ] **P13-T18** Verify max instance × connection-pool and max instance × Redfish concurrency budgets.
 - [ ] **P13-T19** Disable or protect all debug/admin/simulator-control endpoints.
@@ -183,7 +195,7 @@ flowchart TD
 | P13-DP-04 | App rollback after expand migration | Prior app remains functional |
 | P13-DP-05 | Telemetry unavailable | Defined degraded behavior; workflow truth preserved and exporter drops remain bounded/visible locally |
 | P13-DP-06 | All ECS Fargate worker capacity at zero with overdue work | EventBridge Scheduler launches a bounded sweep that starts delivery and advances a new delivery generation where needed |
-| P13-DP-07 | Simulator VM process restarts during accepted operation | Persistent run/device/journal state recovers consistently or run fails closed as invalid |
+| P13-DP-07 | Optional virtual-BMC container restarts during an accepted operation | Persistent run/target/journal state recovers consistently or the run fails closed as invalid |
 | P13-COST-01 | Synthetic runaway traffic | Max instances/queue/application budgets cap amplification |
 | P13-COST-02 | One-minute sweep on disposable Neon Free project | Session shutdown disables sweep; measured CU-hours and retained-environment budget remain explicit |
 | P13-DR-01 | Disposable environment teardown/recreate | Recreated services pass smoke tests; protected evidence retained |
@@ -215,4 +227,5 @@ flowchart TD
 - Stop promotion on unexpected IaC destroy, IAM expansion, migration incompatibility, failed fault/smoke tests, or missing telemetry.
 - Prefer traffic rollback over destructive database down-migration.
 - Disable workers/update queue before scaling through a systemic failure.
-- Tear down or stop simulator, QEMU, and load resources when not actively used; disable disposable-environment scheduler jobs so Neon can suspend.
+- Tear down or scale the simulator and load resources to zero when not actively
+  used; disable disposable-environment scheduler jobs so Neon can suspend.

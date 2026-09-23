@@ -41,5 +41,5 @@ required ownership tags described in [naming.md](naming.md). Feature flags are
 off by default; enabling one requires a future apply-specific expiry record.
 
 This code does not prove AWS permissions, remote state access, billing, live
-resources, or QEMU behavior. Capture those claims only after the corresponding
+resources, or virtual-target behavior. Capture those claims only after the corresponding
 administrative execution and evidence review.

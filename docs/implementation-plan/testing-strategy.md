@@ -15,11 +15,13 @@ flowchart TD
   Contract --> E2E[Cloud end-to-end with simulator]
   E2E --> Fault[Deterministic crash/fault tests]
   Fault --> Load[Measured load/soak]
-  Load --> QEMU[QEMU/OpenBMC compatibility]
-  QEMU --> Release[Evidence-backed release]
+  Load --> Replay[Virtual-BMC contract and deterministic replay]
+  Replay --> Release[Evidence-backed release]
 ```
 
-Fast layers run on every pull request. Expensive cloud/load/QEMU layers run on protected main, scheduled/manual workflows, or release gates as identified below.
+Fast layers run on every pull request. Expensive cloud, load, soak, and restore
+layers run on protected main, scheduled/manual workflows, or release gates as
+identified below.
 
 ## Test layers
 
@@ -35,22 +37,21 @@ Fast layers run on every pull request. Expensive cloud/load/QEMU layers run on p
 | Cloud E2E | API→DB→queue→worker→simulator→UI | Staging services | Main/protected PR/release | Deployment/integration failure |
 | Fault/chaos | Crashes, loss, duplication, outage, ambiguity | Deterministic hooks + simulator | Core subset PR; full main/release | Safety/recovery failure |
 | Load/soak | Capacity, latency, leaks, cost | Staging + simulator | Manual/release | Claim unsupported or bottleneck/regression |
-| QEMU/OpenBMC | Real protocol behavior | Remote VM/prebuilt image | Manual/release | Adapter/simulator assumption mismatch |
+| Virtual-BMC contract/replay | Selected fields, extensions, deterministic behavior, independent oracle | Pinned schemas + canonical fixtures + retained journal | Every PR subset; full release | Adapter/backend drift or nondeterminism |
 | Restore/recovery | Backups, reconstruction, replay | Isolated restore environment | Release/periodic | Durability/recovery claim unsupported |
 
 ## Environment matrix
 
 | Environment | Database | Queue/events | Device | Permitted tests |
 |---|---|---|---|---|
-| Developer laptop | None required; optional remote dev | In-memory/remote opt-in | In-process/small remote simulator | Unit, property, focused contract, frontend |
+| Developer laptop | None required; optional remote dev | In-memory/remote opt-in | In-process or local virtual-BMC container | Unit, property, focused contract, frontend |
 | CI PR | Ephemeral PostgreSQL service | Deterministic adapters; provider contract where safe | Simulator container/in-process | Full fast suite and fault subset |
-| Staging | Neon staging | Amazon SQS Standard + EventBridge Scheduler | Persistent EC2 simulator VM | E2E, provider, faults, load, restore target |
-| Demo production | Neon demo | Amazon SQS Standard + EventBridge Scheduler | On-demand EC2 simulator VM + isolated QEMU VM | Smoke/synthetic and controlled demo only |
-| QEMU lab | Metadata in staging/dedicated | Controlled SQS queues | One QEMU/OpenBMC on EC2 | Explicit manual integration; no load |
+| Staging | Neon staging | Amazon SQS Standard + EventBridge Scheduler | Private scale-to-zero virtual-BMC container | E2E, provider, faults, load, restore target |
+| Demo production | Neon demo | Amazon SQS Standard + EventBridge Scheduler | Scale-to-zero virtual-BMC container | Smoke/synthetic and controlled demo only |
 
 ## Test-data rules
 
-- All target identities, labels, credentials, artifacts, and events are synthetic unless a QEMU fixture is explicitly redacted.
+- All target identities, labels, credentials, artifacts, events, and firmware effects are synthetic.
 - Fixtures declare schema version and provenance.
 - Seeds are printed and stored for generated/fault tests.
 - Time is injected; tests do not wait real minutes when a logical clock can advance.
@@ -133,11 +134,14 @@ Each boundary has an injected crash/failure case. The acceptance oracle includes
 ### Redfish
 
 - Validate selected resource subset against official schemas/fixtures.
-- Compare simulator responses with recorded redacted QEMU/OpenBMC fixtures.
-- Treat vendor extensions as adapter-specific fixtures.
+- Compare simulator responses with canonical fixtures derived from the pinned
+  selected schemas and accepted synthetic contract.
+- Treat simulator extensions as explicit adapter-contract fixtures.
 - Do not label untested surface as compliant.
-- Record each capability as observed on the pinned QEMU image, synthetic-only, or unsupported/unverified.
-- Freeze the actual QEMU update mechanism and fixture before simulator/adapter behavior becomes contractual.
+- Record each capability as selected-standard, simulator-extension,
+  admin-only, or unsupported.
+- Freeze the synthetic update mechanism and fixtures before simulator/adapter
+  behavior becomes contractual.
 
 ## Migration testing
 
@@ -208,7 +212,7 @@ Every material run stores:
 | Git commit and image digest | Yes |
 | Schema/IaC version | Integration/cloud runs |
 | Timestamp/timezone and duration | Yes |
-| Environment/region/resources | Integration/load/QEMU |
+| Environment/region/resources | Integration/load/restore |
 | Scenario/config/seed | Generated/fault/load |
 | Tool versions | Yes |
 | Pass/fail and exact assertion | Yes |
@@ -231,7 +235,7 @@ Every material run stores:
 | Full fault matrix | No | Scheduled/manual | Required |
 | 1,000-target load/soak | No | Manual/scheduled | Required for claim |
 | Restore | No | Periodic | Required |
-| QEMU/OpenBMC | No | Manual | Required for compatibility claim |
+| Full virtual-BMC contract/replay | Required subset | Required | Required for synthetic target claim |
 | Secret/license/SBOM/provenance | Required subset | Required | Required |
 
 ## Completion rule

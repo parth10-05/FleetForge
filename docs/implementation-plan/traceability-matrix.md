@@ -22,6 +22,7 @@ This matrix ensures that every architecture invariant and major non-functional r
 | INV-12 | Retries are finite, multi-scope budgeted, and resume the correct step | 02, 08, 09, 14 | Attempt/deadline/domain counters + jitter + explicit resume step | P02-PT-05, P08-RT-01, P09-FT-12/19, L5 report |
 | INV-13 | Physical operation concurrency survives handler lease expiry and ambiguity | 08, 09, 14 | Durable operation reservation independent of work lease | P08-CT-03, P09-FT-17, L3/L5 active-operation series |
 | INV-14 | Target ownership survives target-update terminality and unresolved operations | 03, 05, 07, 09 | Readiness enrollment claim and unresolved-operation quarantine | P03-IT-15, P05-IT-05, P09-FT-20 |
+| INV-15 | Simulator acceptance truth is independent, durable, and never hides duplicate requests | 04, 09, 14 | Seeded scenario, single-owner engine, append-only acceptance journal, and independent oracle | V1 simulator journal/oracle mutation tests; P14-T21/T21A/T21B |
 
 ## Functional requirements
 
@@ -32,7 +33,7 @@ This matrix ensures that every architecture invariant and major non-functional r
 | FR-03 | Create/validate/freeze campaign | 05, 07, 10, 11 | Snapshot hash, plan golden tests, UI E2E |
 | FR-04 | Select canary and ordered waves | 07 | Determinism/property/golden plan |
 | FR-05 | Enforce physical-operation concurrency by global/site/rack | 08, 09, 14 | Reservation race plus simulator active-operation time series across expiry/attention |
-| FR-06 | Submit/update/observe/reboot/verify target | 09, 14 | Full simulator flow + QEMU record |
+| FR-06 | Submit/update/observe/reboot/verify target | 09, 14 | Full virtual-BMC flow plus independent acceptance journal |
 | FR-07 | Pause/resume/abort safely | 02, 07–11 | Epoch race, E2E command and UI tests |
 | FR-08 | Reconcile lost events/tasks | 04, 08, 09, 14 | Lost-event/task fault reports |
 | FR-09 | Handle manual attention | 09–11 | Admin/recent-auth/audit E2E |
@@ -43,7 +44,7 @@ This matrix ensures that every architecture invariant and major non-functional r
 | ID | Requirement | Phase(s) | Target/evidence |
 |---|---|---:|---|
 | NFR-01 | 1,000 simulated targets without redesign | 04, 07–09, 11, 14 | L2–L5 load reports |
-| NFR-02 | Cloud-first; no laptop DB/heavy OpenBMC build | 01, 13, 14 | Developer setup and remote QEMU/builder record |
+| NFR-02 | Laptop-feasible virtual-target development with optional cloud application services | 01, 13, 14 | Local/container setup, resource measurements, and teardown record |
 | NFR-03 | API p95 design target under 500 ms for non-device endpoints | 10, 12, 14 | SLO-01 measured profile |
 | NFR-04 | 99% runnable due work starts within 60 s design target | 08, 12, 14 | SLO-02 measurement |
 | NFR-05 | Zero blind or stale-worker duplicate submission in fault suite | 09, 14 | Independent SLO-03 accepted-operation and proven-absence report |
@@ -53,7 +54,7 @@ This matrix ensures that every architecture invariant and major non-functional r
 | NFR-09 | Reproducible CI/CD and rollback | 01, 03, 13 | Clean runner, same digest, rollback drill |
 | NFR-10 | Isolated restore and decision replay | 03, 12–14 | Restore/integrity/replay report |
 | NFR-11 | Bounded cloud cost/free-tier awareness | 06, 12–15 | Cost ledger, caps, teardown, observed run cost |
-| NFR-12 | Honest QEMU/OpenBMC compatibility evidence | 04, 05, 09, 14, 15 | Redacted fixture and integration report |
+| NFR-12 | Honest synthetic target compatibility boundary | 04, 05, 09, 14, 15 | Pinned DMTF fixture provenance, integration report, and explicit limitations |
 
 ## Architecture component coverage
 
@@ -62,7 +63,7 @@ This matrix ensures that every architecture invariant and major non-functional r
 | Control API | 01 baseline, 10 complete | 12–14 |
 | Domain reducers/policies | 02, 07 | 09, 14 |
 | PostgreSQL/outbox/due work/enrollment | 03 | 08, 12–14 |
-| Redfish simulator on persistent VM | Pre-04 capability spike, 04 | 09, 14 |
+| Redfish-shaped virtual-BMC backend | Pre-04 contract spike, 04 | 09, 14 |
 | Redfish adapter/inventory | 05 | 09, 14 |
 | Artifact service | 06 | 10, 13, 14 |
 | Orchestrator worker | 08, 09 | 12–14 |
@@ -77,3 +78,12 @@ This matrix ensures that every architecture invariant and major non-functional r
 - A requirement cannot be marked complete without an evidence location.
 - If a requirement is deferred, record scope/reason/risk in the Decision Log and Risk Register.
 - If an invariant is weakened, architecture approval is required before implementation.
+
+## Simulator preparation status
+
+The deterministic simulator's logical-time/scenario boundary is accepted in
+ADR-014, its isolation/single-owner design is accepted in ADR-038, and the
+synthetic update contract is frozen in ADR-032 and ADR-039. Route work may use
+only the pinned DMTF-derived fixtures and documented FleetForge extensions.
+Preparation alone is not proof of P04-LT-01, P04-LT-02, full Phase 04
+completion, complete Redfish compatibility, or a 1,000-target measurement.

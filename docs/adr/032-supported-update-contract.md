@@ -1,31 +1,39 @@
-# ADR 032: Supported update contract
+# ADR 032: Supported virtual-BMC update contract
 
 ## Status
 
-Proposed pending QEMU/OpenBMC capability and recovery evidence.
+Accepted for the synthetic FleetForge virtual-BMC backend.
 
 ## Decision
 
-FleetForge v1 will support exactly one simulator-backed update contract. The
-contract must identify the selected Redfish service root, update endpoint,
-artifact-transfer method, task lifecycle representation, inventory evidence,
-reboot behavior, authentication procedure, and recovery procedure.
+FleetForge v1 supports exactly one synthetic update contract implemented by
+the repository-owned virtual-BMC backend. The contract identifies the selected
+Redfish-shaped service root, update endpoint, bounded artifact-transfer method,
+task lifecycle, inventory evidence, reboot behavior, authentication procedure,
+fault behavior, and recovery procedure.
 
-No API or worker implementation may infer support from vendor names, generic
-Redfish discovery, or a successful upload alone. The update path is accepted
-only after the selected QEMU/OpenBMC image demonstrates a documented,
-reversible test-image update and recovery result.
+The backend accepts only synthetic artifacts and never interprets uploaded
+bytes as executable firmware. Its independent journal records every received
+request and every accepted operation before response-loss injection. Repeated
+accepted requests remain repeated visible side effects; the backend does not
+deduplicate on FleetForge attempt or command identity.
+
+The supported surface is derived from a pinned DMTF schema release and labels
+all FleetForge extensions explicitly. It is a project-owned test contract, not
+a vendor, hardware, or full Redfish compatibility statement.
 
 ## Stop condition
 
-If the selected image cannot safely demonstrate this contract, the v1 update
-scope stops before Phase 04 consumes it. The contract must be revised through
-a new ADR rather than relaxed in application code.
+If an update, task, inventory, reboot, health, or ambiguity behavior is absent
+from this ADR and its supported-resource matrix, the implementation stops and
+the contract is revised through an ADR. Application code may not infer missing
+behavior or weaken the independent acceptance oracle.
 
 ## Required evidence
 
-- image source, checksum, license, and provenance;
-- supported Redfish version and trust/credential procedure;
-- redacted service, task, and inventory observations;
-- upload/apply/reboot timeline for a reversible test image; and
-- failure and recovery record.
+- pinned DMTF release and checksums for the selected schemas;
+- versioned canonical service, task, inventory, event, and error fixtures;
+- scenario, seed, request-trace, and backend-build identity;
+- synthetic upload, task, reboot, inventory, and health timeline;
+- pre-accept, post-accept, retry, contradiction, and recovery records; and
+- explicit limitations stating that no external device was tested.

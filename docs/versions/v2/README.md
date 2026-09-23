@@ -26,11 +26,13 @@ v2 turns the v1 simulator demo into a bounded AWS operator beta. It completes th
 | [V2-P03](03-operator-console.md) | Phase 11 | The browser console accurately represents and controls server truth. |
 | [V2-P04](04-observability-and-staging-hardening.md) | Phase 12 baseline and Phase 13 hardening | A staging operator can detect, diagnose, and safely roll back defined failures. |
 
-v2 is an operator beta. It must not claim release-scale load results, restore proof, QEMU update compatibility, or public portfolio completeness until v3 evidence exists.
+v2 is an operator beta. It must not claim release-scale load results, restore
+proof, external-device compatibility, or public portfolio completeness until
+v3 evidence exists.
 
 ## v2 exit evidence
 
 - A Cognito-authenticated operator can complete normal, pause/abort, stale-revision, and attention workflows through the console.
 - Staging deploys the same immutable image digest that CI tested; rollback and schema compatibility are demonstrated.
 - Queue, database, API, worker, simulator, and browser telemetry can reconstruct a campaign without secret leakage.
-- The report labels all throughput/SLO figures as measured only in their exact staging scenario. It does not make a 1,000-target or QEMU-update claim.
+- The report labels all throughput/SLO figures as measured only in their exact staging scenario. It does not make a 1,000-target or external-device claim.

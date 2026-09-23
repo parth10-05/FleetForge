@@ -10,15 +10,15 @@ This is not a calendar estimate. Progress is evidence-based. A phase is complete
 
 - Approved design: [FleetForge System Architecture RFC](../../FleetForge_System_Architecture_RFC.docx)
 - Normative corrections: [FleetForge Architecture Freeze](architecture-freeze.md)
-- System type: cloud-first firmware-rollout control plane for Redfish/OpenBMC targets
+- System type: firmware-rollout control plane exercised against a repository-owned Redfish-shaped virtual-BMC backend
 - Implementation style: Go modular monolith with separately deployed API, worker, and simulator roles
 - Authoritative state: PostgreSQL
 - Delayed command delivery: Amazon SQS Standard, with PostgreSQL due-work repair and Amazon EventBridge Scheduler wakeups
 - First-release fan-out: database-backed projection/SSE hints; no event broker is used
-- Simulator runtime: one on-demand EC2 VM with persistent test-run state and journal
+- Simulator runtime: local/containerized Go role with persistent test-run state and journal
 - Device boundary: normalized Redfish adapter
 - Scale proof: at least 1,000 deterministic simulated targets
-- Realism proof: one QEMU/OpenBMC integration target
+- Device-boundary proof: canonical synthetic contract fixtures, deterministic replay, and independent acceptance evidence
 - Core safety rule: uncertain firmware submission is reconciled or moved to `NEEDS_ATTENTION`; it is never blindly repeated
 
 ## Core principles
@@ -31,7 +31,7 @@ Read [00-core-principles-and-delivery-contract.md](00-core-principles-and-delive
 4. At-least-once internal execution must not become duplicate firmware submission.
 5. Every long wait is durable scheduled state, never a sleeping process.
 6. Every phase includes tests, telemetry, failure behavior, and rollback.
-7. The simulator must be deterministic and adversarial; QEMU is the compatibility proof, not the load generator.
+7. The virtual-BMC backend must be deterministic, adversarial, and independently auditable; it is both the target contract and load generator for the portfolio scope.
 8. Claims remain targets until measured evidence exists.
 9. Cloud services must have spend limits and replaceable boundaries; billing budgets are alerts unless a separately tested shutdown control is configured.
 10. No service, abstraction, or dependency is added only for résumé vocabulary.
@@ -45,8 +45,8 @@ flowchart TD
   P01 --> P04[04 Redfish simulator]
   P02 --> P03
   P03 --> P13A[13A Cloud bootstrap]
-  P13A --> QSP[QEMU capability spike]
-  QSP --> P04[04 Redfish simulator]
+  P03 --> VBCS[Virtual-BMC contract spike]
+  VBCS --> P04[04 Virtual-BMC backend]
   P03 --> P05[05 Inventory and preflight]
   P04 --> P05
   P03 --> P06[06 Artifact integrity]
@@ -67,7 +67,7 @@ flowchart TD
   P13A --> P13[13 Infrastructure hardening and CI/CD]
   P12 --> P13
   P11 --> P13
-  P04 --> P14[14 Load, fault, and QEMU validation]
+  P04 --> P14[14 Load, fault, and recovery validation]
   P09 --> P14
   P12 --> P14
   P13 --> P14
@@ -79,7 +79,7 @@ flowchart TD
 | Track | Phases | Meaning |
 |---|---|---|
 | Correctness core | 02, 03, 07, 08, 09 | State, transactions, rollout decisions, work ownership, ambiguity safety |
-| Device realism | 04, 05, 06, 09, 14 | Redfish behavior, inventory, firmware artifacts, updates, QEMU proof |
+| Device test boundary | Pre-04, 04, 05, 06, 09, 14 | Synthetic contract, inventory, artifacts, updates, faults, and deterministic replay |
 | Operator surface | 10, 11 | Secure API, audit trail, campaign control, progress visualization |
 | Production readiness | 01, 12, 13, 14 | CI, telemetry, runbooks, cloud deployment, failure and recovery evidence |
 | Portfolio proof | all, consolidated in 15 | Reproducibility, measurements, diagrams, limitations, technical narrative |
@@ -91,7 +91,7 @@ flowchart TD
 | 01 | Can a fresh runner build and verify the repository without hidden state? | Green CI, locked toolchain, health smoke test, secret scan |
 | 02 | Can all state transitions be decided deterministically without I/O? | Table tests, property tests, race-free pure reducer |
 | 03 | Are intent, audit, and outbox atomic under concurrency? | Real-PostgreSQL integration and concurrent-claim tests |
-| Pre-04 | Does the pinned QEMU/OpenBMC image support the update and evidence path assumed by the design? | Redacted capability/update fixtures, artifact-path decision, recovery proof, and accepted ADR |
+| Pre-04 | Is every virtual-target route, field, extension, transition, limit, and fault explicit before implementation? | Pinned schemas, canonical fixtures, accepted update contract, and recovery ordering |
 | 04 | Can failures be reproduced exactly from a seed without the simulator masking duplicate requests? | Contract suite, persistent journal, deliberate-oracle-failure check, and deterministic replay report |
 | 05 | Can FleetForge freeze a valid, conflict-free target set? | Discovery/selector/preflight integration report |
 | 06 | Can only immutable, verified, compatible artifacts become rollout-ready? | Digest/signature/compatibility negative tests |
@@ -102,7 +102,7 @@ flowchart TD
 | 11 | Does the UI communicate safety state and recover from disconnected updates? | Browser E2E, accessibility, reconnect, stale-revision tests |
 | 12 | Can an operator detect, diagnose, and recover from designed failures? | Dashboards, alerts, traces, and runbook drills |
 | 13 | Can the same artifact be securely promoted and rolled back? | Staging deployment, migration compatibility, rollback rehearsal |
-| 14 | Do scale, fault, restore, and real-protocol claims hold under measurement? | Load report, chaos report, restore evidence, QEMU transcript |
+| 14 | Do scale, parallelism, fault, restore, and deterministic-contract claims hold under measurement? | Load report, fault report, restore evidence, replay transcript, and independent-journal results |
 | 15 | Can another engineer reproduce and critique the project honestly? | Release bundle, demo, limitations, evidence index |
 
 ## Phase document contract

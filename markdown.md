@@ -22,7 +22,7 @@ This file is the stable entry point for FleetForge design and delivery documenta
 | 01 | [Repository and Engineering Foundation](docs/implementation-plan/01-foundation-and-repository.md) | Reproducible monorepo, toolchain, CI baseline, configuration, health service |
 | 02 | [Domain Model and State Machines](docs/implementation-plan/02-domain-model-and-state-machines.md) | Pure, deterministic campaign and target lifecycle with invariant tests |
 | 03 | [Persistence, Migrations, Idempotency, and Outbox](docs/implementation-plan/03-persistence-and-transactional-outbox.md) | Transactional PostgreSQL foundation and replayable intent |
-| Pre-04 | [QEMU OpenBMC Capability Spike](docs/implementation-plan/pre-04-qemu-capability-spike.md) | Freeze the real update, artifact-transfer, task/inventory, and recovery contract before simulation |
+| Pre-04 | [Virtual-BMC Contract Spike](docs/implementation-plan/pre-04-virtual-bmc-contract-spike.md) | Freeze the synthetic update, artifact-transfer, task/inventory, fault, and recovery contract before route implementation |
 | 04 | [Deterministic Redfish Simulator](docs/implementation-plan/04-redfish-simulator.md) | Protocol-faithful virtual fleet with seeded fault profiles |
 | 05 | [Target Inventory and Preflight](docs/implementation-plan/05-target-inventory-and-preflight.md) | Safe discovery, normalized capabilities, selectors, and frozen target snapshots |
 | 06 | [Firmware Artifact Integrity](docs/implementation-plan/06-firmware-artifact-integrity.md) | Immutable object metadata, digest/signature verification, compatibility policy |
@@ -33,7 +33,7 @@ This file is the stable entry point for FleetForge design and delivery documenta
 | 11 | [Operator Console and Live Progress](docs/implementation-plan/11-operator-console.md) | Safety-oriented campaign UI, resumable updates, and accessible audit views |
 | 12 | [Observability, SLOs, and Runbooks](docs/implementation-plan/12-observability-slos-and-runbooks.md) | Correlated telemetry, actionable alerts, operational dashboards, and recovery procedures |
 | 13 | [Cloud Infrastructure and CI/CD](docs/implementation-plan/13-cloud-infrastructure-and-cicd.md) | Reproducible cloud environments, secure deployment, promotion, and rollback |
-| 14 | [Load, Fault, Recovery, and QEMU/OpenBMC Validation](docs/implementation-plan/14-load-fault-and-qemu-validation.md) | Measured 1,000-target evidence and one genuine OpenBMC integration proof |
+| 14 | [Load, Fault, Recovery, and Virtual-BMC Validation](docs/implementation-plan/14-load-fault-and-recovery-validation.md) | Measured 1,000-target, bounded-parallelism, fault, restore, and deterministic-replay evidence |
 | 15 | [Portfolio Release and Engineering Narrative](docs/implementation-plan/15-portfolio-release-and-evidence.md) | Reproducible public release backed by evidence, limitations, and a technical story |
 
 ## Navigation rules
