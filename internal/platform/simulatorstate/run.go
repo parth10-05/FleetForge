@@ -84,6 +84,23 @@ func RecoverRun(root, id string) (Run, error) {
 	return run, nil
 }
 
+// WriteStateSnapshot binds a caller-provided immutable engine projection to
+// the current validated journal checkpoint. The caller owns engine access; this
+// retained-state layer owns the atomic filesystem write.
+func (r Run) WriteStateSnapshot(logicalTime int64, state []byte) error {
+	entries, err := journal.Load(r.JournalPath)
+	if err != nil {
+		return fmt.Errorf("load retained journal: %w", err)
+	}
+	snapshot := journal.Snapshot{LogicalTime: logicalTime, State: state}
+	if len(entries) > 0 {
+		last := entries[len(entries)-1]
+		snapshot.Sequence = last.Sequence
+		snapshot.Hash = last.Hash
+	}
+	return journal.WriteSnapshot(r.SnapshotPath, snapshot)
+}
+
 func (r Run) AcquireOwner() (func() error, error) {
 	file, err := os.OpenFile(r.OwnerPath, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
