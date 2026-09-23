@@ -196,6 +196,8 @@ func (e *Engine) loop(m model) {
 func (m *model) apply(c Command, now *clock.Manual, s *clock.Scheduler, seq uint64) (Result, error) {
 	var fired []clock.Event
 	switch v := c.(type) {
+	case Snapshot:
+		// result construction below returns copied, sorted values only.
 	case Observe:
 		if _, ok := m.targets[v.TargetID]; !ok {
 			return Result{}, ErrUnknownTarget

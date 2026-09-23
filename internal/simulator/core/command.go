@@ -15,6 +15,12 @@ type Observe struct{ TargetID string }
 
 func (Observe) command() {}
 
+// Snapshot returns the complete immutable engine projection for durable state
+// capture. It cannot alter logical time or lifecycle state.
+type Snapshot struct{}
+
+func (Snapshot) command() {}
+
 // AcceptUpdate creates a distinct synthetic operation and task. AttemptID is a
 // correlation input, never a deduplication key.
 type AcceptUpdate struct{ TargetID, Version, AttemptID string }

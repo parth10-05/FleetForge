@@ -59,6 +59,22 @@ func TestStartRecoveredExposesDurableAcceptedTruth(t *testing.T) {
 	}
 }
 
+func TestSnapshotIsReadOnlyCompleteProjection(t *testing.T) {
+	engine, err := Start(testScenario(), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	first, err := engine.Submit(context.Background(), Snapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := engine.Submit(context.Background(), Snapshot{})
+	if err != nil || len(first.State) != len(second.State) || first.Sequence+1 != second.Sequence {
+		t.Fatalf("snapshot results = %#v, %#v, %v", first, second, err)
+	}
+}
+
 func TestRecoverAcceptedOperationsRejectsUnknownTarget(t *testing.T) {
 	input := testScenario()
 	entry, err := journal.New("run-1", 1, 0, journal.UpdateAccepted, "target-not-in-scenario", "attempt", "digest", "")
