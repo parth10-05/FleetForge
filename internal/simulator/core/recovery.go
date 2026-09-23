@@ -15,6 +15,40 @@ type RecoveredAcceptance struct {
 	Task      TaskState
 }
 
+// StartRecovered starts an engine only after the journal acceptance projection
+// has been fully validated and converted to deterministic core values.
+func StartRecovered(input scenario.Scenario, entries []journal.Entry, queueSize int) (*Engine, error) {
+	recovered, err := RecoverAcceptedOperations(input, entries)
+	if err != nil {
+		return nil, err
+	}
+	if err := input.Validate(); err != nil {
+		return nil, err
+	}
+	m := model{input: input, targets: map[string]target{}, operations: map[string]OperationState{}, tasks: map[string]TaskState{}, subscriptions: map[string]SubscriptionState{}, events: map[string]EventState{}, faults: map[string]FaultState{}}
+	for _, value := range input.Targets {
+		id, err := scenario.ID(input, "target", value.Index)
+		if err != nil {
+			return nil, err
+		}
+		m.targets[id] = target{TargetState: TargetState{ID: id, Site: value.Site, Rack: value.Rack, Version: value.InitialVersion, Healthy: true, Reachable: true, Phase: LifecycleHealthy}, ExpectedVersion: value.ExpectedVersion}
+	}
+	for _, value := range input.Faults {
+		m.faults[value.FaultID] = FaultState{ID: value.FaultID, Name: value.Name, Scope: value.Scope, ScopeKey: value.ScopeKey, Remaining: value.Consumption, Priority: value.Priority}
+	}
+	for _, value := range recovered {
+		m.operations[value.Operation.ID] = value.Operation
+		m.tasks[value.Task.ID] = value.Task
+		m.acceptanceOrdinal = value.Operation.Ordinal
+		t := m.targets[value.Operation.TargetID]
+		t.RequestCount++
+		t.AcceptedCount++
+		t.StagedVersion = value.Operation.Version
+		m.targets[t.ID] = t
+	}
+	return startModel(m, queueSize)
+}
+
 // RecoverAcceptedOperations projects durable acceptance truth into the same
 // deterministic operation/task identities used by the engine. It is pure: the
 // caller must separately start an engine from this recovered state.

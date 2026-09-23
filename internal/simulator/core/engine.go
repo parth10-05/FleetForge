@@ -136,6 +136,13 @@ func Start(input scenario.Scenario, queueSize int) (*Engine, error) {
 	for _, v := range input.Faults {
 		m.faults[v.FaultID] = FaultState{ID: v.FaultID, Name: v.Name, Scope: v.Scope, ScopeKey: v.ScopeKey, Remaining: v.Consumption, Priority: v.Priority}
 	}
+	return startModel(m, queueSize)
+}
+
+func startModel(m model, queueSize int) (*Engine, error) {
+	if queueSize < 1 || queueSize > 4096 {
+		return nil, fmt.Errorf("invalid engine queue size")
+	}
 	e := &Engine{requests: make(chan request, queueSize), stop: make(chan struct{}), stopped: make(chan struct{})}
 	go e.loop(m)
 	return e, nil

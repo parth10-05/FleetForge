@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -31,6 +32,30 @@ func TestRecoverAcceptedOperationsReconstructsEachDurableAcceptance(t *testing.T
 	}
 	if recovered[0].Operation.AttemptID != "same-attempt" || recovered[1].Operation.Version != "2" {
 		t.Fatalf("recovered operation metadata = %#v", recovered)
+	}
+}
+
+func TestStartRecoveredExposesDurableAcceptedTruth(t *testing.T) {
+	input := testScenario()
+	target, _ := scenario.ID(input, "target", 1)
+	entry, err := journal.New("run-1", 1, 0, journal.UpdateAccepted, target, "attempt", "digest", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := StartRecovered(input, []journal.Entry{entry}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	result, err := engine.Submit(context.Background(), Observe{TargetID: target})
+	accepted := uint64(0)
+	for _, state := range result.State {
+		if state.ID == target {
+			accepted = state.AcceptedCount
+		}
+	}
+	if err != nil || len(result.Operations) != 1 || len(result.Tasks) != 1 || accepted != 1 {
+		t.Fatalf("recovered result = %#v, %v", result, err)
 	}
 }
 
