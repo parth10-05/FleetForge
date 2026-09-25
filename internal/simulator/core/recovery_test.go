@@ -122,6 +122,41 @@ func TestStartFromSnapshotRestoresImmutableProjection(t *testing.T) {
 	}
 }
 
+func TestStartFromSnapshotRestoresPendingLifecycleEvents(t *testing.T) {
+	input := testScenario()
+	source, err := Start(input, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Submit(context.Background(), AcceptUpdate{TargetID: target, Version: "2", AttemptID: "attempt-1"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, snapshot, err := SnapshotBytes(context.Background(), source)
+	source.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Pending) != 4 {
+		t.Fatalf("pending events = %#v", snapshot.Pending)
+	}
+	restored, err := StartFromSnapshot(input, raw, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	result, err := restored.Submit(context.Background(), AdvanceTo{Time: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks) != 1 || result.Tasks[0].State != LifecycleHealthy || result.Tasks[0].PercentComplete != 100 {
+		t.Fatalf("recovered lifecycle result = %#v", result)
+	}
+}
+
 func TestStartFromSnapshotRejectsDuplicateOperationID(t *testing.T) {
 	input := testScenario()
 	state := make([]TargetState, 0, len(input.Targets))

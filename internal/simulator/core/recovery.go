@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
+	"github.com/parth10-05/fleetforge/internal/simulator/clock"
 	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 )
 
-const SnapshotSchemaVersion = "fleetforge.simulator.core-snapshot/v1"
+const SnapshotSchemaVersion = "fleetforge.simulator.core-snapshot/v2"
 
 type PersistedSnapshot struct {
 	SchemaVersion string `json:"schema_version"`
@@ -59,7 +61,7 @@ func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Eng
 	if err := input.Validate(); err != nil {
 		return nil, err
 	}
-	m := model{input: input, targets: map[string]target{}, operations: map[string]OperationState{}, tasks: map[string]TaskState{}, subscriptions: map[string]SubscriptionState{}, events: map[string]EventState{}, faults: map[string]FaultState{}}
+	m := model{input: input, targets: map[string]target{}, operations: map[string]OperationState{}, tasks: map[string]TaskState{}, subscriptions: map[string]SubscriptionState{}, events: map[string]EventState{}, faults: map[string]FaultState{}, pending: append([]clock.Event(nil), result.Pending...)}
 	m.logicalTime = result.Time
 	m.commandSequence = result.Sequence
 	expected := map[string]scenario.Target{}
@@ -142,7 +144,48 @@ func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Eng
 	if err := m.restoreFaults(result.Faults); err != nil {
 		return nil, err
 	}
+	if err := m.validatePending(result.Pending, result.Time); err != nil {
+		return nil, err
+	}
 	return startModel(m, queueSize)
+}
+
+func (m *model) validatePending(events []clock.Event, current clock.LogicalTime) error {
+	seen := make(map[uint64]struct{}, len(events))
+	for _, event := range events {
+		if event.Due < current || event.Sequence == 0 || event.Value == "" {
+			return fmt.Errorf("invalid core snapshot")
+		}
+		if _, ok := m.targets[event.TargetID]; !ok {
+			return fmt.Errorf("invalid core snapshot")
+		}
+		if _, exists := seen[event.Sequence]; exists {
+			return fmt.Errorf("invalid core snapshot")
+		}
+		seen[event.Sequence] = struct{}{}
+		if event.Value == "reachable" || event.Value == "unreachable" {
+			continue
+		}
+		parts := strings.SplitN(event.Value, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid core snapshot")
+		}
+		task, ok := m.tasks[parts[1]]
+		if !ok || task.TargetID != event.TargetID {
+			return fmt.Errorf("invalid core snapshot")
+		}
+		kind := TransitionKind(parts[0])
+		if kind == "healthy" {
+			if event.Priority != priorityHealthy {
+				return fmt.Errorf("invalid core snapshot")
+			}
+			continue
+		}
+		if priority(kind) != event.Priority {
+			return fmt.Errorf("invalid core snapshot")
+		}
+	}
+	return nil
 }
 
 func (m *model) restoreFaults(states []FaultState) error {

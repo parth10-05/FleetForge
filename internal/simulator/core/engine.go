@@ -85,6 +85,7 @@ type Result struct {
 	Events        []EventState
 	Faults        []FaultState
 	Fired         []clock.Event
+	Pending       []clock.Event
 }
 
 type target struct {
@@ -103,6 +104,7 @@ type model struct {
 	acceptanceOrdinal, subscriptionOrdinal, eventOrdinal uint64
 	logicalTime                                          clock.LogicalTime
 	commandSequence                                      uint64
+	pending                                              []clock.Event
 }
 type request struct {
 	command Command
@@ -145,6 +147,10 @@ func startModel(m model, queueSize int) (*Engine, error) {
 	if queueSize < 1 || queueSize > 4096 {
 		return nil, fmt.Errorf("invalid engine queue size")
 	}
+	var schedule clock.Scheduler
+	if err := schedule.Restore(m.pending); err != nil {
+		return nil, err
+	}
 	e := &Engine{requests: make(chan request, queueSize), stop: make(chan struct{}), stopped: make(chan struct{})}
 	go e.loop(m)
 	return e, nil
@@ -182,6 +188,7 @@ func (e *Engine) loop(m model) {
 	defer close(e.stopped)
 	now := clock.NewManual(m.logicalTime)
 	var schedule clock.Scheduler
+	_ = schedule.Restore(m.pending)
 	seq := m.commandSequence
 	for {
 		select {
@@ -268,7 +275,7 @@ func (m *model) apply(c Command, now *clock.Manual, s *clock.Scheduler, seq uint
 	default:
 		return Result{}, errors.New("unsupported simulator command")
 	}
-	return m.snapshot(seq, now.Now(), fired), nil
+	return m.snapshot(seq, now.Now(), fired, s), nil
 }
 func priority(k TransitionKind) int {
 	switch k {
@@ -510,8 +517,8 @@ func (m *model) emit(targetID, taskID, kind string) {
 	m.targets[targetID] = t
 	m.events[id] = EventState{ID: id, TargetID: targetID, TaskID: taskID, Sequence: t.EventSequence, Kind: kind}
 }
-func (m *model) snapshot(seq uint64, time clock.LogicalTime, fired []clock.Event) Result {
-	r := Result{Sequence: seq, Time: time, Fired: append([]clock.Event(nil), fired...)}
+func (m *model) snapshot(seq uint64, time clock.LogicalTime, fired []clock.Event, schedule *clock.Scheduler) Result {
+	r := Result{Sequence: seq, Time: time, Fired: append([]clock.Event(nil), fired...), Pending: schedule.Snapshot()}
 	for _, v := range m.targets {
 		r.State = append(r.State, v.TargetState)
 	}
