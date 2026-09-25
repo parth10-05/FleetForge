@@ -1,4 +1,4 @@
-# Virtual-BMC durable state — Run 03
+# Synthetic target durable state — Run 03
 
 ## Scope
 

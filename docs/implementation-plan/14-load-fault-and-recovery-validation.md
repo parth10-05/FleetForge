@@ -1,11 +1,11 @@
-# Phase 14 — Load, Fault, Recovery, and Virtual-BMC Validation
+# Phase 14 — Load, Fault, Recovery, and Synthetic Target Validation
 
 ## Outcome
 
 Produce defensible evidence that FleetForge meets its stated 1,000-target
 design goal, preserves safety invariants under failure, restores from durable
 state, and remains deterministic against the accepted repository-owned
-virtual-BMC contract.
+synthetic target contract.
 
 This phase validates claims. It does not tune tests until they pass, hide
 failed runs, or extrapolate measurements beyond the recorded environment.
@@ -33,7 +33,7 @@ failed runs, or extrapolate measurements beyond the recorded environment.
 
 ```mermaid
 flowchart TD
-  Correctness[Unit, property, and database invariants] --> Fault[Deterministic virtual-BMC fault matrix]
+  Correctness[Unit, property, and database invariants] --> Fault[Deterministic synthetic target fault matrix]
   Fault --> Load[10, 100, and 1,000-target load]
   Load --> Recovery[Queue, database, service-loss, and restore drills]
   Recovery --> Replay[Contract, determinism, and independent-journal replay]
@@ -57,7 +57,7 @@ flowchart TD
 - Campaign planning and validation duration.
 - Targets reaching terminal state per minute.
 - Serial versus bounded-parallel elapsed time.
-- API and virtual-target request p50/p95/p99 latency.
+- API and synthetic-target request p50/p95/p99 latency.
 - Queue publish/delivery and due-work start delay.
 - Task, reboot, verification, and reconciliation latency.
 - PostgreSQL pool wait, transaction duration, lock/deadlock/conflict counts,
@@ -78,7 +78,7 @@ flowchart TD
   timings, faults, policy, concurrency, limits, and duration.
 - [ ] **P14-T02** Record application/image digests, schema/IaC versions,
   runner resources, service sizing, database plan, and telemetry configuration.
-- [ ] **P14-T03** Generate deterministic virtual targets, campaigns, and
+- [ ] **P14-T03** Generate deterministic synthetic targets, campaigns, and
   synthetic artifacts with no live secrets.
 - [ ] **P14-T04** Automate environment preflight, callback/route isolation, and
   resource-budget verification.
@@ -112,7 +112,7 @@ flowchart TD
 - [ ] **P14-T18** Kill or stall workers at every documented persistence/network
   boundary, including a stale live worker after lease expiry.
 - [ ] **P14-T19** Interrupt queue delivery, scheduler wakeup, telemetry export,
-  virtual-target availability, and database connectivity separately.
+  synthetic-target availability, and database connectivity separately.
 - [ ] **P14-T20** Verify no queue, event, or simulator-process outage erases
   workflow truth.
 - [ ] **P14-T21** Verify the independent receive/acceptance journal, rather than
@@ -121,24 +121,24 @@ flowchart TD
 - [ ] **P14-T21A** Fail the suite when the reconciler reports
   `PROVEN_ABSENT` after the backend accepted the original request.
 - [ ] **P14-T21B** Fail the suite when the controller sends a deliberate second
-  request to the non-idempotent virtual target.
+  request to the non-idempotent synthetic target.
 - [ ] **P14-T22** Preserve every failing seed and add it to regression tests.
 
 ### Restore and reconstruction
 
 - [ ] **P14-T23** Create an isolated backup/export from known campaign state.
 - [ ] **P14-T24** Restore into recovery mode with submission admission disabled
-  and only isolated virtual-target routes available.
+  and only isolated synthetic-target routes available.
 - [ ] **P14-T25** Check schemas, revisions, audits, counters, active uniqueness,
   outbox/due work, leases, reservations, and journal links.
 - [ ] **P14-T26** Rebuild projections and fresh delivery generations without
   reissuing unsafe side effects.
 - [ ] **P14-T26A** Restore an older database snapshot while the retained
-  virtual-target journal is newer; preserve newer target truth or quarantine.
+  synthetic-target journal is newer; preserve newer target truth or quarantine.
 - [ ] **P14-T27** Run decision replay and compare expected decisions.
 - [ ] **P14-T28** Record recovery point, recovery time, manual steps, and limits.
 
-### Virtual-BMC contract and determinism
+### Synthetic target contract and determinism
 
 - [ ] **P14-T29** Re-verify pinned schema checksums, accepted ADRs, canonical
   fixtures, and supported-resource matrix.
@@ -212,7 +212,7 @@ flowchart TD
 - L2–L5 complete with reproducible artifacts.
 - Safety assertions pass and failing seeds are retained and fixed/retested.
 - Restore/reconstruction and newer-target-truth reconciliation pass.
-- The complete accepted virtual-BMC update/task/reboot/inventory/health path is
+- The complete accepted synthetic target update/task/reboot/inventory/health path is
   demonstrated from documented commands.
 - Serial and bounded-parallel results identify the first measured bottleneck.
 - Costs remain inside the approved budget.

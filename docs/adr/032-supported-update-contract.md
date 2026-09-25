@@ -1,13 +1,13 @@
-# ADR 032: Supported virtual-BMC update contract
+# ADR 032: Supported synthetic target update contract
 
 ## Status
 
-Accepted for the synthetic FleetForge virtual-BMC backend.
+Accepted for the FleetForge synthetic target backend.
 
 ## Decision
 
 FleetForge v1 supports exactly one synthetic update contract implemented by
-the repository-owned virtual-BMC backend. The contract identifies the selected
+the repository-owned synthetic target backend. The contract identifies the selected
 Redfish-shaped service root, update endpoint, bounded artifact-transfer method,
 task lifecycle, inventory evidence, reboot behavior, authentication procedure,
 fault behavior, and recovery procedure.

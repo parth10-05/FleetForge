@@ -13,7 +13,7 @@ of this file.
 | Runtime resources carry required ownership and expiry tags | Pending | Pending |
 | Queue consumer role rejects unapproved queue access | Pending | Pending |
 | Worker zero-capacity repair task is bounded | Pending | Pending |
-| Simulator has no inbound security-group rule and uses SSM only | Pending | Pending |
+| Optional synthetic-target container has no public ingress and its admin surface is privately routed and separately authenticated | Pending | Pending |
 | Cognito client configured without Terraform-stored provider secret | Pending | Pending |
 | Neon roles and secret injection recorded outside source control | Pending | Pending |
 | Budget and service limits recorded in dated ledger | Pending | Pending |

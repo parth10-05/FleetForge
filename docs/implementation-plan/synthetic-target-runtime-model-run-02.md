@@ -1,4 +1,4 @@
-# Virtual-BMC runtime model — Run 02
+# Synthetic target runtime model — Run 02
 
 ## Scope and boundary
 

@@ -1,6 +1,6 @@
-# Virtual-BMC fixture provenance
+# Synthetic target fixture provenance
 
-Status: **frozen for the synthetic virtual-BMC route contract.**
+Status: **frozen for the synthetic target route contract.**
 
 | Required record | Value |
 | --- | --- |
@@ -14,7 +14,4 @@ Status: **frozen for the synthetic virtual-BMC route contract.**
 | Synthetic update and crash/recovery evidence | Deferred to lifecycle and recovery runs; no route fixture asserts hardware behavior |
 | Redaction review | Fixture validation rejects credential material; only loopback callback example addresses are present |
 
-No value in this template proves external-device compatibility. The fixture
-bundle must be accepted by the virtual-BMC contract spike before it freezes an
-HTTP route, request body, content type, timing, task behavior, or recovery
-behavior.
+No value in this template proves external-device compatibility. The fixture bundle and accepted contract records together freeze each HTTP route, request body, content type, timing rule, task behavior, and recovery behavior.

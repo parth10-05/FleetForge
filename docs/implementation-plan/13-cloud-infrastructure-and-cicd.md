@@ -29,8 +29,8 @@ Provision reproducible development bootstrap, staging, and demo-production envir
 |---|---|---|---|
 | Developer | Unit/UI/light process work | No required local DB; cloud dev resources optional | Personal, minimum privileges, easy reset |
 | CI | Deterministic verification | Ephemeral PostgreSQL, in-process/container simulator | No production secrets/routes |
-| Staging | Full cloud integration/fault drills | Custom virtual-BMC container and synthetic artifacts only | Automatic deploy after main; destructive tests allowed only against simulator |
-| Demo production | Stable portfolio demo | Scale-to-zero virtual-BMC container using the accepted synthetic contract | Protected approval, strict budgets, no destructive fault injection by default |
+| Staging | Full cloud integration/fault drills | Custom synthetic target container and synthetic artifacts only | Automatic deploy after main; destructive tests allowed only against simulator |
+| Demo production | Stable portfolio demo | Scale-to-zero synthetic target container using the accepted synthetic contract | Protected approval, strict budgets, no destructive fault injection by default |
 
 ## Deployment flow
 
@@ -60,11 +60,11 @@ flowchart TD
 |---|---|
 | ECS Fargate API service | ALB/private-ingress decision, desired/min/max tasks, CPU/memory, health check, task role, readiness |
 | ECS Fargate worker service/task | SQS polling only, desired/min/max tasks, task deadline, no public ingress, dedicated task role |
-| Virtual-BMC simulator role | locally runnable; optional scale-to-zero Fargate task; one run owner, bounded state/journal, explicit synthetic banner, no external credentials/routes |
+| Synthetic target simulator role | locally runnable; optional scale-to-zero Fargate task; one run owner, bounded state/journal, explicit synthetic banner, no external credentials/routes |
 | EventBridge Scheduler + publisher/sweeper ECS task | IAM-invoked bounded batches, external wakeup at zero worker capacity, same immutable worker image/task role |
 | SQS Standard queues | per-class visibility/redrive/backlog/retry policy, worker IAM role, delivery-generation envelope, quarantine policy |
 | S3 with Versioning | non-public bucket, exact version ID, lifecycle, CORS only if needed, signed upload identity |
-| AWS Secrets Manager | Cognito/provider/config secrets and BMC references; worker-task-role access; administrative CLI provisioning and rotation audit |
+| AWS Secrets Manager | Cognito/provider/config secrets and target credential references; worker-task-role access; administrative CLI provisioning and rotation audit |
 | Neon | session-based Free development project; retained staging/demo on Launch with seven-day restore window; pooled app endpoints, direct migration endpoint, role separation, compute/storage limits |
 | Amazon Cognito User Pools | Google federation, callback/session configuration, OIDC provider adapter, application RBAC, recent-auth policy |
 | Grafana Cloud/OTel | one telemetry destination, API keys/ingestion endpoints, dashboards/alerts, 14-day live retention/cardinality budgets |
@@ -77,14 +77,14 @@ flowchart TD
 ### Early development bootstrap
 
 - [ ] **P13-B01** Provision a disposable AWS development account/environment, Neon project, SQS Standard queues, EventBridge Scheduler repair task, private versioned S3 bucket, AWS Secrets Manager resources, ECR repository, and minimal ECS Fargate API/worker shells after Phase 03.
-- [ ] **P13-B02** Package the virtual-BMC backend as the same immutable
+- [ ] **P13-B02** Package the synthetic target backend as the same immutable
   container used locally. If staging needs remote access, deploy one
   scale-to-zero private Fargate task with bounded storage/export and teardown;
   do not provision an EC2 simulator host.
 - [ ] **P13-B03** Prove the worker ECS task role can receive/delete only its SQS queue messages, EventBridge Scheduler can launch a zero-worker-capacity repair pass, and duplicate/uncertain SQS delivery is repaired through a new delivery generation.
 - [ ] **P13-B04** Prove pooled application and direct migration Neon connections, record connection budgets, and stop scheduler work when the disposable session ends.
-- [ ] **P13-B05** Complete the virtual-BMC contract spike before Phase 04
-  implements Redfish-shaped routes.
+- [ ] **P13-B05** Verify the accepted synthetic target contract records before packaging or deploying
+  the Phase 04 Redfish-shaped routes.
 - [ ] **P13-B06** Store a dated cost/source ledger and capture a bootstrap exit report; defer public promotion permissions until the hardening slice.
 
 ### IaC foundation
@@ -115,7 +115,7 @@ flowchart TD
 - [ ] **P13-T14** Configure API ingress/TLS/custom domain decision and CORS allowlist.
 - [ ] **P13-T15** Configure worker task roles and SQS queue policies so only the worker can receive/delete queue messages; expose no public worker endpoint.
 - [ ] **P13-T16** Configure workers to reach only the accepted private
-  virtual-BMC origin in staging. Validate every returned URI and resolved
+  synthetic target origin in staging. Validate every returned URI and resolved
   connection address; no NAT Gateway or fixed public egress is required for
   the synthetic boundary.
 - [ ] **P13-T17** Configure per-service min/max instances, concurrency, CPU/memory, deadlines, and startup probes from measured staging behavior.
@@ -128,7 +128,7 @@ flowchart TD
 - [ ] **P13-T21** Configure worker IAM task roles, queue policies, and dead-letter queue access.
 - [ ] **P13-T22** Provision EventBridge Scheduler to launch the bounded publisher/sweeper ECS task. Prove it wakes repair while worker capacity is zero.
 - [ ] **P13-T23** Provision private artifact bucket, lifecycle, version ID settings, size/CORS/signing prerequisites.
-- [ ] **P13-T24** Provision secret resources as references/placeholders; a separate administrative CLI writes/rotates BMC values directly, and plaintext never enters committed variables, Terraform state, FleetForge API/browser, or GitHub Actions.
+- [ ] **P13-T24** Provision secret resources as references/placeholders; a separate administrative CLI writes/rotates target credential values directly, and plaintext never enters committed variables, Terraform state, FleetForge API/browser, or GitHub Actions.
 - [ ] **P13-T25** Configure telemetry endpoints/keys and rotation.
 
 ### PostgreSQL environments
@@ -195,7 +195,7 @@ flowchart TD
 | P13-DP-04 | App rollback after expand migration | Prior app remains functional |
 | P13-DP-05 | Telemetry unavailable | Defined degraded behavior; workflow truth preserved and exporter drops remain bounded/visible locally |
 | P13-DP-06 | All ECS Fargate worker capacity at zero with overdue work | EventBridge Scheduler launches a bounded sweep that starts delivery and advances a new delivery generation where needed |
-| P13-DP-07 | Optional virtual-BMC container restarts during an accepted operation | Persistent run/target/journal state recovers consistently or the run fails closed as invalid |
+| P13-DP-07 | Optional synthetic target container restarts during an accepted operation | Persistent run/target/journal state recovers consistently or the run fails closed as invalid |
 | P13-COST-01 | Synthetic runaway traffic | Max instances/queue/application budgets cap amplification |
 | P13-COST-02 | One-minute sweep on disposable Neon Free project | Session shutdown disables sweep; measured CU-hours and retained-environment budget remain explicit |
 | P13-DR-01 | Disposable environment teardown/recreate | Recreated services pass smoke tests; protected evidence retained |
@@ -217,7 +217,7 @@ flowchart TD
 - CI uses short-lived federated credentials only.
 - Same immutable digest is promoted.
 - Migrations and app rollback compatibility are proved.
-- Queue/service/database/VM limits are mutually consistent; database connection budget sums per-role maximum pools rather than multiplying a shared pool again by HTTP concurrency.
+- Queue/service/database/runtime limits are mutually consistent; database connection budget sums per-role maximum pools rather than multiplying a shared pool again by HTTP concurrency.
 - Public/private endpoints and service identities are correct.
 - Cost alerts/caps/retention/teardown exist.
 - Deploying the application cannot start a firmware campaign.

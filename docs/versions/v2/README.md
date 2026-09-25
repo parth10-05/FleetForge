@@ -2,7 +2,7 @@
 
 ## Outcome
 
-v2 turns the v1 simulator demo into a bounded AWS operator beta. It completes the usable control API and browser console, broadens inventory/artifact/planning policy coverage, hardens staging deployment, and adds an operational baseline without claiming release-scale validation.
+v2 turns the local v1 synthetic-target demo into a bounded AWS operator beta and supplies the first live AWS provider evidence. It completes the usable control API and browser console, broadens inventory/artifact/planning policy coverage, hardens staging deployment, and adds an operational baseline without claiming release-scale validation.
 
 ## Planned scope
 

@@ -1,4 +1,4 @@
-# V3-P03 — Restore and Virtual-BMC Validation
+# V3-P03 — Restore and Synthetic Target Validation
 
 ## Goal
 
@@ -10,7 +10,7 @@ restart, container, fault, and restore boundaries.
 
 - [ ] **V3-P03-T01** Create an isolated logical backup/export from a known
   active campaign and restore it to a separate recovery-mode environment with
-  submission admission disabled and only isolated virtual-target routes.
+  submission admission disabled and only isolated synthetic-target routes.
 - [ ] **V3-P03-T02** Run schema, audit, revision, counter, ownership, due-work,
   outbox, lease, reservation, and decision-replay integrity checks.
 - [ ] **V3-P03-T03** Rebuild projections and create fresh delivery generations
@@ -39,7 +39,7 @@ restart, container, fault, and restore boundaries.
 
 ## Exit gate
 
-An older database state never overrides newer virtual-target truth, every
+An older database state never overrides newer synthetic-target truth, every
 accepted operation is represented in the independent journal, deterministic
 replay passes across supported runtime boundaries, and the release makes no
 external-device or vendor compatibility claim.

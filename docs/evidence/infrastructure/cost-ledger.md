@@ -6,7 +6,7 @@ source on the execution date. Do not treat this template as a pricing claim.
 | Date checked | Provider/service | Region | Planned bound | Source URL | Owner | Decision |
 |---|---|---|---|---|---|---|
 | Pending administrative run | AWS S3/SQS/ECR | us-east-1 | Artifact lifecycle, one queue class, immutable image retention | Pending | ps | Not yet approved |
-| Local development | Virtual-BMC backend | Local/container | No cloud instance; bounded process resources | Repository contract | ps | Approved local default |
+| Local development | Synthetic target backend | Local/container | No cloud instance; bounded process resources | Repository contract | ps | Approved local default |
 | Pending administrative run | Neon | Provider-selected | Session development or retained environment tier | Pending | ps | Not yet approved |
 
 Before apply, record budget alarms, resource-expiry time, maximum instance

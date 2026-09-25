@@ -1,4 +1,4 @@
-# Virtual-BMC contract provenance
+# Synthetic target contract provenance
 
 Status: **contract refreeze required before route implementation**
 

@@ -9,7 +9,7 @@ This is the flagship phase. It should receive the strongest review and fault tes
 ## Entry criteria
 
 - Phases 04–08 pass.
-- The virtual-BMC contract spike has frozen one synthetic update mechanism,
+- The accepted synthetic target contract defines one update mechanism,
   timing behavior, artifact data path, body limits, selected Redfish-shaped
   resources, task/inventory evidence, faults, and recovery procedure.
 - Simulator supports pre-accept and post-accept connection faults, task loss, reboot, contradictory success, and health failure.
@@ -20,7 +20,7 @@ This is the flagship phase. It should receive the strongest review and fault tes
 
 - No support for every vendor update mechanism.
 - No claim of true exactly-once external execution.
-- No force-cancel assumption for accepted BMC update tasks.
+- No force-cancel assumption for accepted synthetic-target update tasks.
 - No automatic retry after signature/incompatibility/explicit terminal rejection.
 - No real production hardware flashing.
 
@@ -31,7 +31,7 @@ sequenceDiagram
   participant W as Worker
   participant DB as PostgreSQL
   participant R as Redfish adapter
-  participant B as BMC/simulator
+  participant B as synthetic target backend
 
   W->>DB: claim PRECHECK and reservation
   W->>R: bounded capability/current-version check
@@ -56,7 +56,7 @@ sequenceDiagram
 sequenceDiagram
   participant W1 as Original worker
   participant DB as PostgreSQL
-  participant B as BMC
+  participant B as Synthetic target
   participant W2 as Recovery worker
 
   W1->>DB: commit SUBMITTING attempt A + admission + operation reservation
@@ -111,7 +111,7 @@ Absence of a task URI, staged image, or version change alone is never proof that
 - [ ] **P09-T05** Define firmware inventory/activation and health observations with freshness/source.
 - [ ] **P09-T06** Add an explicit target-contract strategy boundary; the V1
   path remains synthetic, narrow, and contract-tested.
-- [ ] **P09-T06A** Implement the frozen artifact transfer mechanism. For push upload, stream the exact S3 version ID through the worker to the BMC with byte/deadline bounds; do not route bytes through the Control API.
+- [ ] **P09-T06A** Implement the frozen artifact transfer mechanism. For push upload, stream the exact S3 version ID through the worker to the synthetic target with byte/deadline bounds; do not route bytes through the Control API.
 
 ### Precheck
 
@@ -126,7 +126,7 @@ Absence of a task URI, staged image, or version change alone is never proof that
 - [ ] **P09-T12** Commit `SUBMITTING` state and unique attempt before network call, then atomically persist one submission admission and durable operation reservation after rechecking epoch/policy.
 - [ ] **P09-T13** Ensure attempt semantic key prevents another active submit attempt for same target/campaign/artifact step.
 - [ ] **P09-T14** In one admission transaction, recheck lease token, expected revision, campaign epoch, pause/abort/window, failure budget, enrollment, and capacity, then persist admission. A later pause blocks new admissions but cannot revoke this one.
-- [ ] **P09-T15** Bind artifact access to the exact S3 version ID. Generate target access only if the frozen mechanism supports secure pull; otherwise stream S3 to the BMC within the measured upload budget.
+- [ ] **P09-T15** Bind artifact access to the exact S3 version ID. Generate target access only if the frozen mechanism supports secure pull; otherwise stream S3 to the synthetic target within the measured upload budget.
 - [ ] **P09-T16** Execute exactly one update request with bounded request/body/response handling.
 - [ ] **P09-T17** Persist accepted task identity/fingerprint and next observation atomically while retaining the durable operation reservation through reboot/version/health resolution.
 - [ ] **P09-T18** Map explicit rejection to terminal/retry policy only from normalized Redfish evidence.

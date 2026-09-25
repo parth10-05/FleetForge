@@ -1,6 +1,6 @@
 # Simulator implementation status
 
-This is an evidence index for the repository-owned virtual-BMC contract.
+This is an evidence index for the repository-owned synthetic target contract.
 Entries are complete only to the stated synthetic scope and must be revalidated
 on the final integration SHA. It makes no external-device claim.
 

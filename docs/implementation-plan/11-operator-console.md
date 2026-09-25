@@ -116,7 +116,7 @@ flowchart TD
 - [ ] **P11-T27** Implement pause/resume/abort dialogs with impact summary, reason, revision, and idempotency key.
 - [ ] **P11-T28** On `409`, refetch and explain changed state instead of retrying automatically.
 - [ ] **P11-T29** Explain abort semantics for in-flight accepted work.
-- [ ] **P11-T29A** Explain that pause blocks new admission while work admitted before the pause may still reach the BMC and remains under observation.
+- [ ] **P11-T29A** Explain that pause blocks new admission while work admitted before the pause may still reach the synthetic target and remains under observation.
 
 ### Attention and audit
 

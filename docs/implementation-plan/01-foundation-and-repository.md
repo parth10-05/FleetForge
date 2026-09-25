@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Create a reproducible monorepo that builds the ECS Fargate API/worker roles, the local/containerized virtual-BMC role, and one TypeScript web application; has a minimal automated quality gate; validates configuration at startup; exposes correct health semantics; and can be used without running PostgreSQL on the laptop.
+Create a reproducible monorepo that builds API/worker binaries intended for a later ECS Fargate deployment, the local/containerized synthetic target role, and one TypeScript web application; has a minimal automated quality gate; validates configuration at startup; exposes correct health semantics; and can be used without running PostgreSQL on the laptop.
 
 This phase proves engineering repeatability. It does not implement campaigns, devices, firmware behavior, queues, or business workflows.
 
@@ -56,8 +56,6 @@ FleetForge/
 │   └── fixtures/
 ├── deploy/
 │   ├── terraform/
-│   ├── cloud-run/
-│   ├── compute-engine/
 │   └── dashboards/
 ├── docs/
 │   ├── adr/
@@ -203,7 +201,7 @@ This phase creates CI, not production deployment. A green commit produces versio
 ## Exit criteria
 
 - Fresh CI runner completes aggregate verification.
-- Three Go roles and the web shell build reproducibly; API/worker services and the local/containerized virtual-BMC process have documented deployment assumptions.
+- Three Go roles and the web shell build reproducibly; API/worker services and the local/containerized synthetic target process have documented deployment assumptions.
 - Health, shutdown, config-negative, non-root, and secret-scan tests pass.
 - No laptop database is required.
 - Package-boundary rules are documented and accepted.

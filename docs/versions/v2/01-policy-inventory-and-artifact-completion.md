@@ -6,7 +6,7 @@ Complete the remaining policy-rich Phase 05–07 behavior so an operator can saf
 
 ## Tasks
 
-- [ ] **V2-P01-T01** Extend target registration with controlled update/disable paths, canonical semantic idempotency, audit, last-known-good observations, and a separately administered BMC credential rotation CLI.
+- [ ] **V2-P01-T01** Extend target registration with controlled update/disable paths, canonical semantic idempotency, audit, last-known-good observations, and a separately administered target credential rotation CLI.
 - [ ] **V2-P01-T02** Complete adapter discovery normalization for capability variants, vendor-extension mapping, response/schema validation, DNS-rebinding defense, TLS trust policy, and deterministic refresh jitter.
 - [ ] **V2-P01-T03** Implement the complete bounded selector grammar, canonical serialization, parameterized compiler, keyset pagination, explanation output, maximum-result acknowledgement, and 10,000-row query-plan evidence.
 - [ ] **V2-P01-T04** Add preflight lifecycle, per-target/global warning acknowledgment, stale-observation policy, drift reporting, failure-domain validation, and immutable snapshot replay.

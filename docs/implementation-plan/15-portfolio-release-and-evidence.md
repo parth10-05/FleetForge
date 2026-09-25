@@ -44,7 +44,7 @@ flowchart TD
 | Load report | What scale was measured, in what environment, with what bottleneck? |
 | Chaos/fault report | What failures were injected and what recovered? |
 | Restore report | Can durable state be reconstructed safely? |
-| Virtual-BMC contract report | Which synthetic routes, fields, extensions, faults, and limits were tested? |
+| Synthetic target contract report | Which synthetic routes, fields, extensions, faults, and limits were tested? |
 | Security model | How are auth, secrets, SSRF, artifact integrity, and audit handled? |
 | Operations guide | Which SLOs, alerts, dashboards, and runbooks exist? |
 | Limitations | What does the project not prove? |
@@ -79,7 +79,7 @@ The portfolio demo should remain under approximately 10–15 minutes and expose 
 - [ ] **P15-T06** Write outcome-first README with problem, demo, architecture, difficult invariants, quick start, evidence, limitations.
 - [ ] **P15-T07** Include architecture and state/ambiguity diagrams rendered from Mermaid source.
 - [ ] **P15-T08** Explain why Go, Neon PostgreSQL, Amazon SQS Standard plus
-  Amazon EventBridge Scheduler, and the local/containerized virtual-BMC backend
+  Amazon EventBridge Scheduler, and the local/containerized synthetic target backend
   were selected; state that no event broker is used in v1 because it carried
   no correctness-critical role.
 - [ ] **P15-T09** Explain modular-monolith/deployable-role choice and rejected Kubernetes/Kafka/Temporal alternatives.
@@ -163,7 +163,7 @@ Only use this pattern after every clause is evidenced. Replace numbers/results w
 - Demo covers normal, lost-event, ambiguity, and canary-stop scenarios.
 - Evidence manifest supports every important claim.
 - Architecture, tests, CI/CD, observability, security, scale, cost, and limitations are visible.
-- The virtual-BMC claim is precise, measured, sourced, and limited to the accepted synthetic contract.
+- The synthetic target claim is precise, measured, sourced, and limited to the accepted synthetic contract.
 - External reviewer feedback is incorporated or documented.
 - Project owner approves portfolio publication.
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for the deterministic virtual-BMC backend and its synthetic
+Accepted for the deterministic synthetic target backend and its synthetic
 Redfish-shaped update route.
 
 ## Context

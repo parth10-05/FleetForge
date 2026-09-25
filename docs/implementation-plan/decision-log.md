@@ -19,14 +19,14 @@ This log tracks implementation decisions that must remain explicit. Create one A
 | ADR-001 | Modular monolith with separate API, worker, and simulator runtime roles | Accepted by architecture | Requires architecture review to split services |
 | ADR-002 | PostgreSQL is workflow truth; Amazon SQS Standard is delivery transport; first-release projections are database-backed | Accepted | Cannot be weakened by provider convenience |
 | ADR-003 | Transactional outbox and durable due work bridge transactions to delivery | Accepted | Alternative must prove loss/duplication safety |
-| ADR-004 | Repository-owned deterministic virtual-BMC backend, locally runnable and optionally container-deployed | Accepted after scope refreeze | Changing the target contract or independent journal changes the evidence claim |
+| ADR-004 | Repository-owned deterministic synthetic target backend, locally runnable and optionally container-deployed | Accepted after scope refreeze | Changing the target contract or independent journal changes the evidence claim |
 | ADR-005 | Ambiguous side effects reconcile or enter `NEEDS_ATTENTION`; no blind retry | Accepted | Safety invariant; change requires architecture reapproval |
 | ADR-006 | AWS-first runtime with Neon PostgreSQL, Amazon SQS Standard, Amazon EventBridge Scheduler repair wakeup, S3, AWS Secrets Manager, Amazon Cognito User Pools, Grafana Cloud, and no event broker in v1 | Accepted after pre-freeze review | Provider changes require an ADR and cannot weaken the correctness contract |
 | ADR-034 | Submission pause semantics use persisted epoch-fenced admission; pre-commit admissions remain potentially in flight | Accepted | Do not claim an external network-write fence |
 | ADR-035 | Work leases and durable physical-operation reservations have separate lifecycles | Accepted | Lease expiry or attention cannot free physical capacity |
 | ADR-036 | Queue envelopes include delivery generation while command identity remains stable | Accepted | Repair must survive Amazon SQS Standard duplicate receipt, visibility expiry, and uncertain publish |
 | ADR-037 | Target enrollment claims persist for the parent campaign and unresolved operations retain quarantine | Accepted | Target-update terminality alone cannot release ownership |
-| ADR-038 | Virtual-BMC isolation and single-owner retained-run runtime | Accepted | Any added ingress, route, credential, or concurrent owner requires review |
+| ADR-038 | Synthetic target isolation and single-owner retained-run runtime | Accepted | Any added ingress, route, credential, or concurrent owner requires review |
 
 ## Required implementation ADRs
 
@@ -47,7 +47,7 @@ This log tracks implementation decisions that must remain explicit. Create one A
 | ADR-019 | Failure-budget threshold/rounding semantics | 07 | Boundary clarity/replay | Integer count with explicitly defined inclusive rule |
 | ADR-020 | Queue classes, semantic command identity, delivery-generation identity, and retry configuration | 08 | Backpressure, redelivery-safe repair, cost | Few workload classes; DB idempotency authoritative |
 | ADR-021 | Work lease, durable operation reservation, enrollment claim, and complete lock acquisition order | Accepted early 2026-09-14 | Deadlock avoidance, stale-worker safety, physical blast radius | Row-backed reservations with documented deterministic writer order |
-| ADR-022 | Ambiguity evidence hierarchy/proof-of-absence policy | 09 | Safety, virtual-target observability, operator burden | Conservative hierarchy; inconclusive → attention |
+| ADR-022 | Ambiguity evidence hierarchy/proof-of-absence policy | 09 | Safety, synthetic-target observability, operator burden | Conservative hierarchy; inconclusive → attention |
 | ADR-023 | Redfish event authentication/correlation | 09 | Supported target behavior, spoofing/replay | Signed secret/network isolation where available; polling remains correctness path |
 | ADR-024 | Amazon Cognito User Pools, Google sign-in, application RBAC, and browser session storage | 10/11 | Secure session/token storage, CSRF, revocation, `auth_time` recent auth | Cognito OIDC adapter; server-managed secure cookie or in-memory token flow; no localStorage by default |
 | ADR-025 | API versioning and breaking-change policy | 10 | Client compatibility, contract governance | `/v1` plus schema diff; additive within version |
@@ -57,9 +57,9 @@ This log tracks implementation decisions that must remain explicit. Create one A
 | ADR-029 | GitHub OIDC claim/permission model | 13 | No long-lived keys, least privilege | Repo/ref/environment restricted federation |
 | ADR-030 | Deployment/migration promotion and rollback | 13 | Same digest, compatibility, safe rollback | Expand/migrate/contract + ECS Fargate revisions |
 | ADR-031 | Load tool/scenario/report format | 14 | Reproducibility, distributed load need, cost | Small Go/k6 harness selected from requirements |
-| ADR-032 | Supported virtual-BMC update contract and evidence boundary | Accepted for Pre-04/14 | Schema provenance, recovery, data path, limits, claim accuracy | One synthetic contract with pinned schemas and independent journal |
-| ADR-033 | Public demo/repository/evidence retention | 15 | Security, cost, reviewer reproducibility | Locally reproducible virtual-BMC demo with retained measured evidence |
-| ADR-039 | Synthetic Redfish-shaped firmware update mechanism/version | Accepted for Pre-04/09 | Selected fields, extension clarity, upload path, task/evidence behavior | One explicit synthetic path before route implementation |
+| ADR-032 | Supported synthetic target update contract and evidence boundary | Accepted for Contract freeze/14 | Schema provenance, recovery, data path, limits, claim accuracy | One synthetic contract with pinned schemas and independent journal |
+| ADR-033 | Public demo/repository/evidence retention | 15 | Security, cost, reviewer reproducibility | Locally reproducible synthetic target demo with retained measured evidence |
+| ADR-039 | Synthetic Redfish-shaped firmware update mechanism/version | Accepted for Contract freeze/09 | Selected fields, extension clarity, upload path, task/evidence behavior | One explicit synthetic path before route implementation |
 
 ## ADR template
 
@@ -87,7 +87,7 @@ Avoid long implementation code. Small diagrams, contract fragments, or benchmark
 - [ADR-012 — Database-enforced audit append-only boundary](../adr/ADR-012-audit-immutability-roles.md)
 - [ADR-014 — Simulator scenarios and logical time](../adr/ADR-014-simulator-scenarios-and-logical-time.md)
 - [ADR-021 — Deterministic lock order for persistence writers](../adr/ADR-021-persistence-lock-order.md)
-- [ADR-038 — Virtual-BMC isolation and single-owner runtime](../adr/ADR-038-simulator-isolation.md)
+- [ADR-038 — Synthetic target isolation and single-owner runtime](../adr/ADR-038-simulator-isolation.md)
 - [ADR-039 — Synthetic Redfish-shaped update mechanism](../adr/ADR-039-synthetic-redfish-update-contract.md)
 
 ## Decision gates

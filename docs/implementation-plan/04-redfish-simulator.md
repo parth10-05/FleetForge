@@ -4,7 +4,7 @@
 
 Build a locally runnable, containerized Go service that exposes the minimum
 Redfish-shaped resources required by FleetForge and can model hundreds or
-thousands of isolated virtual BMC identities with reproducible timing and fault
+thousands of isolated synthetic target identities with reproducible timing and fault
 behavior. The backend is a test instrument: each run is seeded, observable,
 resettable, contract-checked, and backed by persistent state and an independent
 request/acceptance journal.
@@ -14,7 +14,7 @@ request/acceptance journal.
 - Phase 01 passes; Phase 02 value/evidence vocabulary is available.
 - Exact selected fields and schema versions are enumerated from one pinned
   official DMTF release.
-- The pre-Phase-04 virtual-BMC contract spike has frozen target addressing,
+- The accepted synthetic target contract records define target addressing,
   update shape, selected fields, explicit extensions, task/inventory evidence,
   limits, faults, and recovery ordering.
 - Simulator trust boundary and isolation from any real-target environment are accepted.
@@ -45,7 +45,7 @@ request/acceptance journal.
 
 ```mermaid
 flowchart LR
-  Scenario[Scenario + seed] --> Factory[Virtual target factory]
+  Scenario[Scenario + seed] --> Factory[Synthetic target factory]
   Factory --> T1[Target identity 1]
   Factory --> TN[Target identity N]
   Clock[Controllable logical clock] --> Engine[Deterministic transition engine]
@@ -85,7 +85,7 @@ Each target holds simulator state: current/staged version, task state, reboot/re
 ### Standards and fixtures
 
 - [ ] **P04-T01** Record exact DMTF Redfish schema/release references used.
-- [ ] **P04-T02** Import the accepted virtual-BMC contract fixtures and record
+- [ ] **P04-T02** Import the accepted synthetic target contract fixtures and record
   the exact target prefix, upload/data path, timing, task/inventory,
   authentication, extension, limit, and recovery behavior.
 - [ ] **P04-T03** Create minimal conformance fixture set with provenance and schema validation.
@@ -135,7 +135,7 @@ Each target holds simulator state: current/staged version, task state, reboot/re
 
 - [ ] **P04-T32** Expose a safe scenario summary, target-state inspection, and journal export through the admin surface.
 - [ ] **P04-T33** Correlate Redfish requests with target ID, semantic operation ID, and fault trigger without logging auth secrets or firmware bytes.
-- [ ] **P04-T34** Emit request latency, active tasks, virtual target states, callback lag, injected-fault count, and dropped-event count.
+- [ ] **P04-T34** Emit request latency, active tasks, synthetic target states, callback lag, injected-fault count, and dropped-event count.
 
 ## Required tests
 
@@ -179,7 +179,7 @@ The simulator must not be changed merely to make a FleetForge adapter test pass.
 
 - Required Redfish subset passes contract checks.
 - All fifteen fault profiles are deterministic and independently testable.
-- 1,000 virtual targets run within declared local/CI memory, disk, connection, and request limits.
+- 1,000 synthetic targets run within declared local/CI memory, disk, connection, and request limits.
 - Admin controls are isolated from the Redfish interface.
 - Scenario replay reproduces failures.
 - A deliberate duplicate submission and false proof-of-absence classification fail the independent oracle.

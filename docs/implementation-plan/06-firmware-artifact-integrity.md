@@ -39,9 +39,9 @@ The immutable artifact identity binds object bucket/key/version ID, size, SHA-25
 ## Upload flow
 
 1. Authorized client initiates artifact metadata with expected size/digest/media type.
-2. API creates an `INITIATED` record and short-lived signed upload URL restricted to one new object identity and permitted headers; version-ID preconditions prevent overwrite.
-3. Client uploads directly to object storage.
-4. Verification worker observes exact object version ID and metadata and uses that version-ID precondition for every subsequent read.
+2. API creates an `INITIATED` record and short-lived signed upload URL restricted to one new key, expected checksum, content type, and permitted headers. No version ID exists before the upload succeeds.
+3. Client uploads directly to versioned object storage.
+4. Completion or verification observes the provider-assigned non-null version ID, atomically binds it once to the artifact, and uses that exact version ID for every subsequent HEAD, GET, and DELETE.
 5. Worker streams object once through bounded digest/format/signature verification without loading the entire image into memory.
 6. Result and safe evidence are persisted; object identity cannot change after verification.
 7. Rejected/expired objects follow a retention/deletion policy and cannot be referenced by ready campaigns.
