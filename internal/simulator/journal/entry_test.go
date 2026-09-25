@@ -63,6 +63,16 @@ func TestWriteSnapshotDerivesStateDigest(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsUnhashedState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, []byte(`{"schema_version":"fleetforge.simulator.journal/v2","sequence":0,"hash":"","logical_time":0,"state_digest":"","state":{"tasks":[]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshot(path); err == nil {
+		t.Fatal("unhashed state was accepted")
+	}
+}
+
 func TestAppendAndReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.jsonl")
 	first, _ := New("run-1", 1, 0, RequestReceived, "target-1", "request-1", "sha256-abc", "")

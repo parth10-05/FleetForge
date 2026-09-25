@@ -63,10 +63,12 @@ func (w *Writer) Append(record Record) (Entry, error) {
 		return Entry{}, err
 	}
 	if _, err = w.file.Write(append(raw, '\n')); err != nil {
+		w.poison()
 		return Entry{}, err
 	}
 	if record.Kind.syncRequired() {
 		if err = w.file.Sync(); err != nil {
+			w.poison()
 			return Entry{}, err
 		}
 		w.syncs++
@@ -75,6 +77,7 @@ func (w *Writer) Append(record Record) (Entry, error) {
 	w.previous = entry.Hash
 	return entry, nil
 }
+func (w *Writer) poison() { w.closed = true; _ = w.file.Close() }
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -187,7 +190,8 @@ func ReadSnapshot(path string) (Snapshot, error) {
 	if err := decoder.Decode(&extra); err == nil {
 		return Snapshot{}, fmt.Errorf("invalid simulator snapshot")
 	}
-	if snapshot.SchemaVersion != SchemaVersionV2 || (snapshot.Sequence == 0 && snapshot.Hash != "") || (snapshot.Sequence > 0 && len(snapshot.Hash) != 64) {
+	hasState := len(snapshot.State) > 0 && !bytes.Equal(snapshot.State, []byte("null"))
+	if snapshot.SchemaVersion != SchemaVersionV2 || (snapshot.Sequence == 0 && snapshot.Hash != "") || (snapshot.Sequence > 0 && len(snapshot.Hash) != 64) || (hasState && len(snapshot.StateDigest) != 64) {
 		return Snapshot{}, fmt.Errorf("invalid simulator snapshot")
 	}
 	if len(snapshot.StateDigest) > 0 {
