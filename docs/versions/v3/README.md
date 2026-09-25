@@ -3,7 +3,7 @@
 ## Outcome
 
 v3 earns FleetForge's strongest portfolio claims through retained evidence:
-measured 1,000-target virtual-BMC validation, bounded parallelism, full
+measured 1,000-target synthetic-target validation, bounded parallelism, full
 fault/recovery schedules, isolated restore, deterministic replay, operational
 drills, reproducible release material, and an honest public narrative.
 
@@ -24,7 +24,7 @@ drills, reproducible release material, and an honest public narrative.
 | [V3-P00](00-release-measurement-contract.md) | Phases 12–14 methodology | Every release claim has a frozen workload, oracle, budget, and evidence format. |
 | [V3-P01](01-operational-readiness-and-promotion.md) | Remaining Phase 12 and Phase 13 promotion | Alerts, runbooks, protected promotion, and rollback work in staging/demo conditions. |
 | [V3-P02](02-scale-and-fault-validation.md) | Phase 14 L0–L5 | Measured simulator scale and fault evidence supports only its exact claim boundary. |
-| [V3-P03](03-restore-and-virtual-bmc-validation.md) | Phase 14 recovery and contract sections | Restore and the accepted virtual-BMC path have direct retained evidence. |
+| [V3-P03](03-restore-and-synthetic-target-validation.md) | Phase 14 recovery and contract sections | Restore and the accepted synthetic target path have direct retained evidence. |
 | [V3-P04](04-portfolio-evidence-release.md) | Phase 15 | A reviewer can reproduce, inspect, and critique the released portfolio honestly. |
 
 Complete the phases in order. A failed load, fault, restore, or deterministic

@@ -27,7 +27,7 @@ sequenceDiagram
   participant DB as PostgreSQL
   participant W as Discovery worker
   participant R as Redfish adapter
-  participant B as Simulator/BMC
+  participant B as Synthetic target backend
 
   O->>DB: register endpoint identity + labels + credential reference
   DB-->>W: durable discovery work
@@ -83,8 +83,8 @@ sequenceDiagram
 - [ ] **P05-T01** Define target registration command separate from HTTP request shape.
 - [ ] **P05-T02** Canonicalize endpoint scheme/host/port/path; reject credentials in URL.
 - [ ] **P05-T03** Validate DNS/IP/CIDR policy and disable redirects in the Redfish client.
-- [ ] **P05-T04** Store only a AWS Secrets Manager reference, never a credential value.
-- [ ] **P05-T04A** Provide a separate administrative CLI contract for provisioning/rotating BMC credentials directly in AWS Secrets Manager; API, browser, Terraform state, and GitHub Actions never receive the value.
+- [ ] **P05-T04** Store only an AWS Secrets Manager reference, never a credential value.
+- [ ] **P05-T04A** Provide a separate administrative CLI contract for provisioning/rotating target credentials directly in AWS Secrets Manager; API, browser, Terraform state, and GitHub Actions never receive the value.
 - [ ] **P05-T05** Validate label names/values and require configured failure-domain keys.
 - [ ] **P05-T06** Make registration idempotent by external ID plus semantic request hash.
 - [ ] **P05-T07** Audit endpoint/label/credential-reference changes without exposing secrets.

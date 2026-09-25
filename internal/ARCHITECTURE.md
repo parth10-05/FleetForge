@@ -23,5 +23,5 @@ The deterministic simulator is a separate test instrument. Its future
 `application/simulator` boundary; simulator core, scenario, journal, and
 clock packages must not import FleetForge persistence or production domain
 packages. Platform adapters may implement simulator application ports. A
-simulator route is not added until the synthetic virtual-BMC contract,
+simulator route is not added until the synthetic-target contract,
 canonical fixtures, and update/recovery ordering are accepted.

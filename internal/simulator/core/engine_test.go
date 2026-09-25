@@ -93,3 +93,107 @@ func TestEngineRejectsUnknownTargetsWithoutMutation(t *testing.T) {
 		t.Fatalf("unknown target error = %v", err)
 	}
 }
+
+func TestEngineRunsHealthyUpdateLifecycleAndKeepsDuplicates(t *testing.T) {
+	input := testScenario()
+	input.Timing = scenario.Timing{UploadMS: 1, TaskStepMS: 1, RebootMS: 1, InventoryVisibilityMS: 1, EventMS: 1}
+	engine, err := Start(input, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	target, _ := scenario.ID(input, "target", 1)
+	first, err := engine.Submit(context.Background(), AcceptUpdate{TargetID: target, Version: "2", AttemptID: "attempt-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := engine.Submit(context.Background(), AcceptUpdate{TargetID: target, Version: "2", AttemptID: "attempt-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Operations) != 2 || second.Operations[0].ID == second.Operations[1].ID || first.Operations[0].ID != second.Operations[0].ID && first.Operations[0].ID != second.Operations[1].ID {
+		t.Fatalf("duplicate acceptance was hidden: %#v", second.Operations)
+	}
+	result, err := engine.Submit(context.Background(), AdvanceTo{Time: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tasks) != 2 || result.Tasks[0].State != LifecycleHealthy || result.Tasks[1].State != LifecycleHealthy {
+		t.Fatalf("tasks did not reach healthy lifecycle state: %#v", result.Tasks)
+	}
+	for _, state := range result.State {
+		if state.ID == target && (state.Version != "2" || !state.Healthy || !state.Reachable || state.Phase != LifecycleHealthy) {
+			t.Fatalf("unexpected completed target state: %#v", state)
+		}
+	}
+}
+
+func TestEngineRejectsInvalidUpdateWithoutMutationAndConsumesFaultBoundedly(t *testing.T) {
+	input := testScenario()
+	input.Faults = []scenario.Fault{{FaultID: "fault-a", Name: "RF-F01", Scope: "all", Trigger: scenario.Trigger{Kind: "request_count"}, Consumption: 1}}
+	engine, err := Start(input, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	target, _ := scenario.ID(input, "target", 1)
+	if _, err := engine.Submit(context.Background(), AcceptUpdate{TargetID: target, Version: "wrong", AttemptID: "x"}); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("invalid version error = %v", err)
+	}
+	before, err := engine.Submit(context.Background(), Observe{TargetID: target})
+	if err != nil || before.State[0].AcceptedCount != 0 {
+		t.Fatalf("rejected command mutated state: %#v, %v", before, err)
+	}
+	if _, err := engine.Submit(context.Background(), ConsumeFault{TargetID: target, FaultID: "fault-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Submit(context.Background(), ConsumeFault{TargetID: target, FaultID: "fault-a"}); !errors.Is(err, ErrFaultExhausted) {
+		t.Fatalf("second consumption error = %v", err)
+	}
+}
+
+func TestEngineSubscriptionsAreBoundedAndSnapshotsAreStable(t *testing.T) {
+	input := testScenario()
+	input.Limits.Subscriptions = 1
+	engine, err := Start(input, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	target, _ := scenario.ID(input, "target", 1)
+	first, err := engine.Submit(context.Background(), CreateSubscription{TargetID: target, Fingerprint: "callback-one"})
+	if err != nil || len(first.Subscriptions) != 1 {
+		t.Fatalf("first subscription = %#v, %v", first, err)
+	}
+	if _, err := engine.Submit(context.Background(), CreateSubscription{TargetID: target, Fingerprint: "callback-two"}); !errors.Is(err, ErrLimitExceeded) {
+		t.Fatalf("subscription limit error = %v", err)
+	}
+	second, err := engine.Submit(context.Background(), Observe{TargetID: target})
+	if err != nil || len(second.Subscriptions) != 1 || second.Subscriptions[0] != first.Subscriptions[0] {
+		t.Fatalf("snapshot changed unexpectedly: %#v, %v", second.Subscriptions, err)
+	}
+}
+
+func TestEngineConsumesEverySupportedFaultAndHonorsCancellation(t *testing.T) {
+	input := testScenario()
+	faultNames := []string{"RF-F01", "RF-F02", "RF-F03", "RF-F04", "RF-F05", "RF-F06", "RF-F07", "RF-F08", "RF-F10", "RF-F11"}
+	for index, name := range faultNames {
+		input.Faults = append(input.Faults, scenario.Fault{FaultID: "fault-" + string(rune('a'+index)), Name: name, Scope: "all", Trigger: scenario.Trigger{Kind: "request_count"}, Consumption: 1, Priority: index})
+	}
+	engine, err := Start(input, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	target, _ := scenario.ID(input, "target", 1)
+	for _, fault := range input.Faults {
+		if _, err := engine.Submit(context.Background(), ConsumeFault{TargetID: target, FaultID: fault.FaultID}); err != nil {
+			t.Fatalf("consume %s: %v", fault.Name, err)
+		}
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := engine.Submit(canceled, Observe{TargetID: target}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled submission error = %v", err)
+	}
+}

@@ -1,4 +1,4 @@
-# ADR-038 — Virtual-BMC isolation and single-owner runtime
+# ADR-038 — Synthetic target isolation and single-owner runtime
 
 ## Status
 
@@ -6,7 +6,7 @@ Accepted.
 
 ## Decision
 
-The virtual-BMC backend runs locally or as an explicitly deployed simulator
+The synthetic target backend runs locally or as an explicitly deployed simulator
 role. Local development binds its Redfish-shaped, admin, and health listeners
 to loopback by default. A deployed simulator uses a separate service identity,
 network policy, state location, and credentials from the API and worker roles.
@@ -21,7 +21,7 @@ are never reachable through the Redfish-shaped target surface.
 
 ## Consequences
 
-One process may host many virtual targets, but only one process may own a
+One process may host many synthetic targets, but only one process may own a
 retained run. HTTP parsing and callbacks may be concurrent while one bounded
 engine command stream owns mutable target state. Callback destinations are
 allowlisted, redirects are disabled, and worker/queue/connection counts are

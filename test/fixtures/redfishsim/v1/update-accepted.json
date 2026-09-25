@@ -1,0 +1,1 @@
+{"route":"/virtual-bmcs/alpha-001/redfish/v1/UpdateService/update","method":"POST","status":202,"schema":"Task.v1_7_4.json","fields":{"standard":["@odata.id"],"extension":["Oem.FleetForge.Attempt"],"adminOnly":[]},"body":{"@odata.id":"/virtual-bmcs/alpha-001/redfish/v1/TaskService/Tasks/task-0001","Oem":{"FleetForge":{"Attempt":"attempt-0001"}}}}

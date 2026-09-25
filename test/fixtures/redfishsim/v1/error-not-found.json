@@ -1,0 +1,1 @@
+{"route":"*","method":"*","status":404,"schema":"redfish-schema-v1.json","nonMutating":true,"fields":{"standard":["error.code","error.message"],"extension":[],"adminOnly":[]},"body":{"error":{"code":"Base.1.0.ResourceMissingAtURI","message":"The requested synthetic resource does not exist."}}}

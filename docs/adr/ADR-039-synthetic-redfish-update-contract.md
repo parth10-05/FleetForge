@@ -14,7 +14,7 @@ external device emulator.
 
 ## Decision
 
-The repository-owned Go virtual-BMC backend is the authoritative V1 target.
+The repository-owned Go synthetic target backend is the authoritative V1 target.
 One process hosts many isolated targets and exposes a target-prefixed,
 Redfish-shaped HTTP subset derived from a pinned DMTF schema release.
 

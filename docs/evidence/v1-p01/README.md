@@ -7,7 +7,7 @@ image, signed URL, external endpoint, or AWS account data.
 Current status: **route-independent preparation implemented; synthetic
 contract refreeze approved.** Canonical route fixtures and the accepted update
 path must now be completed. This directory establishes only repository-owned
-virtual-target behavior and no external-device compatibility claim.
+synthetic-target behavior and no external-device compatibility claim.
 
 | Artifact | Purpose | Current status |
 | --- | --- | --- |

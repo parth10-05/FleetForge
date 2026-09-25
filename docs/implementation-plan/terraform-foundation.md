@@ -41,9 +41,7 @@ Terraform against AWS, create a state bucket, or provision a resource.
 
 ## Preconditions and branch procedure
 
-1. Preserve existing untracked files: `.agents/`, root `AGENTS.md`,
-   `docs/implementation-plan/phase-03-antigravity-handover.md`, and
-   `skills-lock.json` are user-owned and out of scope.
+1. Preserve unrelated user-owned and untracked files; do not stage or delete them.
 2. Fetch `origin/main`; inspect its status and fast-forward only if the local
    worktree is clean apart from those preserved untracked files. Do not reset,
    force-push, or delete any user material.
@@ -74,7 +72,7 @@ Terraform against AWS, create a state bucket, or provision a resource.
 
 Use one `v1-dev` environment root but no resource module invocation in its
 default configuration. `enable_runtime`, `enable_scheduler`, and
-`enable_cognito_google` are booleans and default to `false`. The virtual-BMC
+`enable_cognito_google` are booleans and default to `false`. The synthetic target
 backend has no cloud-infrastructure feature flag because it is locally runnable;
 a future optional container deployment belongs to the runtime module. A future
 module must be conditionally instantiated only after its matching gated run;
@@ -177,7 +175,7 @@ This foundation is complete only when all static checks pass, the default enviro
 remains zero-scale and provider-unauthenticated, no sensitive or account
 material is tracked, and the PR visibly establishes that untrusted PR CI cannot
 obtain AWS credentials. It does **not** prove AWS provider behavior, billing,
-IAM permissions, remote state, virtual-target behavior, or any runtime resource.
+IAM permissions, remote state, synthetic-target behavior, or any runtime resource.
 
 ## Later-run handoff
 

@@ -15,7 +15,7 @@ flowchart TD
   Contract --> E2E[Cloud end-to-end with simulator]
   E2E --> Fault[Deterministic crash/fault tests]
   Fault --> Load[Measured load/soak]
-  Load --> Replay[Virtual-BMC contract and deterministic replay]
+  Load --> Replay[Synthetic target contract and deterministic replay]
   Replay --> Release[Evidence-backed release]
 ```
 
@@ -37,17 +37,17 @@ identified below.
 | Cloud E2E | API→DB→queue→worker→simulator→UI | Staging services | Main/protected PR/release | Deployment/integration failure |
 | Fault/chaos | Crashes, loss, duplication, outage, ambiguity | Deterministic hooks + simulator | Core subset PR; full main/release | Safety/recovery failure |
 | Load/soak | Capacity, latency, leaks, cost | Staging + simulator | Manual/release | Claim unsupported or bottleneck/regression |
-| Virtual-BMC contract/replay | Selected fields, extensions, deterministic behavior, independent oracle | Pinned schemas + canonical fixtures + retained journal | Every PR subset; full release | Adapter/backend drift or nondeterminism |
+| Synthetic target contract/replay | Selected fields, extensions, deterministic behavior, independent oracle | Pinned schemas + canonical fixtures + retained journal | Every PR subset; full release | Adapter/backend drift or nondeterminism |
 | Restore/recovery | Backups, reconstruction, replay | Isolated restore environment | Release/periodic | Durability/recovery claim unsupported |
 
 ## Environment matrix
 
 | Environment | Database | Queue/events | Device | Permitted tests |
 |---|---|---|---|---|
-| Developer laptop | None required; optional remote dev | In-memory/remote opt-in | In-process or local virtual-BMC container | Unit, property, focused contract, frontend |
+| Developer laptop | None required; optional remote dev | In-memory/remote opt-in | In-process or local synthetic target container | Unit, property, focused contract, frontend |
 | CI PR | Ephemeral PostgreSQL service | Deterministic adapters; provider contract where safe | Simulator container/in-process | Full fast suite and fault subset |
-| Staging | Neon staging | Amazon SQS Standard + EventBridge Scheduler | Private scale-to-zero virtual-BMC container | E2E, provider, faults, load, restore target |
-| Demo production | Neon demo | Amazon SQS Standard + EventBridge Scheduler | Scale-to-zero virtual-BMC container | Smoke/synthetic and controlled demo only |
+| Staging | Neon staging | Amazon SQS Standard + EventBridge Scheduler | Private scale-to-zero synthetic target container | E2E, provider, faults, load, restore target |
+| Demo production | Neon demo | Amazon SQS Standard + EventBridge Scheduler | Scale-to-zero synthetic target container | Smoke/synthetic and controlled demo only |
 
 ## Test-data rules
 
@@ -210,7 +210,7 @@ Every material run stores:
 |---|---|
 | Test/report name and version | Yes |
 | Git commit and image digest | Yes |
-| Schema/IaC version | Integration/cloud runs |
+| Schema/IaC version | Integration/hosted runs |
 | Timestamp/timezone and duration | Yes |
 | Environment/region/resources | Integration/load/restore |
 | Scenario/config/seed | Generated/fault/load |
@@ -235,7 +235,7 @@ Every material run stores:
 | Full fault matrix | No | Scheduled/manual | Required |
 | 1,000-target load/soak | No | Manual/scheduled | Required for claim |
 | Restore | No | Periodic | Required |
-| Full virtual-BMC contract/replay | Required subset | Required | Required for synthetic target claim |
+| Full synthetic target contract/replay | Required subset | Required | Required for synthetic target claim |
 | Secret/license/SBOM/provenance | Required subset | Required | Required |
 
 ## Completion rule

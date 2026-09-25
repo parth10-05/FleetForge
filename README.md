@@ -6,13 +6,13 @@ firmware rollouts through Redfish. It is not a firmware builder.
 The repository is being implemented in gated phases. Read the
 [documentation map](markdown.md), the
 [core delivery contract](docs/implementation-plan/00-core-principles-and-delivery-contract.md),
-and the [Phase 01 execution plan](docs/implementation-plan/phase-01-detailed-execution-plan.md)
+and the [implementation-plan index](docs/implementation-plan/README.md)
 before changing code.
 
 ## Foundation developer mode
 
 Phase 01 requires Go only. It does not require a laptop PostgreSQL instance,
-AWS account, BMC, firmware image, or cloud credential.
+AWS account, external target, firmware image, or cloud credential.
 
 ```text
 make test

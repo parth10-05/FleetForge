@@ -1,0 +1,1 @@
+{"route":"/virtual-bmcs/alpha-001/redfish/v1/UpdateService/update","method":"POST","status":415,"schema":"redfish-schema-v1.json","nonMutating":true,"fields":{"standard":["error.code","error.message"],"extension":[],"adminOnly":[]},"body":{"error":{"code":"Base.1.0.UnsupportedMediaType","message":"Only application/octet-stream is accepted for synthetic updates."}}}

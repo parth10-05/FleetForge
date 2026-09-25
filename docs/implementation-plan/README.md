@@ -10,16 +10,26 @@ This is not a calendar estimate. Progress is evidence-based. A phase is complete
 
 - Approved design: [FleetForge System Architecture RFC](../../FleetForge_System_Architecture_RFC.docx)
 - Normative corrections: [FleetForge Architecture Freeze](architecture-freeze.md)
-- System type: firmware-rollout control plane exercised against a repository-owned Redfish-shaped virtual-BMC backend
+- System type: firmware-rollout control plane exercised against a repository-owned Redfish-shaped synthetic target backend
 - Implementation style: Go modular monolith with separately deployed API, worker, and simulator roles
 - Authoritative state: PostgreSQL
-- Delayed command delivery: Amazon SQS Standard, with PostgreSQL due-work repair and Amazon EventBridge Scheduler wakeups
+- Delayed command delivery target: Amazon SQS Standard, with PostgreSQL due-work repair and Amazon EventBridge Scheduler wakeups; local work uses the same provider-neutral port with a deterministic adapter until the cloud gate
 - First-release fan-out: database-backed projection/SSE hints; no event broker is used
 - Simulator runtime: local/containerized Go role with persistent test-run state and journal
 - Device boundary: normalized Redfish adapter
 - Scale proof: at least 1,000 deterministic simulated targets
 - Device-boundary proof: canonical synthetic contract fixtures, deterministic replay, and independent acceptance evidence
 - Core safety rule: uncertain firmware submission is reconciled or moved to `NEEDS_ATTENTION`; it is never blindly repeated
+
+
+## Document authority and retention
+
+- Numbered phase files, the architecture freeze, accepted ADRs, the testing strategy, traceability matrix, and risk register are normative.
+- `docs/versions/` sequences smaller release slices and cannot weaken a numbered-phase invariant.
+- `docs/evidence/` records observed results and final closeout decisions; evidence does not redefine architecture.
+- Temporary build prompts, handovers, failed interim audits, and remediation plans are removed after their final closeout evidence exists. Git history remains the historical record.
+- Active run notes may remain only while their implementation slice is open; they must be moved to evidence or removed at closeout.
+- Final Phase 02 evidence is indexed at [Phase 02 evidence](../evidence/phase-02/README.md); final Phase 03 evidence is indexed at [Phase 03 evidence](../evidence/phase-03/README.md).
 
 ## Core principles
 
@@ -31,7 +41,7 @@ Read [00-core-principles-and-delivery-contract.md](00-core-principles-and-delive
 4. At-least-once internal execution must not become duplicate firmware submission.
 5. Every long wait is durable scheduled state, never a sleeping process.
 6. Every phase includes tests, telemetry, failure behavior, and rollback.
-7. The virtual-BMC backend must be deterministic, adversarial, and independently auditable; it is both the target contract and load generator for the portfolio scope.
+7. The synthetic target backend must be deterministic, adversarial, and independently auditable; it is both the target contract and load generator for the portfolio scope.
 8. Claims remain targets until measured evidence exists.
 9. Cloud services must have spend limits and replaceable boundaries; billing budgets are alerts unless a separately tested shutdown control is configured.
 10. No service, abstraction, or dependency is added only for résumé vocabulary.
@@ -45,8 +55,8 @@ flowchart TD
   P01 --> P04[04 Redfish simulator]
   P02 --> P03
   P03 --> P13A[13A Cloud bootstrap]
-  P03 --> VBCS[Virtual-BMC contract spike]
-  VBCS --> P04[04 Virtual-BMC backend]
+  P03 --> CONTRACT[Accepted ADR-032/038/039 + canonical fixtures]
+  CONTRACT --> P04[04 Synthetic target backend]
   P03 --> P05[05 Inventory and preflight]
   P04 --> P05
   P03 --> P06[06 Artifact integrity]
@@ -79,7 +89,7 @@ flowchart TD
 | Track | Phases | Meaning |
 |---|---|---|
 | Correctness core | 02, 03, 07, 08, 09 | State, transactions, rollout decisions, work ownership, ambiguity safety |
-| Device test boundary | Pre-04, 04, 05, 06, 09, 14 | Synthetic contract, inventory, artifacts, updates, faults, and deterministic replay |
+| Device test boundary | Contract freeze records, 04, 05, 06, 09, 14 | Synthetic contract, inventory, artifacts, updates, faults, and deterministic replay |
 | Operator surface | 10, 11 | Secure API, audit trail, campaign control, progress visualization |
 | Production readiness | 01, 12, 13, 14 | CI, telemetry, runbooks, cloud deployment, failure and recovery evidence |
 | Portfolio proof | all, consolidated in 15 | Reproducibility, measurements, diagrams, limitations, technical narrative |
@@ -91,7 +101,7 @@ flowchart TD
 | 01 | Can a fresh runner build and verify the repository without hidden state? | Green CI, locked toolchain, health smoke test, secret scan |
 | 02 | Can all state transitions be decided deterministically without I/O? | Table tests, property tests, race-free pure reducer |
 | 03 | Are intent, audit, and outbox atomic under concurrency? | Real-PostgreSQL integration and concurrent-claim tests |
-| Pre-04 | Is every virtual-target route, field, extension, transition, limit, and fault explicit before implementation? | Pinned schemas, canonical fixtures, accepted update contract, and recovery ordering |
+| Contract freeze | Is every synthetic-target route, field, extension, transition, limit, and fault explicit before implementation? | Pinned schemas, canonical fixtures, accepted update contract, and recovery ordering |
 | 04 | Can failures be reproduced exactly from a seed without the simulator masking duplicate requests? | Contract suite, persistent journal, deliberate-oracle-failure check, and deterministic replay report |
 | 05 | Can FleetForge freeze a valid, conflict-free target set? | Discovery/selector/preflight integration report |
 | 06 | Can only immutable, verified, compatible artifacts become rollout-ready? | Digest/signature/compatibility negative tests |

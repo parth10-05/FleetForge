@@ -19,11 +19,6 @@ type manifest struct {
 	RunID          string `json:"run_id"`
 	ScenarioDigest string `json:"scenario_digest"`
 }
-type snapshot struct {
-	SchemaVersion string `json:"schema_version"`
-	Sequence      uint64 `json:"sequence"`
-	Hash          string `json:"hash"`
-}
 
 func CreateRun(root string, input scenario.Scenario) (Run, error) {
 	canonical, err := scenario.CanonicalBytes(input)
@@ -51,7 +46,7 @@ func CreateRun(root string, input scenario.Scenario) (Run, error) {
 	if err := writeExclusive(run.JournalPath, nil); err != nil {
 		return Run{}, err
 	}
-	if err := journal.WriteSnapshot(run.SnapshotPath, 0, ""); err != nil {
+	if err := journal.WriteSnapshot(run.SnapshotPath, journal.Snapshot{}); err != nil {
 		return Run{}, err
 	}
 	return run, nil
@@ -79,8 +74,8 @@ func RecoverRun(root, id string) (Run, error) {
 	if err != nil {
 		return invalidate(run, "journal")
 	}
-	var checkpoint snapshot
-	if err := readJSON(run.SnapshotPath, &checkpoint); err != nil || checkpoint.SchemaVersion != journal.SchemaVersionV1 || checkpoint.Sequence > uint64(len(entries)) {
+	checkpoint, err := journal.ReadSnapshot(run.SnapshotPath)
+	if err != nil || checkpoint.Sequence > uint64(len(entries)) {
 		return invalidate(run, "snapshot")
 	}
 	if checkpoint.Sequence > 0 && entries[checkpoint.Sequence-1].Hash != checkpoint.Hash {
@@ -89,20 +84,55 @@ func RecoverRun(root, id string) (Run, error) {
 	return run, nil
 }
 
+// WriteStateSnapshot binds a caller-provided immutable engine projection to
+// the current validated journal checkpoint. The caller owns engine access; this
+// retained-state layer owns the atomic filesystem write.
+func (r Run) WriteStateSnapshot(logicalTime int64, state []byte) error {
+	entries, err := journal.Load(r.JournalPath)
+	if err != nil {
+		return fmt.Errorf("load retained journal: %w", err)
+	}
+	snapshot := journal.Snapshot{LogicalTime: logicalTime, State: state}
+	if len(entries) > 0 {
+		last := entries[len(entries)-1]
+		snapshot.Sequence = last.Sequence
+		snapshot.Hash = last.Hash
+	}
+	return journal.WriteSnapshot(r.SnapshotPath, snapshot)
+}
+
 func (r Run) AcquireOwner() (func() error, error) {
-	file, err := os.OpenFile(r.OwnerPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	file, err := os.OpenFile(r.OwnerPath, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("%w: owner", ErrInvalidRun)
 	}
-	if _, err := file.WriteString("owned\n"); err != nil {
+	if err := lockExclusive(file); err != nil {
 		file.Close()
-		os.Remove(r.OwnerPath)
+		return nil, fmt.Errorf("%w: owner", ErrInvalidRun)
+	}
+	if err := file.Truncate(0); err != nil {
+		_ = unlockExclusive(file)
+		_ = file.Close()
 		return nil, err
 	}
-	if err := file.Close(); err != nil {
+	if _, err := file.WriteString("active-owner\n"); err != nil {
+		_ = unlockExclusive(file)
+		_ = file.Close()
 		return nil, err
 	}
-	return func() error { return os.Remove(r.OwnerPath) }, nil
+	if err := file.Sync(); err != nil {
+		_ = unlockExclusive(file)
+		_ = file.Close()
+		return nil, err
+	}
+	return func() error {
+		unlockErr := unlockExclusive(file)
+		closeErr := file.Close()
+		if unlockErr != nil {
+			return unlockErr
+		}
+		return closeErr
+	}, nil
 }
 
 func paths(root, id string) Run {

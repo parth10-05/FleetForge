@@ -1,11 +1,10 @@
 # FleetForge Phase 02 Verification Evidence
 
 > **Audit status (2026-09-13): PASS.**
-> [The Phase 02 audit record](phase-02-audit-2026-09-13.md) found a retry
-> resume-step bypass, untyped safety inputs, misplaced reference models,
-> incomplete properties, and no hosted Linux race evidence. The remediation
-> passed all required local and hosted verification gates; see the closure
-> audit for the immutable Linux evidence.
+> The initial audit found a retry resume-step bypass, untyped safety inputs,
+> misplaced reference models, incomplete properties, and no hosted Linux race
+> evidence. The retained closure audit records the remediation and final
+> passing decision.
 
 **Scope:** pure domain model and state machines only. No database, queue,
 network client, background timer, Docker workload, or device side effect was

@@ -1,0 +1,50 @@
+{
+  "format": "fleetforge.redfishsim.schema-manifest.v1",
+  "retrievedAt": "2026-09-23",
+  "source": {
+    "publisher": "DMTF",
+    "repository": "https://github.com/DMTF/Redfish-Publications",
+    "release": "2026.2",
+    "annotatedTagObject": "be6f86ff49bd1176b32f80b5929c301bd2e27173",
+    "commit": "4f81814e399213c9055863ddaff42791c6b3706a",
+    "license": "BSD-3-Clause",
+    "licensePath": "LICENSE.md",
+    "licenseSHA256": "30733d426c211a281f673aa726b3ec08827e4f8fc9fd8a93936d30fe9644c6d4"
+  },
+  "retrieval": {
+    "immutableRawBase": "https://raw.githubusercontent.com/DMTF/Redfish-Publications/4f81814e399213c9055863ddaff42791c6b3706a",
+    "verificationHelper": "scripts/verify-redfish-schema-fixtures.ps1",
+    "vendoredSchemaFiles": false,
+    "reason": "Fixture discipline uses immutable source checksums; FleetForge does not redistribute a broad schema bundle."
+  },
+  "publications": [
+    {"id": "DSP8010", "version": "2026.2", "title": "Redfish Schema Bundle", "url": "https://redfish.dmtf.org/schemas/DSP8010_2026.2.html"},
+    {"id": "DSP0268", "version": "2026.2", "title": "Redfish Data Model Specification", "url": "https://redfish.dmtf.org/schemas/DSP0268_2026.2.html"},
+    {"id": "DSP0266", "version": "1.25.0", "title": "Redfish Specification", "url": "https://redfish.dmtf.org/schemas/DSP0266_1.25.0.html"}
+  ],
+  "schemas": [
+    {"path":"json-schema/ServiceRoot.v1_9_4.json","sha256":"2c404b0603700ae7704fa919f20f5b217c3495d8a1ef1dba663824d7253e4350","purpose":"Service Root"},
+    {"path":"json-schema/Resource.v1_9_9.json","sha256":"5c92143e9c3d685062a32007b3be6edf30e728df51ce44b2d2864031d12aba33","purpose":"Resource base"},
+    {"path":"json-schema/Resource.json","sha256":"1106c9fbcccdc39dc1d5d0d5a97139bb21904e2a10b40c634936dfc3cfdc2edb","purpose":"Resource dependency"},
+    {"path":"json-schema/Manager.v1_9_8.json","sha256":"0346c169ebbb0f5575404d89fbeb8ca8add9de930cce96eee5d3c4b181f9ef31","purpose":"Manager"},
+    {"path":"json-schema/ComputerSystem.v1_9_9.json","sha256":"3cd6e1a1462808abfaa3a63dc52203d45108595eaff72685d8ed30a30dcf7042","purpose":"ComputerSystem"},
+    {"path":"json-schema/Chassis.v1_9_9.json","sha256":"daa100f665665c2810f3e2cff337c4df7c8306ee067c33ed3a15c1dc441def3f","purpose":"Chassis"},
+    {"path":"json-schema/UpdateService.v1_9_8.json","sha256":"34b72e00bff6970bc1b43a7417a8b21927319acbe0691463f1839156592be6b8","purpose":"UpdateService"},
+    {"path":"json-schema/SoftwareInventory.v1_9_2.json","sha256":"b91e5b32579aa6eb53af29189bb93cf4832898e95b8a865e2b26e0a46d58fdc7","purpose":"SoftwareInventory"},
+    {"path":"json-schema/TaskService.v1_3_0.json","sha256":"2244120ff85fee0559a7a86d3dca963cf5381e1177ee1a5e320585258fe66235","purpose":"TaskService"},
+    {"path":"json-schema/Task.v1_7_4.json","sha256":"eb1a77891e2477c7101a1623b44d09b18260e7ff8592e43e2558ff9e7510fcc4","purpose":"Task"},
+    {"path":"json-schema/EventService.v1_9_4.json","sha256":"56f038a69d6099facefee298b47cfc49f78d62341dc1be5f7cef3f7385080f2f","purpose":"EventService"},
+    {"path":"json-schema/EventDestination.v1_9_9.json","sha256":"8cec42662fcd8c0d33a2b757a315f0eeea111e5a74c390aaaa2e8d3db7c51725","purpose":"EventDestination"},
+    {"path":"json-schema/Event.v1_9_3.json","sha256":"af1692b7b24e86c153dc5ac3e1c505383fa733dbeff64909892871dd42fe4405","purpose":"Event payload"},
+    {"path":"json-schema/Message.v1_4_0.json","sha256":"e05e9b3dcc398eb6c8f3cddf879833a9530d9126d626030652b4255de087a6ed","purpose":"Message"},
+    {"path":"json-schema/Message.json","sha256":"719484866a3df888cf1aef4f26c183e503d4343fa9ff0383faf91d3f6e1243e0","purpose":"Message dependency"},
+    {"path":"json-schema/ComputerSystemCollection.json","sha256":"6496eaa686fcd73e04cf7c89eac248e99462bbbf85062f76d2a8169044ecd590","purpose":"Systems collection"},
+    {"path":"json-schema/ManagerCollection.json","sha256":"3e427f94db227819549bbb82f55ec755af7aeefb007ff398ecc34126e0bed151","purpose":"Managers collection"},
+    {"path":"json-schema/ChassisCollection.json","sha256":"1139108bb8e4eb6c104fb9f3d88ec9444c70a7c2a09e16a7f1c7a1e55aa1bd42","purpose":"Chassis collection"},
+    {"path":"json-schema/SoftwareInventoryCollection.json","sha256":"6864adf2bc37f1698b35e4250edec8b3b4cc2a3a91c513a54deb2ae1f0023ca6","purpose":"Firmware inventory collection"},
+    {"path":"json-schema/TaskCollection.json","sha256":"e9e7ec36f9af7a2a4ae272e60f0584507471cb913b70bc272ee92f6135bf5820","purpose":"Tasks collection"},
+    {"path":"json-schema/EventDestinationCollection.json","sha256":"de1be8f8ff742adf581372c0c1ded4e835f1af4868f73177198bbdf255cb3854","purpose":"Subscriptions collection"},
+    {"path":"json-schema/odata-v4.json","sha256":"af6040bfb65caa8476b3c3c3cd43fe6a39b917ce3b1657763f75004ee21eb562","purpose":"OData dependency"},
+    {"path":"json-schema/redfish-schema-v1.json","sha256":"6aeb708414c0fdaf779fba6d33a16b8feb901e8e710126bfc39a9f0fae7942be","purpose":"Redfish error definition"}
+  ]
+}

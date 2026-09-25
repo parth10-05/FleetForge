@@ -6,7 +6,10 @@ import (
 	"sort"
 )
 
-var ErrTimeReversal = errors.New("logical time cannot move backwards")
+var (
+	ErrTimeReversal  = errors.New("logical time cannot move backwards")
+	ErrInvalidEvents = errors.New("invalid scheduled events")
+)
 
 type LogicalTime int64
 
@@ -41,6 +44,34 @@ func (s *Scheduler) PopDue(now LogicalTime) []Event {
 	due := append([]Event(nil), s.events[:cutoff]...)
 	s.events = append([]Event(nil), s.events[cutoff:]...)
 	return due
+}
+
+// Snapshot returns the pending scheduler state in deterministic firing order.
+func (s *Scheduler) Snapshot() []Event { return append([]Event(nil), s.events...) }
+
+// Restore replaces pending state after validating that event identities and
+// insertion sequences remain unambiguous. It preserves event sequences so a
+// recovered scheduler produces exactly the same ordering as before a restart.
+func (s *Scheduler) Restore(events []Event) error {
+	next := uint64(0)
+	seen := make(map[uint64]struct{}, len(events))
+	copyOfEvents := append([]Event(nil), events...)
+	for _, event := range copyOfEvents {
+		if event.Sequence == 0 || event.TargetID == "" || event.Value == "" {
+			return ErrInvalidEvents
+		}
+		if _, exists := seen[event.Sequence]; exists {
+			return ErrInvalidEvents
+		}
+		seen[event.Sequence] = struct{}{}
+		if event.Sequence > next {
+			next = event.Sequence
+		}
+	}
+	sort.SliceStable(copyOfEvents, func(i, j int) bool { return before(copyOfEvents[i], copyOfEvents[j]) })
+	s.events = copyOfEvents
+	s.next = next
+	return nil
 }
 
 func before(left, right Event) bool {

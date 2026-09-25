@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 )
 
@@ -38,6 +39,11 @@ func TestCreateRecoverAndOwnRun(t *testing.T) {
 	if err := release(); err != nil {
 		t.Fatal(err)
 	}
+	// The metadata file remains, but OS ownership has been released and a new
+	// live owner may acquire the run without treating the old file as a lock.
+	if _, err := os.Stat(run.OwnerPath); err != nil {
+		t.Fatalf("missing diagnostic owner metadata: %v", err)
+	}
 	if release, err := run.AcquireOwner(); err != nil {
 		t.Fatal(err)
 	} else if err := release(); err != nil {
@@ -58,5 +64,19 @@ func TestRecoveryInvalidatesLeadingSnapshot(t *testing.T) {
 	}
 	if _, err := os.Stat(run.InvalidPath); err != nil {
 		t.Fatalf("missing invalid marker: %v", err)
+	}
+}
+
+func TestRunWritesSnapshotBoundToJournalCheckpoint(t *testing.T) {
+	run, err := CreateRun(t.TempDir(), testRunScenario())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.WriteStateSnapshot(7, []byte(`{"targets":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := journal.ReadSnapshot(run.SnapshotPath)
+	if err != nil || snapshot.LogicalTime != 7 || snapshot.StateDigest == "" {
+		t.Fatalf("snapshot = %#v, %v", snapshot, err)
 	}
 }

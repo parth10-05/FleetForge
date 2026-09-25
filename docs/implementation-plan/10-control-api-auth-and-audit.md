@@ -17,7 +17,7 @@ Expose the verified domain capabilities through a versioned, authenticated Contr
 - No custom password database.
 - No API key as the primary human identity mechanism.
 - No synchronous waiting for firmware completion.
-- No direct object bytes or BMC credentials through API.
+- No direct object bytes or target credentials through API.
 - No endpoint that mutates state outside application commands and transaction/audit rules.
 
 ## API boundary

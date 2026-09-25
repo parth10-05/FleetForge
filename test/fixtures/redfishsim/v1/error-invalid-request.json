@@ -1,0 +1,1 @@
+{"route":"*","method":"*","status":400,"schema":"redfish-schema-v1.json","nonMutating":true,"fields":{"standard":["error.code","error.message"],"extension":[],"adminOnly":[]},"body":{"error":{"code":"Base.1.0.GeneralError","message":"The request is outside the supported synthetic contract."}}}
