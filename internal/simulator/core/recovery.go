@@ -96,13 +96,20 @@ func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Eng
 		}
 	}
 	for _, value := range result.Tasks {
-		if _, ok := m.operations[value.OperationID]; !ok || value.ID == "" {
+		operation, ok := m.operations[value.OperationID]
+		if !ok || value.ID == "" || value.TargetID != operation.TargetID || operation.TaskID != value.ID {
 			return nil, fmt.Errorf("invalid core snapshot")
 		}
 		if _, exists := m.tasks[value.ID]; exists {
 			return nil, fmt.Errorf("invalid core snapshot")
 		}
 		m.tasks[value.ID] = value
+	}
+	for _, value := range m.operations {
+		task, ok := m.tasks[value.TaskID]
+		if !ok || task.OperationID != value.ID || task.TargetID != value.TargetID {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
 	}
 	for _, value := range result.Subscriptions {
 		if _, ok := m.targets[value.TargetID]; !ok || value.ID == "" {
@@ -112,12 +119,19 @@ func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Eng
 			return nil, fmt.Errorf("invalid core snapshot")
 		}
 		m.subscriptions[value.ID] = value
+		target := m.targets[value.TargetID]
+		target.subscriptions++
+		if target.subscriptions > uint64(input.Limits.Subscriptions) {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
+		m.targets[value.TargetID] = target
 		if value.Ordinal > m.subscriptionOrdinal {
 			m.subscriptionOrdinal = value.Ordinal
 		}
 	}
 	for _, value := range result.Events {
-		if _, ok := m.targets[value.TargetID]; !ok || value.ID == "" {
+		task, ok := m.tasks[value.TaskID]
+		if !ok || value.ID == "" || value.TargetID != task.TargetID || value.Sequence == 0 {
 			return nil, fmt.Errorf("invalid core snapshot")
 		}
 		if _, exists := m.events[value.ID]; exists {
@@ -125,10 +139,31 @@ func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Eng
 		}
 		m.events[value.ID] = value
 	}
-	for _, value := range input.Faults {
-		m.faults[value.FaultID] = FaultState{ID: value.FaultID, Name: value.Name, Scope: value.Scope, ScopeKey: value.ScopeKey, Remaining: value.Consumption, Priority: value.Priority}
+	if err := m.restoreFaults(result.Faults); err != nil {
+		return nil, err
 	}
 	return startModel(m, queueSize)
+}
+
+func (m *model) restoreFaults(states []FaultState) error {
+	if len(states) != len(m.input.Faults) {
+		return fmt.Errorf("invalid core snapshot")
+	}
+	expected := make(map[string]scenario.Fault, len(m.input.Faults))
+	for _, value := range m.input.Faults {
+		expected[value.FaultID] = value
+	}
+	for _, state := range states {
+		value, ok := expected[state.ID]
+		if !ok || state.Name != value.Name || state.Scope != value.Scope || state.ScopeKey != value.ScopeKey || state.Priority != value.Priority || state.Remaining < 0 || state.Remaining > value.Consumption {
+			return fmt.Errorf("invalid core snapshot")
+		}
+		if _, exists := m.faults[state.ID]; exists {
+			return fmt.Errorf("invalid core snapshot")
+		}
+		m.faults[state.ID] = state
+	}
+	return nil
 }
 
 // RecoveredAcceptance is the trusted core representation reconstructed from a

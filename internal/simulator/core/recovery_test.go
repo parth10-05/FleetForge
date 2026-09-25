@@ -142,6 +142,66 @@ func TestStartFromSnapshotRejectsDuplicateOperationID(t *testing.T) {
 	}
 }
 
+func TestStartFromSnapshotRetainsSubscriptionCapacity(t *testing.T) {
+	input := testScenario()
+	source, err := Start(input, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Submit(context.Background(), CreateSubscription{TargetID: target, Fingerprint: "callback-1"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := SnapshotBytes(context.Background(), source)
+	source.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := StartFromSnapshot(input, raw, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	if _, err := restored.Submit(context.Background(), CreateSubscription{TargetID: target, Fingerprint: "callback-2"}); !errors.Is(err, ErrLimitExceeded) {
+		t.Fatalf("subscription limit error = %v", err)
+	}
+}
+
+func TestStartFromSnapshotRetainsFaultConsumption(t *testing.T) {
+	input := testScenario()
+	input.Faults = []scenario.Fault{{FaultID: "fault-1", Name: "RF-F01", Scope: "rack", ScopeKey: "r1", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 2}}
+	target, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := Start(input, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Submit(context.Background(), ConsumeFault{TargetID: target, FaultID: "fault-1"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := SnapshotBytes(context.Background(), source)
+	source.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := StartFromSnapshot(input, raw, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	if _, err := restored.Submit(context.Background(), ConsumeFault{TargetID: target, FaultID: "fault-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restored.Submit(context.Background(), ConsumeFault{TargetID: target, FaultID: "fault-1"}); !errors.Is(err, ErrFaultExhausted) {
+		t.Fatalf("fault exhaustion error = %v", err)
+	}
+}
+
 func TestRecoverAcceptedOperationsRejectsUnknownTarget(t *testing.T) {
 	input := testScenario()
 	entry, err := journal.New("run-1", 1, 0, journal.UpdateAccepted, "target-not-in-scenario", "attempt", "digest", "")
