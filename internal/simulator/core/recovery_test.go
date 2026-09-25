@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -118,6 +119,26 @@ func TestStartFromSnapshotRestoresImmutableProjection(t *testing.T) {
 	after, err := restored.Submit(context.Background(), Snapshot{})
 	if err != nil || len(after.State) != len(before.State) || len(after.Tasks) != len(before.Tasks) || after.Time != before.Time || after.Sequence <= before.Sequence {
 		t.Fatalf("restored snapshot = %#v, %v", after, err)
+	}
+}
+
+func TestStartFromSnapshotRejectsDuplicateOperationID(t *testing.T) {
+	input := testScenario()
+	state := make([]TargetState, 0, len(input.Targets))
+	for _, value := range input.Targets {
+		id, err := scenario.ID(input, "target", value.Index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state = append(state, TargetState{ID: id, Site: value.Site, Rack: value.Rack, Version: value.InitialVersion, Healthy: true, Reachable: true, Phase: LifecycleHealthy})
+	}
+	result := Result{State: state, Operations: []OperationState{{ID: "op-1", TargetID: state[0].ID}, {ID: "op-1", TargetID: state[0].ID}}}
+	raw, err := json.Marshal(PersistedSnapshot{SchemaVersion: SnapshotSchemaVersion, Result: result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StartFromSnapshot(input, raw, 4); err == nil {
+		t.Fatal("duplicate operation ID was accepted")
 	}
 }
 

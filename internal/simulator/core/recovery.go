@@ -78,10 +78,16 @@ func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Eng
 		if !found || state.Site != value.Site || state.Rack != value.Rack {
 			return nil, fmt.Errorf("invalid core snapshot")
 		}
+		if _, exists := m.targets[state.ID]; exists {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
 		m.targets[state.ID] = target{TargetState: state, ExpectedVersion: value.ExpectedVersion}
 	}
 	for _, value := range result.Operations {
 		if _, ok := m.targets[value.TargetID]; !ok || value.ID == "" {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
+		if _, exists := m.operations[value.ID]; exists {
 			return nil, fmt.Errorf("invalid core snapshot")
 		}
 		m.operations[value.ID] = value
@@ -93,10 +99,16 @@ func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Eng
 		if _, ok := m.operations[value.OperationID]; !ok || value.ID == "" {
 			return nil, fmt.Errorf("invalid core snapshot")
 		}
+		if _, exists := m.tasks[value.ID]; exists {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
 		m.tasks[value.ID] = value
 	}
 	for _, value := range result.Subscriptions {
 		if _, ok := m.targets[value.TargetID]; !ok || value.ID == "" {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
+		if _, exists := m.subscriptions[value.ID]; exists {
 			return nil, fmt.Errorf("invalid core snapshot")
 		}
 		m.subscriptions[value.ID] = value
@@ -106,6 +118,9 @@ func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Eng
 	}
 	for _, value := range result.Events {
 		if _, ok := m.targets[value.TargetID]; !ok || value.ID == "" {
+			return nil, fmt.Errorf("invalid core snapshot")
+		}
+		if _, exists := m.events[value.ID]; exists {
 			return nil, fmt.Errorf("invalid core snapshot")
 		}
 		m.events[value.ID] = value
