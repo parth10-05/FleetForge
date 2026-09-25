@@ -101,6 +101,8 @@ type model struct {
 	events                                               map[string]EventState
 	faults                                               map[string]FaultState
 	acceptanceOrdinal, subscriptionOrdinal, eventOrdinal uint64
+	logicalTime                                          clock.LogicalTime
+	commandSequence                                      uint64
 }
 type request struct {
 	command Command
@@ -178,9 +180,9 @@ func (e *Engine) Submit(ctx context.Context, c Command) (Result, error) {
 }
 func (e *Engine) loop(m model) {
 	defer close(e.stopped)
-	now := clock.NewManual(0)
+	now := clock.NewManual(m.logicalTime)
 	var schedule clock.Scheduler
-	var seq uint64
+	seq := m.commandSequence
 	for {
 		select {
 		case <-e.stop:

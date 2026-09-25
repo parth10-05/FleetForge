@@ -60,6 +60,8 @@ func StartFromSnapshot(input scenario.Scenario, raw []byte, queueSize int) (*Eng
 		return nil, err
 	}
 	m := model{input: input, targets: map[string]target{}, operations: map[string]OperationState{}, tasks: map[string]TaskState{}, subscriptions: map[string]SubscriptionState{}, events: map[string]EventState{}, faults: map[string]FaultState{}}
+	m.logicalTime = result.Time
+	m.commandSequence = result.Sequence
 	expected := map[string]scenario.Target{}
 	for _, value := range input.Targets {
 		id, err := scenario.ID(input, "target", value.Index)

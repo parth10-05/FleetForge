@@ -102,6 +102,9 @@ func TestStartFromSnapshotRestoresImmutableProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := source.Submit(context.Background(), AdvanceTo{Time: 7}); err != nil {
+		t.Fatal(err)
+	}
 	raw, before, err := SnapshotBytes(context.Background(), source)
 	source.Close()
 	if err != nil {
@@ -113,7 +116,7 @@ func TestStartFromSnapshotRestoresImmutableProjection(t *testing.T) {
 	}
 	defer restored.Close()
 	after, err := restored.Submit(context.Background(), Snapshot{})
-	if err != nil || len(after.State) != len(before.State) || len(after.Tasks) != len(before.Tasks) {
+	if err != nil || len(after.State) != len(before.State) || len(after.Tasks) != len(before.Tasks) || after.Time != before.Time || after.Sequence <= before.Sequence {
 		t.Fatalf("restored snapshot = %#v, %v", after, err)
 	}
 }
