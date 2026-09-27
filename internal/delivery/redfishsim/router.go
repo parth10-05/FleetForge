@@ -81,6 +81,9 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, http.StatusMethodNotAllowed, "Base.1.0.ActionNotSupported", "The requested synthetic method is not supported.")
 		return
 	}
+	if h.consumeObservationFault(w, ctx, target, result) {
+		return
+	}
 	prefix := "/virtual-bmcs/" + target + "/redfish/v1"
 	switch resource {
 	case "":
@@ -100,6 +103,36 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		errorJSON(w, http.StatusNotFound, "Base.1.0.ResourceMissingAtURI", "The requested synthetic resource does not exist.")
 	}
+}
+
+func (h *Handler) consumeObservationFault(w http.ResponseWriter, ctx context.Context, target string, result core.Result) bool {
+	state := core.TargetState{}
+	for _, candidate := range result.State {
+		if candidate.ID == target {
+			state = candidate
+			break
+		}
+	}
+	for _, fault := range result.Faults {
+		if fault.Remaining < 1 || (fault.Name != "RF-F04" && fault.Name != "RF-F05") {
+			continue
+		}
+		matches := fault.Scope == "all" || (fault.Scope == "target" && fault.ScopeKey == target) || (fault.Scope == "rack" && fault.ScopeKey == state.Rack) || (fault.Scope == "site" && fault.ScopeKey == state.Site)
+		if !matches {
+			continue
+		}
+		if _, err := h.engine.Submit(ctx, core.ConsumeFault{TargetID: target, FaultID: fault.ID}); err != nil {
+			return false
+		}
+		if fault.Name == "RF-F04" {
+			w.Header().Set("Retry-After", "1")
+			errorJSON(w, http.StatusTooManyRequests, "Base.1.0.ServiceTemporarilyUnavailable", "Synthetic observation is rate limited.")
+		} else {
+			errorJSON(w, http.StatusServiceUnavailable, "Base.1.0.ServiceTemporarilyUnavailable", "Synthetic observation is unavailable.")
+		}
+		return true
+	}
+	return false
 }
 
 func (h *Handler) auth(r *http.Request) bool {
