@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,9 @@ type reader struct{}
 
 func (reader) Status(context.Context) (simulator.Status, error) {
 	return simulator.Status{RunID: "synthetic-run", Ready: true}, nil
+}
+func (reader) Journal(context.Context) (simulator.JournalStatus, error) {
+	return simulator.JournalStatus{Entries: 2, LastHash: "abc"}, nil
 }
 
 func TestAdminAuthAndListenerIsolation(t *testing.T) {
@@ -37,8 +41,15 @@ func TestAdminAuthAndListenerIsolation(t *testing.T) {
 			}
 		})
 	}
-	request := httptest.NewRequest(http.MethodGet, "/admin/v1/status", nil)
+	request := httptest.NewRequest(http.MethodGet, "/admin/v1/journal", nil)
+	request.Header.Set(credentialHeader, "admin-secret")
 	response := httptest.NewRecorder()
+	admin.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "entries") {
+		t.Fatalf("journal = %d: %s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "/admin/v1/status", nil)
+	response = httptest.NewRecorder()
 	redfishsim.Routes().ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("Redfish listener exposed admin route: %d", response.Code)

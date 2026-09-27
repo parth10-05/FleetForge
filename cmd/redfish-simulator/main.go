@@ -79,7 +79,7 @@ func run() error {
 	mux.Handle("/virtual-bmcs/", targets.Routes())
 	mux.Handle("/", health.Routes())
 	server := &http.Server{Addr: cfg.Address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
-	admin := &http.Server{Addr: cfg.AdminAddress, Handler: simulatoradmin.New(appsim.New(runtimeStatus{runID: run.ID, targets: targets}), []byte(cfg.AdminSecret), cfg.ReadinessTimeout).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
+	admin := &http.Server{Addr: cfg.AdminAddress, Handler: simulatoradmin.New(appsim.New(runtimeStatus{runID: run.ID, journalPath: run.JournalPath, targets: targets}), []byte(cfg.AdminSecret), cfg.ReadinessTimeout).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errorsChannel := make(chan error, 2)
@@ -172,8 +172,8 @@ func shutdownServers(server, admin *http.Server, timeout time.Duration) {
 }
 
 type runtimeStatus struct {
-	runID   string
-	targets *redfishsim.Handler
+	runID, journalPath string
+	targets            *redfishsim.Handler
 }
 
 func (r runtimeStatus) Status(context.Context) (appsim.Status, error) {
@@ -182,4 +182,15 @@ func (r runtimeStatus) Status(context.Context) (appsim.Status, error) {
 func (r runtimeStatus) Metrics(context.Context) (appsim.Metrics, error) {
 	metrics := r.targets.Metrics()
 	return appsim.Metrics{Requests: metrics.Requests, AcceptedUpdates: metrics.AcceptedUpdates, TaskObservations: metrics.TaskObservations, Faults: metrics.Faults}, nil
+}
+func (r runtimeStatus) Journal(context.Context) (appsim.JournalStatus, error) {
+	entries, err := journal.Load(r.journalPath)
+	if err != nil {
+		return appsim.JournalStatus{}, err
+	}
+	status := appsim.JournalStatus{Entries: uint64(len(entries))}
+	if len(entries) > 0 {
+		status.LastHash = entries[len(entries)-1].Hash
+	}
+	return status, nil
 }

@@ -22,6 +22,13 @@ type Metrics struct {
 type MetricsReader interface {
 	Metrics(context.Context) (Metrics, error)
 }
+type JournalStatus struct {
+	Entries  uint64 `json:"entries"`
+	LastHash string `json:"last_hash,omitempty"`
+}
+type JournalReader interface {
+	Journal(context.Context) (JournalStatus, error)
+}
 
 type Service struct{ reader StatusReader }
 
@@ -41,4 +48,14 @@ func (s *Service) Metrics(ctx context.Context) (Metrics, error) {
 		return Metrics{}, ErrUnavailable
 	}
 	return reader.Metrics(ctx)
+}
+func (s *Service) Journal(ctx context.Context) (JournalStatus, error) {
+	if s == nil || s.reader == nil {
+		return JournalStatus{}, ErrUnavailable
+	}
+	reader, ok := s.reader.(JournalReader)
+	if !ok {
+		return JournalStatus{}, ErrUnavailable
+	}
+	return reader.Journal(ctx)
 }
