@@ -77,6 +77,10 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 		h.update(w, r, ctx, target)
 		return
 	}
+	if r.Method == http.MethodPost && resource == "EventService/Subscriptions" {
+		h.subscribe(w, r, ctx, target)
+		return
+	}
 	if r.Method != http.MethodGet {
 		errorJSON(w, http.StatusMethodNotAllowed, "Base.1.0.ActionNotSupported", "The requested synthetic method is not supported.")
 		return
@@ -119,6 +123,25 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		errorJSON(w, http.StatusNotFound, "Base.1.0.ResourceMissingAtURI", "The requested synthetic resource does not exist.")
 	}
+}
+
+func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request, ctx context.Context, target string) {
+	body := http.MaxBytesReader(w, r.Body, h.maxBody)
+	defer body.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, body); err != nil {
+		errorJSON(w, http.StatusRequestEntityTooLarge, "Base.1.0.RequestTooLarge", "The subscription body is too large.")
+		return
+	}
+	result, err := h.engine.Submit(ctx, core.CreateSubscription{TargetID: target, Fingerprint: hex.EncodeToString(hash.Sum(nil))})
+	if err != nil || len(result.Subscriptions) == 0 {
+		errorJSON(w, http.StatusBadRequest, "Base.1.0.PropertyValueIncorrect", "Synthetic subscription is invalid.")
+		return
+	}
+	id := result.Subscriptions[len(result.Subscriptions)-1].ID
+	uri := "/virtual-bmcs/" + target + "/redfish/v1/EventService/Subscriptions/" + id
+	w.Header().Set("Location", uri)
+	jsonOut(w, http.StatusCreated, map[string]any{"@odata.id": uri})
 }
 
 func (h *Handler) task(w http.ResponseWriter, id string, result core.Result) {
