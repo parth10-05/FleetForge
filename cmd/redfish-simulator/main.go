@@ -134,7 +134,7 @@ func advanceRealtime(ctx context.Context, done chan<- struct{}, engine *core.Eng
 			if len(result.Fired) == 0 {
 				continue
 			}
-			targets.DispatchEvents(result)
+			targets.DispatchEvents(ctx, result)
 			_ = checkpoint(run, engine, context.Background())
 		}
 	}

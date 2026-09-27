@@ -30,6 +30,8 @@ type Handler struct {
 	journalMu      sync.Mutex
 	afterMutation  func(context.Context) error
 	dispatcher     *CallbackDispatcher
+	callbackMu     sync.Mutex
+	delayedEvent   *core.EventState
 	metrics        counters
 }
 
@@ -79,7 +81,7 @@ func (h *Handler) Metrics() Metrics {
 
 // DispatchEvents queues callbacks for lifecycle events fired by an external
 // logical-time adapter. The engine remains transport-neutral and serial.
-func (h *Handler) DispatchEvents(result core.Result) {
+func (h *Handler) DispatchEvents(ctx context.Context, result core.Result) {
 	if h.dispatcher == nil || len(result.Fired) == 0 {
 		return
 	}
@@ -90,11 +92,53 @@ func (h *Handler) DispatchEvents(result core.Result) {
 		}
 		for _, event := range result.Events {
 			if event.TargetID == fired.TargetID && event.TaskID == parts[1] && event.Kind == parts[0] {
-				h.dispatcher.Enqueue(result.Subscriptions, event)
+				h.dispatchEvent(ctx, result, event)
 				break
 			}
 		}
 	}
+}
+
+func (h *Handler) dispatchEvent(ctx context.Context, result core.Result, event core.EventState) {
+	if h.consumeEventFault(ctx, result, event, "RF-F03") {
+		return
+	}
+	if h.consumeEventFault(ctx, result, event, "RF-F02") {
+		h.callbackMu.Lock()
+		copy := event
+		h.delayedEvent = &copy
+		h.callbackMu.Unlock()
+		return
+	}
+	h.callbackMu.Lock()
+	delayed := h.delayedEvent
+	h.delayedEvent = nil
+	h.callbackMu.Unlock()
+	h.dispatcher.Enqueue(result.Subscriptions, event)
+	if delayed != nil {
+		h.dispatcher.Enqueue(result.Subscriptions, *delayed)
+	}
+	if h.consumeEventFault(ctx, result, event, "RF-F01") {
+		h.dispatcher.Enqueue(result.Subscriptions, event)
+	}
+}
+
+func (h *Handler) consumeEventFault(ctx context.Context, result core.Result, event core.EventState, name string) bool {
+	state := targetState(result, event.TargetID)
+	for _, fault := range result.Faults {
+		if fault.Name != name || fault.Remaining < 1 || !matchesFault(fault, state) || !triggered(fault, result, state) {
+			continue
+		}
+		if _, err := h.engine.Submit(ctx, core.ConsumeFault{TargetID: event.TargetID, FaultID: fault.ID}); err != nil {
+			return false
+		}
+		if h.checkpoint(ctx) != nil {
+			return false
+		}
+		h.metrics.faults.Add(1)
+		return true
+	}
+	return false
 }
 
 func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
