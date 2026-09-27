@@ -26,6 +26,7 @@ type Handler struct {
 	maxBody        int64
 	journal        *journal.Writer
 	journalMu      sync.Mutex
+	afterMutation  func(context.Context) error
 }
 
 // NewWithJournal composes a retained run journal with the target listener.
@@ -46,6 +47,11 @@ func New(engine *core.Engine, user, password []byte, timeout time.Duration, maxB
 	}
 	return &Handler{engine: engine, user: append([]byte(nil), user...), password: append([]byte(nil), password...), timeout: timeout, maxBody: maxBody}
 }
+
+// SetAfterMutation installs the retained-state checkpoint callback. The
+// callback is invoked before a successful mutation response is written, so a
+// graceful restart never acknowledges state that it cannot restore.
+func (h *Handler) SetAfterMutation(callback func(context.Context) error) { h.afterMutation = callback }
 
 // Routes preserves the non-composed isolation boundary used by existing tests.
 func Routes() http.Handler { return http.MaxBytesHandler(http.NewServeMux(), 4<<10) }
@@ -138,6 +144,10 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request, ctx context.
 		errorJSON(w, http.StatusBadRequest, "Base.1.0.PropertyValueIncorrect", "Synthetic subscription is invalid.")
 		return
 	}
+	if err := h.checkpoint(ctx); err != nil {
+		errorJSON(w, http.StatusServiceUnavailable, "Base.1.0.InternalError", "Synthetic retained state is unavailable.")
+		return
+	}
 	id := result.Subscriptions[len(result.Subscriptions)-1].ID
 	uri := "/virtual-bmcs/" + target + "/redfish/v1/EventService/Subscriptions/" + id
 	w.Header().Set("Location", uri)
@@ -201,6 +211,10 @@ func (h *Handler) consumeObservationFault(w http.ResponseWriter, ctx context.Con
 		}
 		if _, err := h.engine.Submit(ctx, core.ConsumeFault{TargetID: target, FaultID: fault.ID}); err != nil {
 			return false
+		}
+		if h.checkpoint(ctx) != nil {
+			errorJSON(w, http.StatusServiceUnavailable, "Base.1.0.InternalError", "Synthetic retained state is unavailable.")
+			return true
 		}
 		if fault.Name == "RF-F04" {
 			w.Header().Set("Retry-After", "1")
@@ -269,9 +283,19 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, ctx context.Con
 			return
 		}
 	}
+	if err := h.checkpoint(ctx); err != nil {
+		errorJSON(w, http.StatusServiceUnavailable, "Base.1.0.InternalError", "Synthetic retained state is unavailable.")
+		return
+	}
 	uri := "/virtual-bmcs/" + target + "/redfish/v1/TaskService/Tasks/" + op.TaskID
 	w.Header().Set("Location", uri)
 	jsonOut(w, http.StatusAccepted, map[string]any{"@odata.id": uri, "Oem": map[string]any{"FleetForge": map[string]string{"Attempt": attempt}}})
+}
+func (h *Handler) checkpoint(ctx context.Context) error {
+	if h.afterMutation == nil {
+		return nil
+	}
+	return h.afterMutation(ctx)
 }
 func link(uri string) map[string]string { return map[string]string{"@odata.id": uri} }
 func jsonOut(w http.ResponseWriter, status int, body any) {

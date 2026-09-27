@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -15,8 +14,7 @@ import (
 const (
 	apiAddressKey                     = "FLEETFORGE_API_ADDR"
 	simulatorAddressKey               = "FLEETFORGE_SIMULATOR_ADDR"
-	simulatorStatePathKey             = "FLEETFORGE_SIMULATOR_STATE_PATH"
-	simulatorJournalPathKey           = "FLEETFORGE_SIMULATOR_JOURNAL_PATH"
+	simulatorRunRootKey               = "FLEETFORGE_SIMULATOR_RUN_ROOT"
 	simulatorScenarioPathKey          = "FLEETFORGE_SIMULATOR_SCENARIO_PATH"
 	simulatorUsernameKey              = "FLEETFORGE_SIMULATOR_USERNAME"
 	simulatorPasswordKey              = "FLEETFORGE_SIMULATOR_PASSWORD"
@@ -55,7 +53,7 @@ type API struct {
 type Worker struct{ Common }
 type Simulator struct {
 	Common
-	Address, StatePath, JournalPath, ScenarioPath, Username, Password, AdminAddress, AdminSecret string
+	Address, RunRoot, ScenarioPath, Username, Password, AdminAddress, AdminSecret string
 }
 
 // PostgreSQL holds bounded, role-specific database settings. DSNs are opaque
@@ -106,16 +104,9 @@ func LoadSimulator() (Simulator, error) {
 	if err != nil {
 		return Simulator{}, err
 	}
-	statePath, err := requiredPath(os.LookupEnv, simulatorStatePathKey)
+	runRoot, err := requiredPath(os.LookupEnv, simulatorRunRootKey)
 	if err != nil {
 		return Simulator{}, err
-	}
-	journalPath, err := requiredPath(os.LookupEnv, simulatorJournalPathKey)
-	if err != nil {
-		return Simulator{}, err
-	}
-	if filepath.Clean(statePath) == filepath.Clean(journalPath) {
-		return Simulator{}, &Error{Key: simulatorJournalPathKey, Reason: "must differ from simulator state path"}
 	}
 	scenarioPath, err := requiredPath(os.LookupEnv, simulatorScenarioPathKey)
 	if err != nil {
@@ -134,7 +125,7 @@ func LoadSimulator() (Simulator, error) {
 	if adminSecret == "" {
 		return Simulator{}, &Error{Key: simulatorAdminSecretKey, Reason: "is required"}
 	}
-	return Simulator{Common: common, Address: address, StatePath: statePath, JournalPath: journalPath, ScenarioPath: scenarioPath, Username: username, Password: password, AdminAddress: adminAddress, AdminSecret: adminSecret}, nil
+	return Simulator{Common: common, Address: address, RunRoot: runRoot, ScenarioPath: scenarioPath, Username: username, Password: password, AdminAddress: adminAddress, AdminSecret: adminSecret}, nil
 }
 
 // LoadPostgreSQL is opt-in: Phase 01 process startup does not call it, so

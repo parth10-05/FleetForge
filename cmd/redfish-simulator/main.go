@@ -19,6 +19,7 @@ import (
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 	"github.com/parth10-05/fleetforge/internal/platform/simulatorstate"
 	"github.com/parth10-05/fleetforge/internal/simulator/core"
+	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 )
 
@@ -34,9 +35,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := simulatorstate.EnsureRecoverable(cfg.StatePath, cfg.JournalPath); err != nil {
-		return err
-	}
 	rawScenario, err := os.ReadFile(cfg.ScenarioPath)
 	if err != nil {
 		return fmt.Errorf("read simulator scenario: %w", err)
@@ -45,18 +43,34 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("decode simulator scenario: %w", err)
 	}
-	engine, err := core.Start(input, 64)
+	run, err := simulatorstate.OpenOrCreateRun(cfg.RunRoot, input)
+	if err != nil {
+		return fmt.Errorf("open retained simulator run: %w", err)
+	}
+	release, err := run.AcquireOwner()
+	if err != nil {
+		return fmt.Errorf("acquire retained simulator run owner: %w", err)
+	}
+	defer release()
+	engine, err := startRetainedEngine(run, input)
 	if err != nil {
 		return fmt.Errorf("start simulator engine: %w", err)
 	}
 	defer engine.Close()
+	writer, err := journal.OpenWriter(run.JournalPath, run.ID)
+	if err != nil {
+		return fmt.Errorf("open retained simulator journal: %w", err)
+	}
+	defer writer.Close()
 	health := healthhttp.NewHandler(healthhttp.FileProbe{Path: cfg.ReadinessFile}, cfg.ReadinessTimeout, buildinfo.Current())
 	health.MarkStarted()
 	mux := http.NewServeMux()
-	mux.Handle("/virtual-bmcs/", redfishsim.New(engine, []byte(cfg.Username), []byte(cfg.Password), cfg.ReadinessTimeout, int64(input.Limits.BodyBytes)).Routes())
+	targets := redfishsim.NewWithJournal(engine, []byte(cfg.Username), []byte(cfg.Password), cfg.ReadinessTimeout, int64(input.Limits.BodyBytes), writer)
+	targets.SetAfterMutation(func(ctx context.Context) error { return checkpoint(run, engine, ctx) })
+	mux.Handle("/virtual-bmcs/", targets.Routes())
 	mux.Handle("/", health.Routes())
 	server := &http.Server{Addr: cfg.Address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
-	admin := &http.Server{Addr: cfg.AdminAddress, Handler: simulatoradmin.New(appsim.New(runtimeStatus{runID: input.ScenarioID}), []byte(cfg.AdminSecret), cfg.ReadinessTimeout).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
+	admin := &http.Server{Addr: cfg.AdminAddress, Handler: simulatoradmin.New(appsim.New(runtimeStatus{runID: run.ID}), []byte(cfg.AdminSecret), cfg.ReadinessTimeout).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errorsChannel := make(chan error, 2)
@@ -65,6 +79,7 @@ func run() error {
 	slog.Info("redfish simulator started", "role", "redfish-simulator", "environment", cfg.Environment, "address", cfg.Address, "version", buildinfo.Current().Version)
 	select {
 	case err := <-errorsChannel:
+		shutdownServers(server, admin, cfg.ShutdownTimeout)
 		if !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
@@ -72,6 +87,9 @@ func run() error {
 	case <-shutdownContext.Done():
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
+		if err := checkpoint(run, engine, ctx); err != nil {
+			return fmt.Errorf("checkpoint retained simulator state: %w", err)
+		}
 		if err := server.Shutdown(ctx); err != nil {
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
@@ -80,6 +98,36 @@ func run() error {
 		}
 		return nil
 	}
+}
+
+func startRetainedEngine(run simulatorstate.Run, input scenario.Scenario) (*core.Engine, error) {
+	snapshot, err := journal.ReadSnapshot(run.SnapshotPath)
+	if err != nil {
+		return nil, fmt.Errorf("read retained simulator snapshot: %w", err)
+	}
+	if len(snapshot.State) > 0 && string(snapshot.State) != "null" {
+		return core.StartFromSnapshot(input, snapshot.State, 64)
+	}
+	entries, err := journal.Load(run.JournalPath)
+	if err != nil {
+		return nil, fmt.Errorf("load retained simulator journal: %w", err)
+	}
+	return core.StartRecovered(input, entries, 64)
+}
+
+func checkpoint(run simulatorstate.Run, engine *core.Engine, ctx context.Context) error {
+	state, result, err := core.SnapshotBytes(ctx, engine)
+	if err != nil {
+		return err
+	}
+	return run.WriteStateSnapshot(int64(result.Time), state)
+}
+
+func shutdownServers(server, admin *http.Server, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_ = server.Shutdown(ctx)
+	_ = admin.Shutdown(ctx)
 }
 
 type runtimeStatus struct{ runID string }

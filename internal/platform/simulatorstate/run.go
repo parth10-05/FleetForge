@@ -52,6 +52,22 @@ func CreateRun(root string, input scenario.Scenario) (Run, error) {
 	return run, nil
 }
 
+// OpenOrCreateRun resolves the deterministic run identity for a scenario. An
+// existing run is always recovered and validated before it can be reused;
+// malformed retained state is never overwritten by a fresh process.
+func OpenOrCreateRun(root string, input scenario.Scenario) (Run, error) {
+	id, err := scenario.ID(input, "run", 0)
+	if err != nil {
+		return Run{}, err
+	}
+	if _, err := os.Stat(paths(root, id).ManifestPath); err == nil {
+		return RecoverRun(root, id)
+	} else if !os.IsNotExist(err) {
+		return Run{}, err
+	}
+	return CreateRun(root, input)
+}
+
 func RecoverRun(root, id string) (Run, error) {
 	run := paths(root, id)
 	var record manifest
