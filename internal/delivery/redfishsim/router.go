@@ -170,7 +170,7 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request, ctx context.
 		return
 	}
 	hash := sha256.Sum256(raw)
-	result, err := h.engine.Submit(ctx, core.CreateSubscription{TargetID: target, Fingerprint: hex.EncodeToString(hash[:])})
+	result, err := h.engine.Submit(ctx, core.CreateSubscription{TargetID: target, Fingerprint: hex.EncodeToString(hash[:]), Destination: request.Destination})
 	if err != nil || len(result.Subscriptions) == 0 {
 		errorJSON(w, http.StatusBadRequest, "Base.1.0.PropertyValueIncorrect", "Synthetic subscription is invalid.")
 		return

@@ -27,7 +27,10 @@ type AcceptUpdate struct{ TargetID, Version, AttemptID string }
 
 func (AcceptUpdate) command() {}
 
-type CreateSubscription struct{ TargetID, Fingerprint string }
+// CreateSubscription stores only a validated callback destination and a
+// request fingerprint. Neither caller credentials nor callback payloads enter
+// the deterministic core state.
+type CreateSubscription struct{ TargetID, Fingerprint, Destination string }
 
 func (CreateSubscription) command() {}
 

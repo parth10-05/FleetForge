@@ -63,8 +63,8 @@ type TaskState struct {
 	Visible                   bool
 }
 type SubscriptionState struct {
-	ID, TargetID, Fingerprint string
-	Ordinal                   uint64
+	ID, TargetID, Fingerprint, Destination string
+	Ordinal                                uint64
 }
 type EventState struct {
 	ID, TargetID, TaskID string
@@ -352,7 +352,7 @@ func (m *model) subscribe(v CreateSubscription) error {
 	if err != nil {
 		return err
 	}
-	m.subscriptions[id] = SubscriptionState{ID: id, TargetID: v.TargetID, Fingerprint: v.Fingerprint, Ordinal: m.subscriptionOrdinal}
+	m.subscriptions[id] = SubscriptionState{ID: id, TargetID: v.TargetID, Fingerprint: v.Fingerprint, Destination: v.Destination, Ordinal: m.subscriptionOrdinal}
 	t.subscriptions++
 	m.targets[v.TargetID] = t
 	return nil
