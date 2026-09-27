@@ -20,6 +20,8 @@ const (
 	simulatorScenarioPathKey          = "FLEETFORGE_SIMULATOR_SCENARIO_PATH"
 	simulatorUsernameKey              = "FLEETFORGE_SIMULATOR_USERNAME"
 	simulatorPasswordKey              = "FLEETFORGE_SIMULATOR_PASSWORD"
+	simulatorAdminAddressKey          = "FLEETFORGE_SIMULATOR_ADMIN_ADDR"
+	simulatorAdminSecretKey           = "FLEETFORGE_SIMULATOR_ADMIN_SECRET"
 	postgresApplicationDSNKey         = "FLEETFORGE_POSTGRES_APP_DSN"
 	postgresMigrationDSNKey           = "FLEETFORGE_POSTGRES_MIGRATION_DSN"
 	postgresApplicationDSNFallbackKey = "DATABASE_URL"
@@ -53,7 +55,7 @@ type API struct {
 type Worker struct{ Common }
 type Simulator struct {
 	Common
-	Address, StatePath, JournalPath, ScenarioPath, Username, Password string
+	Address, StatePath, JournalPath, ScenarioPath, Username, Password, AdminAddress, AdminSecret string
 }
 
 // PostgreSQL holds bounded, role-specific database settings. DSNs are opaque
@@ -124,7 +126,15 @@ func LoadSimulator() (Simulator, error) {
 	if username == "" || password == "" {
 		return Simulator{}, &Error{Key: simulatorUsernameKey, Reason: "and simulator password are required"}
 	}
-	return Simulator{Common: common, Address: address, StatePath: statePath, JournalPath: journalPath, ScenarioPath: scenarioPath, Username: username, Password: password}, nil
+	adminAddress, err := requiredAddress(os.LookupEnv, simulatorAdminAddressKey)
+	if err != nil {
+		return Simulator{}, err
+	}
+	adminSecret := optional(os.LookupEnv, simulatorAdminSecretKey, "")
+	if adminSecret == "" {
+		return Simulator{}, &Error{Key: simulatorAdminSecretKey, Reason: "is required"}
+	}
+	return Simulator{Common: common, Address: address, StatePath: statePath, JournalPath: journalPath, ScenarioPath: scenarioPath, Username: username, Password: password, AdminAddress: adminAddress, AdminSecret: adminSecret}, nil
 }
 
 // LoadPostgreSQL is opt-in: Phase 01 process startup does not call it, so
