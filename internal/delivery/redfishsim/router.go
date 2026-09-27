@@ -29,6 +29,7 @@ type Handler struct {
 	journal        *journal.Writer
 	journalMu      sync.Mutex
 	afterMutation  func(context.Context) error
+	dispatcher     *CallbackDispatcher
 	metrics        counters
 }
 
@@ -63,6 +64,7 @@ func New(engine *core.Engine, user, password []byte, timeout time.Duration, maxB
 // callback is invoked before a successful mutation response is written, so a
 // graceful restart never acknowledges state that it cannot restore.
 func (h *Handler) SetAfterMutation(callback func(context.Context) error) { h.afterMutation = callback }
+func (h *Handler) SetCallbackDispatcher(dispatcher *CallbackDispatcher)  { h.dispatcher = dispatcher }
 
 // Routes preserves the non-composed isolation boundary used by existing tests.
 func Routes() http.Handler { return http.MaxBytesHandler(http.NewServeMux(), 4<<10) }
@@ -73,6 +75,26 @@ func (h *Handler) Routes() http.Handler {
 }
 func (h *Handler) Metrics() Metrics {
 	return Metrics{Requests: h.metrics.requests.Load(), AcceptedUpdates: h.metrics.acceptedUpdates.Load(), TaskObservations: h.metrics.taskObservations.Load(), Faults: h.metrics.faults.Load()}
+}
+
+// DispatchEvents queues callbacks for lifecycle events fired by an external
+// logical-time adapter. The engine remains transport-neutral and serial.
+func (h *Handler) DispatchEvents(result core.Result) {
+	if h.dispatcher == nil || len(result.Fired) == 0 {
+		return
+	}
+	for _, fired := range result.Fired {
+		parts := strings.SplitN(fired.Value, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		for _, event := range result.Events {
+			if event.TargetID == fired.TargetID && event.TaskID == parts[1] && event.Kind == parts[0] {
+				h.dispatcher.Enqueue(result.Subscriptions, event)
+				break
+			}
+		}
+	}
 }
 
 func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {

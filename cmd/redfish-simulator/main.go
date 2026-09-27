@@ -18,6 +18,7 @@ import (
 	"github.com/parth10-05/fleetforge/internal/platform/buildinfo"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 	"github.com/parth10-05/fleetforge/internal/platform/simulatorstate"
+	"github.com/parth10-05/fleetforge/internal/simulator/clock"
 	"github.com/parth10-05/fleetforge/internal/simulator/core"
 	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
@@ -67,6 +68,13 @@ func run() error {
 	mux := http.NewServeMux()
 	targets := redfishsim.NewWithJournal(engine, []byte(cfg.Username), []byte(cfg.Password), cfg.ReadinessTimeout, int64(input.Limits.BodyBytes), writer)
 	targets.SetAfterMutation(func(ctx context.Context) error { return checkpoint(run, engine, ctx) })
+	dispatcher := redfishsim.NewCallbackDispatcher(input.Limits.CallbackWorkers, input.Limits.OpenConnections, cfg.ReadinessTimeout)
+	defer dispatcher.Close()
+	targets.SetCallbackDispatcher(dispatcher)
+	realtimeContext, stopRealtime := context.WithCancel(context.Background())
+	realtimeDone := make(chan struct{})
+	go advanceRealtime(realtimeContext, realtimeDone, engine, targets, run)
+	defer func() { stopRealtime(); <-realtimeDone }()
 	mux.Handle("/virtual-bmcs/", targets.Routes())
 	mux.Handle("/", health.Routes())
 	server := &http.Server{Addr: cfg.Address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
@@ -79,12 +87,16 @@ func run() error {
 	slog.Info("redfish simulator started", "role", "redfish-simulator", "environment", cfg.Environment, "address", cfg.Address, "version", buildinfo.Current().Version)
 	select {
 	case err := <-errorsChannel:
+		stopRealtime()
+		<-realtimeDone
 		shutdownServers(server, admin, cfg.ShutdownTimeout)
 		if !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
 		return nil
 	case <-shutdownContext.Done():
+		stopRealtime()
+		<-realtimeDone
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if err := checkpoint(run, engine, ctx); err != nil {
@@ -97,6 +109,34 @@ func run() error {
 			return fmt.Errorf("graceful admin shutdown: %w", err)
 		}
 		return nil
+	}
+}
+
+func advanceRealtime(ctx context.Context, done chan<- struct{}, engine *core.Engine, targets *redfishsim.Handler, run simulatorstate.Run) {
+	defer close(done)
+	initial, err := engine.Submit(ctx, core.Snapshot{})
+	if err != nil {
+		return
+	}
+	next := initial.Time + 1
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			result, err := engine.Submit(ctx, core.AdvanceTo{Time: clock.LogicalTime(next)})
+			if err != nil {
+				return
+			}
+			next++
+			if len(result.Fired) == 0 {
+				continue
+			}
+			targets.DispatchEvents(result)
+			_ = checkpoint(run, engine, context.Background())
+		}
 	}
 }
 
