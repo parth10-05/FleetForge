@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	appsim "github.com/parth10-05/fleetforge/internal/application/simulator"
 	"github.com/parth10-05/fleetforge/internal/delivery/healthhttp"
 	"github.com/parth10-05/fleetforge/internal/delivery/redfishsim"
+	"github.com/parth10-05/fleetforge/internal/delivery/simulatoradmin"
 	"github.com/parth10-05/fleetforge/internal/platform/buildinfo"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 	"github.com/parth10-05/fleetforge/internal/platform/simulatorstate"
@@ -54,10 +56,12 @@ func run() error {
 	mux.Handle("/virtual-bmcs/", redfishsim.New(engine, []byte(cfg.Username), []byte(cfg.Password), cfg.ReadinessTimeout, int64(input.Limits.BodyBytes)).Routes())
 	mux.Handle("/", health.Routes())
 	server := &http.Server{Addr: cfg.Address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
+	admin := &http.Server{Addr: cfg.AdminAddress, Handler: simulatoradmin.New(appsim.New(runtimeStatus{runID: input.ScenarioID}), []byte(cfg.AdminSecret), cfg.ReadinessTimeout).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	errorsChannel := make(chan error, 1)
+	errorsChannel := make(chan error, 2)
 	go func() { errorsChannel <- server.ListenAndServe() }()
+	go func() { errorsChannel <- admin.ListenAndServe() }()
 	slog.Info("redfish simulator started", "role", "redfish-simulator", "environment", cfg.Environment, "address", cfg.Address, "version", buildinfo.Current().Version)
 	select {
 	case err := <-errorsChannel:
@@ -71,6 +75,15 @@ func run() error {
 		if err := server.Shutdown(ctx); err != nil {
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
+		if err := admin.Shutdown(ctx); err != nil {
+			return fmt.Errorf("graceful admin shutdown: %w", err)
+		}
 		return nil
 	}
+}
+
+type runtimeStatus struct{ runID string }
+
+func (r runtimeStatus) Status(context.Context) (appsim.Status, error) {
+	return appsim.Status{RunID: r.runID, Ready: true}, nil
 }
