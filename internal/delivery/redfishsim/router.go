@@ -252,6 +252,15 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, ctx context.Con
 		errorJSON(w, http.StatusBadRequest, "Base.1.0.PropertyValueFormatError", "Synthetic update headers are invalid.")
 		return
 	}
+	if h.consumeTransportFault(ctx, target, "RF-F06") {
+		// A pre-write transport fault deliberately leaves no Redfish response.
+		// On a real listener the client observes a closed connection before its
+		// body can be accepted.
+		if h.checkpoint(ctx) == nil {
+			h.abort(w)
+		}
+		return
+	}
 	body := http.MaxBytesReader(w, r.Body, h.maxBody)
 	defer body.Close()
 	hash := sha256.New()
@@ -287,10 +296,67 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, ctx context.Con
 		errorJSON(w, http.StatusServiceUnavailable, "Base.1.0.InternalError", "Synthetic retained state is unavailable.")
 		return
 	}
+	if h.consumeTransportFault(ctx, target, "RF-F07") {
+		if err := h.checkpoint(ctx); err != nil {
+			return
+		}
+		// Acceptance and its checkpoint are durable before the deliberate loss.
+		h.abort(w)
+		return
+	}
 	uri := "/virtual-bmcs/" + target + "/redfish/v1/TaskService/Tasks/" + op.TaskID
 	w.Header().Set("Location", uri)
 	jsonOut(w, http.StatusAccepted, map[string]any{"@odata.id": uri, "Oem": map[string]any{"FleetForge": map[string]string{"Attempt": attempt}}})
 }
+
+func (h *Handler) consumeTransportFault(ctx context.Context, target, name string) bool {
+	result, err := h.engine.Submit(ctx, core.Observe{TargetID: target})
+	if err != nil {
+		return false
+	}
+	state := targetState(result, target)
+	for _, fault := range result.Faults {
+		if fault.Name != name || fault.Remaining < 1 || !matchesFault(fault, state) || !triggered(fault, result, state) {
+			continue
+		}
+		if _, err := h.engine.Submit(ctx, core.ConsumeFault{TargetID: target, FaultID: fault.ID}); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesFault(fault core.FaultState, state core.TargetState) bool {
+	return fault.Scope == "all" || (fault.Scope == "target" && fault.ScopeKey == state.ID) || (fault.Scope == "rack" && fault.ScopeKey == state.Rack) || (fault.Scope == "site" && fault.ScopeKey == state.Site)
+}
+
+// Trigger values are evaluated against the immutable observation projection.
+// task_state and reboot_ordinal are both acceptance ordinals in the small v1
+// profile; later phases may introduce named task-state predicates.
+func triggered(fault core.FaultState, result core.Result, state core.TargetState) bool {
+	switch fault.TriggerKind {
+	case "logical_time":
+		return int64(result.Time) >= int64(fault.TriggerValue)
+	case "request_count":
+		return state.RequestCount >= uint64(fault.TriggerValue)
+	case "task_state", "reboot_ordinal":
+		return state.AcceptedCount >= uint64(fault.TriggerValue)
+	default:
+		return false
+	}
+}
+
+func (h *Handler) abort(w http.ResponseWriter) {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		return
+	}
+	conn, _, err := hijacker.Hijack()
+	if err == nil {
+		_ = conn.Close()
+	}
+}
+
 func (h *Handler) checkpoint(ctx context.Context) error {
 	if h.afterMutation == nil {
 		return nil

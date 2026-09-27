@@ -198,7 +198,7 @@ func (m *model) restoreFaults(states []FaultState) error {
 	}
 	for _, state := range states {
 		value, ok := expected[state.ID]
-		if !ok || state.Name != value.Name || state.Scope != value.Scope || state.ScopeKey != value.ScopeKey || state.Priority != value.Priority || state.Remaining < 0 || state.Remaining > value.Consumption {
+		if !ok || state.Name != value.Name || state.Scope != value.Scope || state.ScopeKey != value.ScopeKey || state.TriggerKind != value.Trigger.Kind || state.TriggerValue != value.Trigger.Value || state.Priority != value.Priority || state.Remaining < 0 || state.Remaining > value.Consumption {
 			return fmt.Errorf("invalid core snapshot")
 		}
 		if _, exists := m.faults[state.ID]; exists {
@@ -235,7 +235,7 @@ func StartRecovered(input scenario.Scenario, entries []journal.Entry, queueSize 
 		m.targets[id] = target{TargetState: TargetState{ID: id, Site: value.Site, Rack: value.Rack, Version: value.InitialVersion, Healthy: true, Reachable: true, Phase: LifecycleHealthy}, ExpectedVersion: value.ExpectedVersion}
 	}
 	for _, value := range input.Faults {
-		m.faults[value.FaultID] = FaultState{ID: value.FaultID, Name: value.Name, Scope: value.Scope, ScopeKey: value.ScopeKey, Remaining: value.Consumption, Priority: value.Priority}
+		m.faults[value.FaultID] = FaultState{ID: value.FaultID, Name: value.Name, Scope: value.Scope, ScopeKey: value.ScopeKey, TriggerKind: value.Trigger.Kind, TriggerValue: value.Trigger.Value, Remaining: value.Consumption, Priority: value.Priority}
 	}
 	for _, value := range recovered {
 		m.operations[value.Operation.ID] = value.Operation

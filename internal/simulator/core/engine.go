@@ -73,6 +73,8 @@ type EventState struct {
 }
 type FaultState struct {
 	ID, Name, Scope, ScopeKey string
+	TriggerKind               string
+	TriggerValue              int
 	Remaining, Priority       int
 }
 type Result struct {
@@ -138,7 +140,7 @@ func Start(input scenario.Scenario, queueSize int) (*Engine, error) {
 		m.targets[id] = target{TargetState: TargetState{ID: id, Site: v.Site, Rack: v.Rack, Version: v.InitialVersion, Healthy: true, Reachable: true, Phase: LifecycleHealthy}, ExpectedVersion: v.ExpectedVersion}
 	}
 	for _, v := range input.Faults {
-		m.faults[v.FaultID] = FaultState{ID: v.FaultID, Name: v.Name, Scope: v.Scope, ScopeKey: v.ScopeKey, Remaining: v.Consumption, Priority: v.Priority}
+		m.faults[v.FaultID] = FaultState{ID: v.FaultID, Name: v.Name, Scope: v.Scope, ScopeKey: v.ScopeKey, TriggerKind: v.Trigger.Kind, TriggerValue: v.Trigger.Value, Remaining: v.Consumption, Priority: v.Priority}
 	}
 	return startModel(m, queueSize)
 }
