@@ -24,7 +24,22 @@ func New(service *simulator.Service, secret []byte, timeout time.Duration) *Hand
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/v1/status", h.status)
+	mux.HandleFunc("GET /admin/v1/metrics", h.metrics)
 	return http.MaxBytesHandler(mux, 4<<10)
+}
+func (h *Handler) metrics(writer http.ResponseWriter, request *http.Request) {
+	if !h.authorized(request) {
+		write(writer, http.StatusUnauthorized, map[string]string{"status": "denied"})
+		return
+	}
+	ctx, cancel := contextWithTimeout(request, h.timeout)
+	defer cancel()
+	metrics, err := h.service.Metrics(ctx)
+	if err != nil {
+		write(writer, http.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
+		return
+	}
+	write(writer, http.StatusOK, metrics)
 }
 
 func (h *Handler) status(writer http.ResponseWriter, request *http.Request) {

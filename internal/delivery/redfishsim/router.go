@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/parth10-05/fleetforge/internal/simulator/core"
@@ -27,6 +28,15 @@ type Handler struct {
 	journal        *journal.Writer
 	journalMu      sync.Mutex
 	afterMutation  func(context.Context) error
+	metrics        counters
+}
+
+type counters struct{ requests, acceptedUpdates, taskObservations, faults atomic.Uint64 }
+type Metrics struct {
+	Requests         uint64 `json:"requests"`
+	AcceptedUpdates  uint64 `json:"accepted_updates"`
+	TaskObservations uint64 `json:"task_observations"`
+	Faults           uint64 `json:"faults"`
 }
 
 // NewWithJournal composes a retained run journal with the target listener.
@@ -60,8 +70,12 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("/virtual-bmcs/", h.handle)
 	return http.MaxBytesHandler(mux, h.maxBody)
 }
+func (h *Handler) Metrics() Metrics {
+	return Metrics{Requests: h.metrics.requests.Load(), AcceptedUpdates: h.metrics.acceptedUpdates.Load(), TaskObservations: h.metrics.taskObservations.Load(), Faults: h.metrics.faults.Load()}
+}
 
 func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
+	h.metrics.requests.Add(1)
 	if !h.auth(r) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="fleetforge-simulator"`)
 		errorJSON(w, http.StatusUnauthorized, "Base.1.0.NoValidSession", "Target authentication is required.")
@@ -157,6 +171,7 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request, ctx context.
 func (h *Handler) task(w http.ResponseWriter, id string, result core.Result) {
 	for _, v := range result.Tasks {
 		if v.ID == id && v.Visible {
+			h.metrics.taskObservations.Add(1)
 			jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#Task.v1_7_4.Task", "Id": v.ID, "TaskState": string(v.State), "TaskStatus": "OK", "PercentComplete": v.PercentComplete, "Messages": []any{}})
 			return
 		}
@@ -216,6 +231,7 @@ func (h *Handler) consumeObservationFault(w http.ResponseWriter, ctx context.Con
 			errorJSON(w, http.StatusServiceUnavailable, "Base.1.0.InternalError", "Synthetic retained state is unavailable.")
 			return true
 		}
+		h.metrics.faults.Add(1)
 		if fault.Name == "RF-F04" {
 			w.Header().Set("Retry-After", "1")
 			errorJSON(w, http.StatusTooManyRequests, "Base.1.0.ServiceTemporarilyUnavailable", "Synthetic observation is rate limited.")
@@ -296,6 +312,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, ctx context.Con
 		errorJSON(w, http.StatusServiceUnavailable, "Base.1.0.InternalError", "Synthetic retained state is unavailable.")
 		return
 	}
+	h.metrics.acceptedUpdates.Add(1)
 	if h.consumeTransportFault(ctx, target, "RF-F07") {
 		if err := h.checkpoint(ctx); err != nil {
 			return
@@ -320,6 +337,7 @@ func (h *Handler) consumeTransportFault(ctx context.Context, target, name string
 			continue
 		}
 		if _, err := h.engine.Submit(ctx, core.ConsumeFault{TargetID: target, FaultID: fault.ID}); err == nil {
+			h.metrics.faults.Add(1)
 			return true
 		}
 	}
