@@ -10,9 +10,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/parth10-05/fleetforge/internal/simulator/core"
+	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 )
 
 // Handler exposes only the bounded V1 target surface. It has no simulator
@@ -22,6 +24,17 @@ type Handler struct {
 	user, password []byte
 	timeout        time.Duration
 	maxBody        int64
+	journal        *journal.Writer
+	journalMu      sync.Mutex
+}
+
+// NewWithJournal composes a retained run journal with the target listener.
+// The writer synchronizes request receipt and acceptance evidence before a
+// success response can leave the process.
+func NewWithJournal(engine *core.Engine, user, password []byte, timeout time.Duration, maxBody int64, writer *journal.Writer) *Handler {
+	h := New(engine, user, password, timeout, maxBody)
+	h.journal = writer
+	return h
 }
 
 func New(engine *core.Engine, user, password []byte, timeout time.Duration, maxBody int64) *Handler {
@@ -125,12 +138,26 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, ctx context.Con
 		errorJSON(w, http.StatusBadRequest, "Base.1.0.PropertyValueIncorrect", "Synthetic update digest does not match the body.")
 		return
 	}
+	h.journalMu.Lock()
+	defer h.journalMu.Unlock()
+	if h.journal != nil {
+		if _, err := h.journal.Append(journal.Record{Kind: journal.RequestReceived, TargetID: target, Payload: journal.Payload{CorrelationID: attempt, Fingerprint: strings.ToLower(digest)}}); err != nil {
+			errorJSON(w, http.StatusServiceUnavailable, "Base.1.0.InternalError", "Synthetic request evidence is unavailable.")
+			return
+		}
+	}
 	result, err := h.engine.Submit(ctx, core.AcceptUpdate{TargetID: target, Version: version, AttemptID: attempt})
 	if err != nil || len(result.Operations) == 0 {
 		errorJSON(w, http.StatusBadRequest, "Base.1.0.PropertyValueIncorrect", "Synthetic update does not match target policy.")
 		return
 	}
 	op := result.Operations[len(result.Operations)-1]
+	if h.journal != nil {
+		if _, err := h.journal.Append(journal.Record{LogicalTime: result.Time, Kind: journal.UpdateAccepted, TargetID: target, Payload: journal.Payload{CorrelationID: attempt, Fingerprint: strings.ToLower(digest)}}); err != nil {
+			errorJSON(w, http.StatusServiceUnavailable, "Base.1.0.InternalError", "Synthetic acceptance evidence is unavailable.")
+			return
+		}
+	}
 	uri := "/virtual-bmcs/" + target + "/redfish/v1/TaskService/Tasks/" + op.TaskID
 	w.Header().Set("Location", uri)
 	jsonOut(w, http.StatusAccepted, map[string]any{"@odata.id": uri, "Oem": map[string]any{"FleetForge": map[string]string{"Attempt": attempt}}})

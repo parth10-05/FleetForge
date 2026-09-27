@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/parth10-05/fleetforge/internal/simulator/core"
+	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 )
 
@@ -24,7 +26,13 @@ func TestTargetRoutesRequireAuthAndExposeBoundedUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(engine, []byte("user"), []byte("pass"), time.Second, 1024).Routes()
+	journalPath := filepath.Join(t.TempDir(), "journal.jsonl")
+	writer, err := journal.OpenWriter(journalPath, "run-routes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	h := NewWithJournal(engine, []byte("user"), []byte("pass"), time.Second, 1024, writer).Routes()
 	root := "/virtual-bmcs/" + target + "/redfish/v1"
 	request := httptest.NewRequest(http.MethodGet, root, nil)
 	response := httptest.NewRecorder()
@@ -51,6 +59,9 @@ func TestTargetRoutesRequireAuthAndExposeBoundedUpdate(t *testing.T) {
 	h.ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || response.Header().Get("Location") == "" {
 		t.Fatalf("update = %d: %s", response.Code, response.Body.String())
+	}
+	if writer.SyncCount() != 2 {
+		t.Fatalf("synced evidence records = %d, want 2", writer.SyncCount())
 	}
 	request = httptest.NewRequest(http.MethodGet, root+"/TaskService/Tasks", nil)
 	request.SetBasicAuth("user", "pass")
