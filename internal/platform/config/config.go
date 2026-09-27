@@ -17,6 +17,7 @@ const (
 	simulatorAddressKey               = "FLEETFORGE_SIMULATOR_ADDR"
 	simulatorStatePathKey             = "FLEETFORGE_SIMULATOR_STATE_PATH"
 	simulatorJournalPathKey           = "FLEETFORGE_SIMULATOR_JOURNAL_PATH"
+	simulatorScenarioPathKey          = "FLEETFORGE_SIMULATOR_SCENARIO_PATH"
 	postgresApplicationDSNKey         = "FLEETFORGE_POSTGRES_APP_DSN"
 	postgresMigrationDSNKey           = "FLEETFORGE_POSTGRES_MIGRATION_DSN"
 	postgresApplicationDSNFallbackKey = "DATABASE_URL"
@@ -50,7 +51,7 @@ type API struct {
 type Worker struct{ Common }
 type Simulator struct {
 	Common
-	Address, StatePath, JournalPath string
+	Address, StatePath, JournalPath, ScenarioPath string
 }
 
 // PostgreSQL holds bounded, role-specific database settings. DSNs are opaque
@@ -112,7 +113,11 @@ func LoadSimulator() (Simulator, error) {
 	if filepath.Clean(statePath) == filepath.Clean(journalPath) {
 		return Simulator{}, &Error{Key: simulatorJournalPathKey, Reason: "must differ from simulator state path"}
 	}
-	return Simulator{Common: common, Address: address, StatePath: statePath, JournalPath: journalPath}, nil
+	scenarioPath, err := requiredPath(os.LookupEnv, simulatorScenarioPathKey)
+	if err != nil {
+		return Simulator{}, err
+	}
+	return Simulator{Common: common, Address: address, StatePath: statePath, JournalPath: journalPath, ScenarioPath: scenarioPath}, nil
 }
 
 // LoadPostgreSQL is opt-in: Phase 01 process startup does not call it, so

@@ -15,6 +15,8 @@ import (
 	"github.com/parth10-05/fleetforge/internal/platform/buildinfo"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 	"github.com/parth10-05/fleetforge/internal/platform/simulatorstate"
+	"github.com/parth10-05/fleetforge/internal/simulator/core"
+	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 )
 
 func main() {
@@ -32,6 +34,19 @@ func run() error {
 	if err := simulatorstate.EnsureRecoverable(cfg.StatePath, cfg.JournalPath); err != nil {
 		return err
 	}
+	rawScenario, err := os.ReadFile(cfg.ScenarioPath)
+	if err != nil {
+		return fmt.Errorf("read simulator scenario: %w", err)
+	}
+	input, err := scenario.Decode(rawScenario)
+	if err != nil {
+		return fmt.Errorf("decode simulator scenario: %w", err)
+	}
+	engine, err := core.Start(input, 64)
+	if err != nil {
+		return fmt.Errorf("start simulator engine: %w", err)
+	}
+	defer engine.Close()
 	handler := healthhttp.NewHandler(healthhttp.FileProbe{Path: cfg.ReadinessFile}, cfg.ReadinessTimeout, buildinfo.Current())
 	handler.MarkStarted()
 	server := &http.Server{Addr: cfg.Address, Handler: handler.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}

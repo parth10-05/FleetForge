@@ -12,6 +12,7 @@ func TestLoadValidRoleConfigurations(t *testing.T) {
 	t.Setenv("FLEETFORGE_SIMULATOR_ADDR", "127.0.0.1:8081")
 	t.Setenv("FLEETFORGE_SIMULATOR_STATE_PATH", "state.json")
 	t.Setenv("FLEETFORGE_SIMULATOR_JOURNAL_PATH", "journal.json")
+	t.Setenv("FLEETFORGE_SIMULATOR_SCENARIO_PATH", "scenario.json")
 	if _, err := LoadAPI(); err != nil {
 		t.Fatalf("LoadAPI() error = %v", err)
 	}
