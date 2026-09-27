@@ -16,7 +16,10 @@ import (
 const SchemaVersionV2 = "fleetforge.simulator.journal/v2"
 const SchemaVersionV1 = SchemaVersionV2 // retained name prevents silent v1 callers.
 
-var ErrInvalidChain = errors.New("invalid simulator journal chain")
+var (
+	ErrInvalidChain  = errors.New("invalid simulator journal chain")
+	ErrLimitExceeded = errors.New("simulator journal entry limit exceeded")
+)
 
 type Kind string
 

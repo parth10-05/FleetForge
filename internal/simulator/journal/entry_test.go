@@ -127,6 +127,20 @@ func TestWriterSerializesAndSyncsDurableKinds(t *testing.T) {
 	}
 }
 
+func TestWriterRefusesEntriesPastConfiguredLimit(t *testing.T) {
+	writer, err := OpenWriterLimited(filepath.Join(t.TempDir(), "journal.jsonl"), "run-1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	if _, err := writer.Append(Record{Kind: RequestReceived}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Append(Record{Kind: UpdateAccepted}); !errors.Is(err, ErrLimitExceeded) {
+		t.Fatalf("append beyond limit error = %v", err)
+	}
+}
+
 func TestTypedRecordsRejectUnsafePayloadAndPartialFinalLine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.jsonl")
 	writer, err := OpenWriter(path, "run-1")

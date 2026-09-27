@@ -32,6 +32,7 @@ type Handler struct {
 	dispatcher     *CallbackDispatcher
 	callbackMu     sync.Mutex
 	delayedEvent   *core.EventState
+	connections    chan struct{}
 	metrics        counters
 }
 
@@ -67,13 +68,34 @@ func New(engine *core.Engine, user, password []byte, timeout time.Duration, maxB
 // graceful restart never acknowledges state that it cannot restore.
 func (h *Handler) SetAfterMutation(callback func(context.Context) error) { h.afterMutation = callback }
 func (h *Handler) SetCallbackDispatcher(dispatcher *CallbackDispatcher)  { h.dispatcher = dispatcher }
+func (h *Handler) SetOpenConnectionLimit(limit int) {
+	if limit < 1 {
+		limit = 1
+	}
+	h.connections = make(chan struct{}, limit)
+}
 
 // Routes preserves the non-composed isolation boundary used by existing tests.
 func Routes() http.Handler { return http.MaxBytesHandler(http.NewServeMux(), 4<<10) }
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/virtual-bmcs/", h.handle)
-	return http.MaxBytesHandler(mux, h.maxBody)
+	return h.limitConnections(http.MaxBytesHandler(mux, h.maxBody))
+}
+func (h *Handler) limitConnections(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if h.connections == nil {
+			next.ServeHTTP(writer, request)
+			return
+		}
+		select {
+		case h.connections <- struct{}{}:
+			defer func() { <-h.connections }()
+			next.ServeHTTP(writer, request)
+		default:
+			errorJSON(writer, http.StatusServiceUnavailable, "Base.1.0.ServiceTemporarilyUnavailable", "Synthetic listener connection limit is reached.")
+		}
+	})
 }
 func (h *Handler) Metrics() Metrics {
 	return Metrics{Requests: h.metrics.requests.Load(), AcceptedUpdates: h.metrics.acceptedUpdates.Load(), TaskObservations: h.metrics.taskObservations.Load(), Faults: h.metrics.faults.Load()}

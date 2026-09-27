@@ -17,14 +17,24 @@ type Writer struct {
 	file            *os.File
 	runID, previous string
 	next            uint64
+	limit           uint64
 	mu              sync.Mutex
 	closed          bool
 	syncs           uint64
 }
 
 func OpenWriter(path, runID string) (*Writer, error) {
+	return OpenWriterLimited(path, runID, 1_000_000)
+}
+
+// OpenWriterLimited retains the validated existing chain and refuses every
+// append beyond the scenario's explicit evidence bound.
+func OpenWriterLimited(path, runID string, limit uint64) (*Writer, error) {
 	if runID == "" {
 		return nil, ErrInvalidChain
+	}
+	if limit == 0 {
+		return nil, ErrLimitExceeded
 	}
 	entries, err := Load(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -33,6 +43,9 @@ func OpenWriter(path, runID string) (*Writer, error) {
 	if len(entries) > 0 && entries[0].RunID != runID {
 		return nil, ErrInvalidChain
 	}
+	if uint64(len(entries)) > limit {
+		return nil, ErrLimitExceeded
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -40,7 +53,7 @@ func OpenWriter(path, runID string) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := &Writer{file: f, runID: runID, next: 1}
+	w := &Writer{file: f, runID: runID, next: 1, limit: limit}
 	if len(entries) > 0 {
 		last := entries[len(entries)-1]
 		w.next = last.Sequence + 1
@@ -53,6 +66,9 @@ func (w *Writer) Append(record Record) (Entry, error) {
 	defer w.mu.Unlock()
 	if w.closed {
 		return Entry{}, os.ErrClosed
+	}
+	if w.next > w.limit {
+		return Entry{}, ErrLimitExceeded
 	}
 	entry, err := newEntry(w.runID, w.next, record, w.previous)
 	if err != nil {

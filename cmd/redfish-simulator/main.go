@@ -58,7 +58,7 @@ func run() error {
 		return fmt.Errorf("start simulator engine: %w", err)
 	}
 	defer engine.Close()
-	writer, err := journal.OpenWriter(run.JournalPath, run.ID)
+	writer, err := journal.OpenWriterLimited(run.JournalPath, run.ID, uint64(input.Limits.JournalEntries))
 	if err != nil {
 		return fmt.Errorf("open retained simulator journal: %w", err)
 	}
@@ -68,6 +68,7 @@ func run() error {
 	mux := http.NewServeMux()
 	targets := redfishsim.NewWithJournal(engine, []byte(cfg.Username), []byte(cfg.Password), cfg.ReadinessTimeout, int64(input.Limits.BodyBytes), writer)
 	targets.SetAfterMutation(func(ctx context.Context) error { return checkpoint(run, engine, ctx) })
+	targets.SetOpenConnectionLimit(input.Limits.OpenConnections)
 	dispatcher := redfishsim.NewCallbackDispatcher(input.Limits.CallbackWorkers, input.Limits.OpenConnections, cfg.ReadinessTimeout)
 	defer dispatcher.Close()
 	targets.SetCallbackDispatcher(dispatcher)
