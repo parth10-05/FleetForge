@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -133,9 +134,17 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 	case "UpdateService/FirmwareInventory/BMC":
 		jsonOut(w, http.StatusOK, inventory(targetState(result, target)))
 	case "TaskService":
-		jsonOut(w, http.StatusOK, map[string]any{"Id": "TaskService", "Tasks": link(prefix + "/TaskService/Tasks")})
+		jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#TaskService.v1_3_0.TaskService", "Id": "TaskService", "ServiceEnabled": true, "Tasks": link(prefix + "/TaskService/Tasks")})
 	case "EventService":
-		jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#EventService.v1_9_4.EventService", "Id": "EventService", "ServiceEnabled": true, "Subscriptions": link(prefix + "/EventService/Subscriptions")})
+		jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#EventService.v1_9_4.EventService", "Id": "EventService", "ServiceEnabled": true, "Subscriptions": link(prefix + "/EventService/Subscriptions"), "Oem": map[string]any{"FleetForge": map[string]string{"EventSequence": "logical"}}})
+	case "EventService/Subscriptions":
+		members := make([]any, 0, len(result.Subscriptions))
+		for _, subscription := range result.Subscriptions {
+			if subscription.TargetID == target {
+				members = append(members, link(prefix+"/EventService/Subscriptions/"+subscription.ID))
+			}
+		}
+		jsonOut(w, http.StatusOK, map[string]any{"Members": members, "Members@odata.count": len(members)})
 	default:
 		if strings.HasPrefix(resource, "TaskService/Tasks/") {
 			h.task(w, strings.TrimPrefix(resource, "TaskService/Tasks/"), result)
@@ -148,12 +157,20 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request, ctx context.Context, target string) {
 	body := http.MaxBytesReader(w, r.Body, h.maxBody)
 	defer body.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, body); err != nil {
+	raw, err := io.ReadAll(body)
+	if err != nil {
 		errorJSON(w, http.StatusRequestEntityTooLarge, "Base.1.0.RequestTooLarge", "The subscription body is too large.")
 		return
 	}
-	result, err := h.engine.Submit(ctx, core.CreateSubscription{TargetID: target, Fingerprint: hex.EncodeToString(hash.Sum(nil))})
+	var request subscriptionRequest
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || !validSubscription(request) {
+		errorJSON(w, http.StatusBadRequest, "Base.1.0.PropertyValueIncorrect", "Synthetic subscription is invalid.")
+		return
+	}
+	hash := sha256.Sum256(raw)
+	result, err := h.engine.Submit(ctx, core.CreateSubscription{TargetID: target, Fingerprint: hex.EncodeToString(hash[:])})
 	if err != nil || len(result.Subscriptions) == 0 {
 		errorJSON(w, http.StatusBadRequest, "Base.1.0.PropertyValueIncorrect", "Synthetic subscription is invalid.")
 		return
@@ -165,14 +182,25 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request, ctx context.
 	id := result.Subscriptions[len(result.Subscriptions)-1].ID
 	uri := "/virtual-bmcs/" + target + "/redfish/v1/EventService/Subscriptions/" + id
 	w.Header().Set("Location", uri)
-	jsonOut(w, http.StatusCreated, map[string]any{"@odata.id": uri})
+	jsonOut(w, http.StatusCreated, map[string]any{"@odata.type": "#EventDestination.v1_9_9.EventDestination", "Id": id, "Destination": request.Destination, "Protocol": request.Protocol, "SubscriptionType": request.SubscriptionType})
+}
+
+type subscriptionRequest struct {
+	Destination      string `json:"Destination"`
+	Protocol         string `json:"Protocol"`
+	SubscriptionType string `json:"SubscriptionType"`
+}
+
+func validSubscription(request subscriptionRequest) bool {
+	endpoint, err := url.ParseRequestURI(request.Destination)
+	return err == nil && (endpoint.Scheme == "http" || endpoint.Scheme == "https") && endpoint.Host != "" && request.Protocol == "Redfish" && request.SubscriptionType == "RedfishEvent"
 }
 
 func (h *Handler) task(w http.ResponseWriter, id string, result core.Result) {
 	for _, v := range result.Tasks {
 		if v.ID == id && v.Visible {
 			h.metrics.taskObservations.Add(1)
-			jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#Task.v1_7_4.Task", "Id": v.ID, "TaskState": string(v.State), "TaskStatus": "OK", "PercentComplete": v.PercentComplete, "Messages": []any{}})
+			jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#Task.v1_7_4.Task", "Id": v.ID, "TaskState": string(v.State), "TaskStatus": "OK", "PercentComplete": v.PercentComplete, "Messages": []any{}, "Oem": map[string]any{"FleetForge": map[string]string{"OperationFingerprint": "synthetic"}}})
 			return
 		}
 	}

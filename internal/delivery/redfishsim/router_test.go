@@ -70,4 +70,18 @@ func TestTargetRoutesRequireAuthAndExposeBoundedUpdate(t *testing.T) {
 	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte("TaskService/Tasks")) {
 		t.Fatalf("tasks = %d: %s", response.Code, response.Body.String())
 	}
+	request = httptest.NewRequest(http.MethodPost, root+"/EventService/Subscriptions", bytes.NewBufferString(`{"Destination":"http://127.0.0.1:8088/events","Protocol":"Redfish","SubscriptionType":"RedfishEvent"}`))
+	request.SetBasicAuth("user", "pass")
+	response = httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !bytes.Contains(response.Body.Bytes(), []byte("EventDestination")) {
+		t.Fatalf("subscription = %d: %s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, root+"/EventService/Subscriptions", nil)
+	request.SetBasicAuth("user", "pass")
+	response = httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte("Members@odata.count")) {
+		t.Fatalf("subscriptions = %d: %s", response.Code, response.Body.String())
+	}
 }
