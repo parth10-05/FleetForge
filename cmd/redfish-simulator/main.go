@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/parth10-05/fleetforge/internal/delivery/healthhttp"
+	"github.com/parth10-05/fleetforge/internal/delivery/redfishsim"
 	"github.com/parth10-05/fleetforge/internal/platform/buildinfo"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 	"github.com/parth10-05/fleetforge/internal/platform/simulatorstate"
@@ -47,9 +48,12 @@ func run() error {
 		return fmt.Errorf("start simulator engine: %w", err)
 	}
 	defer engine.Close()
-	handler := healthhttp.NewHandler(healthhttp.FileProbe{Path: cfg.ReadinessFile}, cfg.ReadinessTimeout, buildinfo.Current())
-	handler.MarkStarted()
-	server := &http.Server{Addr: cfg.Address, Handler: handler.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
+	health := healthhttp.NewHandler(healthhttp.FileProbe{Path: cfg.ReadinessFile}, cfg.ReadinessTimeout, buildinfo.Current())
+	health.MarkStarted()
+	mux := http.NewServeMux()
+	mux.Handle("/virtual-bmcs/", redfishsim.New(engine, []byte(cfg.Username), []byte(cfg.Password), cfg.ReadinessTimeout, int64(input.Limits.BodyBytes)).Routes())
+	mux.Handle("/", health.Routes())
+	server := &http.Server{Addr: cfg.Address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errorsChannel := make(chan error, 1)
