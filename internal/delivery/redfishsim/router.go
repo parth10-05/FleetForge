@@ -90,6 +90,10 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#ServiceRoot.v1_9_4.ServiceRoot", "Id": "RootService", "Systems": link(prefix + "/Systems"), "Managers": link(prefix + "/Managers"), "Chassis": link(prefix + "/Chassis"), "UpdateService": link(prefix + "/UpdateService"), "TaskService": link(prefix + "/TaskService"), "EventService": link(prefix + "/EventService"), "Oem": map[string]any{"FleetForge": map[string]bool{"Synthetic": true}}})
 	case "Systems":
 		jsonOut(w, http.StatusOK, map[string]any{"Members": []any{link(prefix + "/Systems/1")}, "Members@odata.count": 1})
+	case "Systems/1", "Managers/1", "Chassis/1":
+		jsonOut(w, http.StatusOK, identity(resource, targetState(result, target)))
+	case "Managers", "Chassis":
+		jsonOut(w, http.StatusOK, map[string]any{"Members": []any{link(prefix + "/" + resource + "/1")}, "Members@odata.count": 1})
 	case "UpdateService":
 		jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#UpdateService.v1_9_8.UpdateService", "Id": "UpdateService", "ServiceEnabled": true, "FirmwareInventory": link(prefix + "/UpdateService/FirmwareInventory"), "HttpPushUri": prefix + "/UpdateService/update", "Oem": map[string]any{"FleetForge": map[string]any{"UpdateHeaders": []string{"X-FleetForge-Expected-Version", "X-FleetForge-Artifact-SHA256", "X-FleetForge-Attempt"}}}})
 	case "TaskService/Tasks":
@@ -100,9 +104,60 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		jsonOut(w, http.StatusOK, map[string]any{"Members": tasks, "Members@odata.count": len(tasks)})
+	case "UpdateService/FirmwareInventory":
+		jsonOut(w, http.StatusOK, map[string]any{"Members": []any{link(prefix + "/UpdateService/FirmwareInventory/BMC")}, "Members@odata.count": 1})
+	case "UpdateService/FirmwareInventory/BMC":
+		jsonOut(w, http.StatusOK, inventory(targetState(result, target)))
+	case "TaskService":
+		jsonOut(w, http.StatusOK, map[string]any{"Id": "TaskService", "Tasks": link(prefix + "/TaskService/Tasks")})
+	case "EventService":
+		jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#EventService.v1_9_4.EventService", "Id": "EventService", "ServiceEnabled": true, "Subscriptions": link(prefix + "/EventService/Subscriptions")})
 	default:
+		if strings.HasPrefix(resource, "TaskService/Tasks/") {
+			h.task(w, strings.TrimPrefix(resource, "TaskService/Tasks/"), result)
+			return
+		}
 		errorJSON(w, http.StatusNotFound, "Base.1.0.ResourceMissingAtURI", "The requested synthetic resource does not exist.")
 	}
+}
+
+func (h *Handler) task(w http.ResponseWriter, id string, result core.Result) {
+	for _, v := range result.Tasks {
+		if v.ID == id && v.Visible {
+			jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#Task.v1_7_4.Task", "Id": v.ID, "TaskState": string(v.State), "TaskStatus": "OK", "PercentComplete": v.PercentComplete, "Messages": []any{}})
+			return
+		}
+	}
+	errorJSON(w, http.StatusNotFound, "Base.1.0.ResourceMissingAtURI", "The requested synthetic resource does not exist.")
+}
+func targetState(result core.Result, id string) core.TargetState {
+	for _, v := range result.State {
+		if v.ID == id {
+			return v
+		}
+	}
+	return core.TargetState{}
+}
+func identity(resource string, state core.TargetState) map[string]any {
+	kind := "ComputerSystem"
+	if strings.HasPrefix(resource, "Managers") {
+		kind = "Manager"
+	}
+	if strings.HasPrefix(resource, "Chassis") {
+		kind = "Chassis"
+	}
+	health := "OK"
+	if !state.Healthy {
+		health = "Critical"
+	}
+	return map[string]any{"@odata.type": "#" + kind + ".v1_9_9." + kind, "Id": "1", "Name": "Synthetic " + kind, "Status": map[string]string{"State": "Enabled", "Health": health}, "Oem": map[string]any{"FleetForge": map[string]string{"Model": "deterministic"}}}
+}
+func inventory(state core.TargetState) map[string]any {
+	health := "OK"
+	if !state.Healthy {
+		health = "Critical"
+	}
+	return map[string]any{"@odata.type": "#SoftwareInventory.v1_9_2.SoftwareInventory", "Id": "BMC", "Version": state.Version, "Updateable": true, "Status": map[string]string{"State": "Enabled", "Health": health}, "Oem": map[string]any{"FleetForge": map[string]string{"ExpectedVersion": state.StagedVersion}}}
 }
 
 func (h *Handler) consumeObservationFault(w http.ResponseWriter, ctx context.Context, target string, result core.Result) bool {
