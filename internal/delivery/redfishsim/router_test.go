@@ -2,10 +2,12 @@ package redfishsim
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -83,5 +85,67 @@ func TestTargetRoutesRequireAuthAndExposeBoundedUpdate(t *testing.T) {
 	h.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte("Members@odata.count")) {
 		t.Fatalf("subscriptions = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestPostAcceptDisconnectPersistsExactlyOneAcceptance(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "test", "fixtures", "simulator", "v1", "post-accept-disconnect.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := scenario.Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := core.Start(s, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	target, err := scenario.ID(s, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "journal.jsonl")
+	writer, err := journal.OpenWriter(path, "post-accept-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	server := httptest.NewServer(NewWithJournal(engine, []byte("user"), []byte("pass"), time.Second, 1024, writer).Routes())
+	defer server.Close()
+	body := []byte("synthetic-artifact")
+	sum := sha256.Sum256(body)
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/virtual-bmcs/"+target+"/redfish/v1/UpdateService/update", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("user", "pass")
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-FleetForge-Expected-Version", "1.1")
+	request.Header.Set("X-FleetForge-Artifact-SHA256", hex.EncodeToString(sum[:]))
+	request.Header.Set("X-FleetForge-Attempt", "lost-response-attempt")
+	response, err := server.Client().Do(request)
+	if err == nil {
+		_ = response.Body.Close()
+		t.Fatal("post-accept request received an HTTP response, want connection loss")
+	}
+	state, err := engine.Submit(context.Background(), core.Snapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Operations) != 1 || state.Operations[0].AttemptID != "lost-response-attempt" {
+		t.Fatalf("operations after post-accept loss = %#v", state.Operations)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := journal.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := journal.ReplayAccepted(entries)
+	if err != nil || len(accepted) != 1 {
+		t.Fatalf("accepted journal entries = %#v, %v", accepted, err)
 	}
 }
