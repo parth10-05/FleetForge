@@ -43,7 +43,7 @@ func (address TargetAddress) ResolveResource(raw string) (string, error) {
 		return "", ErrForbiddenAddress
 	}
 	path := parsed.Path
-	if !parsed.IsAbs() {
+	if !parsed.IsAbs() && !strings.HasPrefix(path, address.serviceRoot) {
 		path = strings.TrimPrefix(path, "/")
 		path = address.serviceRoot + path
 	}

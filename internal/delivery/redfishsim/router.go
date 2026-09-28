@@ -200,7 +200,7 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 	prefix := "/virtual-bmcs/" + target + "/redfish/v1"
 	switch resource {
 	case "":
-		jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#ServiceRoot.v1_9_4.ServiceRoot", "Id": "RootService", "Systems": link(prefix + "/Systems"), "Managers": link(prefix + "/Managers"), "Chassis": link(prefix + "/Chassis"), "UpdateService": link(prefix + "/UpdateService"), "TaskService": link(prefix + "/TaskService"), "EventService": link(prefix + "/EventService"), "Oem": map[string]any{"FleetForge": map[string]bool{"Synthetic": true}}})
+		jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#ServiceRoot.v1_9_4.ServiceRoot", "Id": "RootService", "RedfishVersion": "1.16.0", "Systems": link(prefix + "/Systems"), "Managers": link(prefix + "/Managers"), "Chassis": link(prefix + "/Chassis"), "UpdateService": link(prefix + "/UpdateService"), "TaskService": link(prefix + "/TaskService"), "EventService": link(prefix + "/EventService"), "Oem": map[string]any{"FleetForge": map[string]bool{"Synthetic": true}}})
 	case "Systems":
 		jsonOut(w, http.StatusOK, map[string]any{"Members": []any{link(prefix + "/Systems/1")}, "Members@odata.count": 1})
 	case "Systems/1", "Managers/1", "Chassis/1":

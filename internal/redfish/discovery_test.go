@@ -11,12 +11,12 @@ import (
 func TestDiscoverServiceNormalizesOnlyApprovedCapabilityLinks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"RedfishVersion":"1.16.0","Systems":{"@odata.id":"Systems"},"Managers":{"@odata.id":"Managers"},"UpdateService":{"@odata.id":"UpdateService"}}`))
+		_, _ = w.Write([]byte(`{"RedfishVersion":"1.16.0","Systems":{"@odata.id":"/virtual-bmcs/rack-a/redfish/v1/Systems"},"Managers":{"@odata.id":"/virtual-bmcs/rack-a/redfish/v1/Managers"},"UpdateService":{"@odata.id":"/virtual-bmcs/rack-a/redfish/v1/UpdateService"}}`))
 	}))
 	defer server.Close()
 	address, _ := ParseTargetAddress(server.URL, "rack-a")
 	got, err := NewClient(ClientConfig{}).DiscoverService(context.Background(), address)
-	if err != nil || got.SystemsURI != "Systems" || got.RedfishVersion != "1.16.0" {
+	if err != nil || got.SystemsURI != "/virtual-bmcs/rack-a/redfish/v1/Systems" || got.RedfishVersion != "1.16.0" {
 		t.Fatalf("discovery=%+v err=%v", got, err)
 	}
 }
