@@ -41,6 +41,14 @@ type DiscoveryError struct {
 func (error DiscoveryError) Error() string { return string(error.Kind) + " Redfish discovery failure" }
 func (error DiscoveryError) Unwrap() error { return error.err }
 
+// Retryable reports only transport outcomes for which a later read may safely
+// produce new evidence. Authentication, authorization, malformed, and
+// unsupported responses require an explicit configuration or compatibility
+// change; retrying them indefinitely would hide a real safety failure.
+func (kind ErrorKind) Retryable() bool {
+	return kind == ErrorUnreachable || kind == ErrorRateLimited || kind == ErrorTransient || kind == ErrorTimeout
+}
+
 // Client is a read-only Redfish document client. Its narrow API deliberately
 // prevents P02 from reaching an update/action endpoint.
 type Client struct {

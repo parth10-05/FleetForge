@@ -85,3 +85,16 @@ func TestClientHonorsTotalDeadline(t *testing.T) {
 		t.Fatalf("GetDocument error = %v, want timeout", err)
 	}
 }
+
+func TestDiscoveryErrorRetryabilityFailsClosed(t *testing.T) {
+	for _, kind := range []ErrorKind{ErrorUnreachable, ErrorRateLimited, ErrorTransient, ErrorTimeout} {
+		if !kind.Retryable() {
+			t.Fatalf("%q should be retryable", kind)
+		}
+	}
+	for _, kind := range []ErrorKind{ErrorUnauthenticated, ErrorUnauthorized, ErrorMalformed, ErrorUnsupported} {
+		if kind.Retryable() {
+			t.Fatalf("%q must not be retryable", kind)
+		}
+	}
+}
