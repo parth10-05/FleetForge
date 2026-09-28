@@ -48,6 +48,10 @@ type Querier interface {
 	// Access pattern: fenced result commit. Zero rows means stale ownership,
 	// aggregate revision, or command epoch and must fail closed.
 	CompleteDueWork(ctx context.Context, arg CompleteDueWorkParams) (int64, error)
+	// P02-Q33: expire-abandoned-artifact-uploads.sql
+	// Access pattern: bounded cleanup candidates. A row with a bound immutable
+	// object version is never eligible, regardless of age.
+	ExpireAbandonedArtifactUploads(ctx context.Context, arg ExpireAbandonedArtifactUploadsParams) ([]pgtype.UUID, error)
 	// P03-Q22: fail-due-work.sql
 	// Access pattern: fenced non-success result commit. A worker can only return
 	// pending work while it still owns the token and captured aggregate fence.
