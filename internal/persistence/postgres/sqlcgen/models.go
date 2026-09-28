@@ -8,6 +8,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ArtifactHold struct {
+	ArtifactID      pgtype.UUID        `json:"artifact_id"`
+	CampaignID      pgtype.UUID        `json:"campaign_id"`
+	ObjectVersionID string             `json:"object_version_id"`
+	AcquiredAt      pgtype.Timestamptz `json:"acquired_at"`
+	ReleasedAt      pgtype.Timestamptz `json:"released_at"`
+	ReleaseReason   pgtype.Text        `json:"release_reason"`
+}
+
+type ArtifactObjectVersion struct {
+	ArtifactID                pgtype.UUID        `json:"artifact_id"`
+	Provider                  string             `json:"provider"`
+	Container                 string             `json:"container"`
+	ObjectKey                 string             `json:"object_key"`
+	VersionID                 string             `json:"version_id"`
+	ObjectSize                int64              `json:"object_size"`
+	Sha256Digest              string             `json:"sha256_digest"`
+	VerificationPolicyVersion string             `json:"verification_policy_version"`
+	DeclaredTargetFamily      string             `json:"declared_target_family"`
+	BoundAt                   pgtype.Timestamptz `json:"bound_at"`
+}
+
+type ArtifactVerificationResult struct {
+	ArtifactID      pgtype.UUID        `json:"artifact_id"`
+	ObjectVersionID string             `json:"object_version_id"`
+	PolicyVersion   string             `json:"policy_version"`
+	State           string             `json:"state"`
+	ReasonCode      string             `json:"reason_code"`
+	VerifiedDigest  pgtype.Text        `json:"verified_digest"`
+	VerifiedSize    pgtype.Int8        `json:"verified_size"`
+	VerifiedAt      pgtype.Timestamptz `json:"verified_at"`
+}
+
 type AuditEvent struct {
 	ID                int64              `json:"id"`
 	AggregateType     string             `json:"aggregate_type"`
@@ -164,6 +197,29 @@ type OutboxEvent struct {
 	ClaimExpiresAt    pgtype.Timestamptz `json:"claim_expires_at"`
 }
 
+type PreflightCandidate struct {
+	ID                pgtype.UUID        `json:"id"`
+	ArtifactID        pgtype.UUID        `json:"artifact_id"`
+	ArtifactVersionID string             `json:"artifact_version_id"`
+	SelectorVersion   string             `json:"selector_version"`
+	SelectorJson      []byte             `json:"selector_json"`
+	SnapshotHash      string             `json:"snapshot_hash"`
+	State             string             `json:"state"`
+	Report            []byte             `json:"report"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type PreflightCandidateTarget struct {
+	CandidateID                pgtype.UUID `json:"candidate_id"`
+	TargetID                   pgtype.UUID `json:"target_id"`
+	FrozenTargetRevision       int64       `json:"frozen_target_revision"`
+	SiteKey                    string      `json:"site_key"`
+	RackKey                    string      `json:"rack_key"`
+	TargetFamily               string      `json:"target_family"`
+	CompatibilityPolicyVersion string      `json:"compatibility_policy_version"`
+	CompatibilityReason        string      `json:"compatibility_reason"`
+}
+
 // P03-Q20: durable GLOBAL/SITE/RACK physical-operation capacity accounting.
 type ScopeCapacity struct {
 	ScopeLevel             string             `json:"scope_level"`
@@ -202,15 +258,31 @@ type SubmissionAdmission struct {
 }
 
 type Target struct {
-	ID                  pgtype.UUID        `json:"id"`
-	ExternalIdentity    string             `json:"external_identity"`
-	EndpointReference   string             `json:"endpoint_reference"`
-	SiteKey             string             `json:"site_key"`
-	RackKey             string             `json:"rack_key"`
-	AdministrativeState string             `json:"administrative_state"`
-	Revision            int64              `json:"revision"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                     pgtype.UUID        `json:"id"`
+	ExternalIdentity       string             `json:"external_identity"`
+	EndpointReference      string             `json:"endpoint_reference"`
+	SiteKey                string             `json:"site_key"`
+	RackKey                string             `json:"rack_key"`
+	AdministrativeState    string             `json:"administrative_state"`
+	Revision               int64              `json:"revision"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	TargetKey              pgtype.Text        `json:"target_key"`
+	ContractVersion        pgtype.Text        `json:"contract_version"`
+	CredentialProvider     pgtype.Text        `json:"credential_provider"`
+	CredentialReference    pgtype.Text        `json:"credential_reference"`
+	TransportPolicyVersion pgtype.Text        `json:"transport_policy_version"`
+	RegistrationHash       pgtype.Text        `json:"registration_hash"`
+	TrustMetadataComplete  bool               `json:"trust_metadata_complete"`
+}
+
+type TargetDiscoveryHead struct {
+	TargetID              pgtype.UUID        `json:"target_id"`
+	HeadRevision          int64              `json:"head_revision"`
+	ConfigurationRevision int64              `json:"configuration_revision"`
+	LatestAttemptID       pgtype.UUID        `json:"latest_attempt_id"`
+	LastGoodID            pgtype.UUID        `json:"last_good_id"`
+	NextRefreshAt         pgtype.Timestamptz `json:"next_refresh_at"`
 }
 
 type TargetEnrollment struct {
@@ -222,6 +294,12 @@ type TargetEnrollment struct {
 	AcquiredAt       pgtype.Timestamptz `json:"acquired_at"`
 	ReleasedAt       pgtype.Timestamptz `json:"released_at"`
 	ReleaseReason    pgtype.Text        `json:"release_reason"`
+}
+
+type TargetLabel struct {
+	TargetID pgtype.UUID `json:"target_id"`
+	Key      string      `json:"key"`
+	Value    string      `json:"value"`
 }
 
 type TargetUpdate struct {

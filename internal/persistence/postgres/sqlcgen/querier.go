@@ -92,6 +92,10 @@ type Querier interface {
 	// Access pattern: admission transaction locks one durable scope counter in the
 	// fixed GLOBAL -> SITE -> RACK order defined by ADR-021.
 	LockScopeCapacity(ctx context.Context, arg LockScopeCapacityParams) (ScopeCapacity, error)
+	// P02-Q28: lock-target-registration.sql
+	// Access pattern: serialize comparison of an existing target registration.
+	// The repository uses this only after Q27 reported an external-ID conflict.
+	LockTargetRegistration(ctx context.Context, externalIdentity string) (LockTargetRegistrationRow, error)
 	// P03-Q25: oldest-due-work.sql
 	// Access pattern: inspect oldest claimable due-work rows for planning and
 	// query-plan evidence without scanning completed history.
@@ -100,6 +104,11 @@ type Querier interface {
 	// Access pattern: inspect oldest publishable outbox rows for planning and
 	// query-plan evidence without scanning published history.
 	OldestOutbox(ctx context.Context, dollar_1 int32) ([]OldestOutboxRow, error)
+	// P02-Q27: register-trusted-target.sql
+	// Access pattern: insert a fully validated simulator registration exactly once.
+	// A caller that receives no row must lock/read the existing external identity
+	// and compare registration_hash; it must never silently mutate an endpoint.
+	RegisterTrustedTarget(ctx context.Context, arg RegisterTrustedTargetParams) (RegisterTrustedTargetRow, error)
 	// P03-Q23: repair-expired-due-work.sql
 	// Access pattern: bounded, ordered repair candidates. The caller holds rows,
 	// then moves SUBMIT work to reconciliation or safe non-submit work to pending.
