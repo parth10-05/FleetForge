@@ -17,7 +17,18 @@ type ServiceCapabilities struct {
 // DiscoverService performs only a read of the fixed service root. It never
 // follows action links or submits firmware.
 func (client *Client) DiscoverService(ctx context.Context, address TargetAddress) (ServiceCapabilities, error) {
-	raw, err := client.GetDocument(ctx, address, "")
+	return client.discoverService(ctx, address, nil)
+}
+
+func (client *Client) DiscoverServiceAuthenticated(ctx context.Context, address TargetAddress, authenticator RequestAuthenticator) (ServiceCapabilities, error) {
+	if authenticator == nil {
+		return ServiceCapabilities{}, DiscoveryError{Kind: ErrorUnauthenticated, err: ErrRequestNotAuthorized}
+	}
+	return client.discoverService(ctx, address, authenticator)
+}
+
+func (client *Client) discoverService(ctx context.Context, address TargetAddress, authenticator RequestAuthenticator) (ServiceCapabilities, error) {
+	raw, err := client.getDocument(ctx, address, "", authenticator)
 	if err != nil {
 		return ServiceCapabilities{}, err
 	}

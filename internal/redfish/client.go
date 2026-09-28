@@ -67,6 +67,10 @@ type ClientConfig struct {
 	Total      time.Duration
 }
 
+// RequestAuthenticator applies credentials directly to an outbound request.
+// Implementations must not expose or log secret values.
+type RequestAuthenticator interface{ Apply(*http.Request) }
+
 func NewClient(config ClientConfig) *Client {
 	maxBytes := config.MaxBytes
 	if maxBytes == 0 {
@@ -102,6 +106,17 @@ func NewClient(config ClientConfig) *Client {
 // GetDocument retrieves and validates one device document. resource must have
 // passed TargetAddress's service-root and origin restrictions.
 func (client *Client) GetDocument(ctx context.Context, address TargetAddress, resource string) ([]byte, error) {
+	return client.getDocument(ctx, address, resource, nil)
+}
+
+func (client *Client) GetDocumentAuthenticated(ctx context.Context, address TargetAddress, resource string, authenticator RequestAuthenticator) ([]byte, error) {
+	if authenticator == nil {
+		return nil, DiscoveryError{Kind: ErrorUnauthenticated, err: ErrRequestNotAuthorized}
+	}
+	return client.getDocument(ctx, address, resource, authenticator)
+}
+
+func (client *Client) getDocument(ctx context.Context, address TargetAddress, resource string, authenticator RequestAuthenticator) ([]byte, error) {
 	if client == nil || client.httpClient == nil || client.maxBytes <= 0 || client.maxDepth <= 0 || client.total <= 0 {
 		return nil, DiscoveryError{Kind: ErrorMalformed, err: ErrRequestNotAuthorized}
 	}
@@ -116,6 +131,9 @@ func (client *Client) GetDocument(ctx context.Context, address TargetAddress, re
 		return nil, DiscoveryError{Kind: ErrorMalformed, err: err}
 	}
 	request.Header.Set("Accept", "application/json")
+	if authenticator != nil {
+		authenticator.Apply(request)
+	}
 	response, err := client.httpClient.Do(request)
 	if err != nil {
 		return nil, classifyTransportError(err)

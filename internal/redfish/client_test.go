@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+type testAuthenticator struct{}
+
+func (testAuthenticator) Apply(request *http.Request) { request.SetBasicAuth("user", "pass") }
+
 func TestClientAcceptsOnlyBoundedJSONAtTargetServiceRoot(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/virtual-bmcs/rack-a/redfish/v1/Systems/1" {
@@ -83,6 +87,26 @@ func TestClientHonorsTotalDeadline(t *testing.T) {
 	var failure DiscoveryError
 	if !errors.As(err, &failure) || failure.Kind != ErrorTimeout {
 		t.Fatalf("GetDocument error = %v, want timeout", err)
+	}
+}
+
+func TestClientAppliesAuthenticatorWithoutChangingOriginRules(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		user, password, ok := request.BasicAuth()
+		if !ok || user != "user" || password != "pass" {
+			writer.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"Id":"one"}`))
+	}))
+	defer server.Close()
+	address, _ := ParseTargetAddress(server.URL, "rack-a")
+	if _, err := NewClient(ClientConfig{}).GetDocumentAuthenticated(context.Background(), address, "Systems/1", testAuthenticator{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewClient(ClientConfig{}).GetDocumentAuthenticated(context.Background(), address, "Systems/1", nil); err == nil {
+		t.Fatal("nil authenticator accepted")
 	}
 }
 
