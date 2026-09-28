@@ -14,7 +14,7 @@ func TestTargetAddressRejectsOriginEscapeBeforeIO(t *testing.T) {
 	if got, err := address.ResolveResource("Systems/1"); err != nil || got != "https://sim.example/virtual-bmcs/rack-a/redfish/v1/Systems/1" {
 		t.Fatalf("resource = %q, %v", got, err)
 	}
-	for _, raw := range []string{"https://evil.example/x", "//evil.example/x", "../admin", "Systems/1?token=x"} {
+	for _, raw := range []string{"https://evil.example/x", "//evil.example/x", "../admin", "%2e%2e/admin", "Systems\\admin", "Systems/1?token=x"} {
 		if _, err := address.ResolveResource(raw); !errors.Is(err, ErrForbiddenAddress) {
 			t.Fatalf("ResolveResource(%q) = %v", raw, err)
 		}

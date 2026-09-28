@@ -47,7 +47,7 @@ func (address TargetAddress) ResolveResource(raw string) (string, error) {
 		path = strings.TrimPrefix(path, "/")
 		path = address.serviceRoot + path
 	}
-	if !strings.HasPrefix(path, address.serviceRoot) || strings.Contains(path, "..") {
+	if !strings.HasPrefix(path, address.serviceRoot) || strings.Contains(path, "..") || strings.ContainsAny(path, "\\\x00") {
 		return "", ErrForbiddenAddress
 	}
 	copy := *address.origin
