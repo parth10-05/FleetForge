@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -61,10 +63,12 @@ type Client struct {
 type ClientConfig struct {
 	// HTTPClient is for a controlled test transport. Production callers leave
 	// it nil and use the restrictive default transport below.
-	HTTPClient *http.Client
-	MaxBytes   int
-	MaxDepth   int
-	Total      time.Duration
+	HTTPClient   *http.Client
+	MaxBytes     int
+	MaxDepth     int
+	Total        time.Duration
+	AllowedCIDRs []netip.Prefix
+	ResolveIP    func(context.Context, string) ([]netip.Addr, error)
 }
 
 // RequestAuthenticator applies credentials directly to an outbound request.
@@ -87,11 +91,18 @@ func NewClient(config ClientConfig) *Client {
 
 	client := config.HTTPClient
 	if client == nil {
+		resolver := config.ResolveIP
+		if resolver == nil {
+			resolver = func(ctx context.Context, host string) ([]netip.Addr, error) {
+				return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+			}
+		}
 		client = &http.Client{Transport: &http.Transport{
 			Proxy:                 nil,
 			ResponseHeaderTimeout: 5 * time.Second,
 			TLSHandshakeTimeout:   5 * time.Second,
 			DisableCompression:    true,
+			DialContext:           dialApprovedIP(config.AllowedCIDRs, resolver),
 		}, Timeout: total}
 	} else {
 		copy := *client
@@ -101,6 +112,26 @@ func NewClient(config ClientConfig) *Client {
 	// follow one; a device must return a valid service-root-relative URI.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return ErrRedirectDenied }
 	return &Client{httpClient: client, maxBytes: maxBytes, maxDepth: maxDepth, total: total}
+}
+
+func dialApprovedIP(allow []netip.Prefix, resolve func(context.Context, string) ([]netip.Addr, error)) func(context.Context, string, string) (net.Conn, error) {
+	dialer := net.Dialer{}
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, ErrForbiddenAddress
+		}
+		ips, err := resolve(ctx, host)
+		if err != nil {
+			return nil, ErrForbiddenAddress
+		}
+		for _, ip := range ips {
+			if ValidateDialIP(ip.String(), allow) == nil {
+				return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			}
+		}
+		return nil, ErrForbiddenAddress
+	}
 }
 
 // GetDocument retrieves and validates one device document. resource must have

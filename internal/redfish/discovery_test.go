@@ -15,7 +15,7 @@ func TestDiscoverServiceNormalizesOnlyApprovedCapabilityLinks(t *testing.T) {
 	}))
 	defer server.Close()
 	address, _ := ParseTargetAddress(server.URL, "rack-a")
-	got, err := NewClient(ClientConfig{}).DiscoverService(context.Background(), address)
+	got, err := NewClient(loopbackClientConfig()).DiscoverService(context.Background(), address)
 	if err != nil || got.SystemsURI != "/virtual-bmcs/rack-a/redfish/v1/Systems" || got.RedfishVersion != "1.16.0" {
 		t.Fatalf("discovery=%+v err=%v", got, err)
 	}
@@ -31,7 +31,7 @@ func TestDiscoverServiceRejectsMissingOrEscapingCapabilityLink(t *testing.T) {
 			_, _ = w.Write([]byte(body))
 		}))
 		address, _ := ParseTargetAddress(server.URL, "rack-a")
-		_, err := NewClient(ClientConfig{}).DiscoverService(context.Background(), address)
+		_, err := NewClient(loopbackClientConfig()).DiscoverService(context.Background(), address)
 		server.Close()
 		var failure DiscoveryError
 		if !errors.As(err, &failure) || failure.Kind != ErrorMalformed {

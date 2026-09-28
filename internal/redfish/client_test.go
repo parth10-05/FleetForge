@@ -3,8 +3,11 @@ package redfish
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -12,6 +15,9 @@ import (
 type testAuthenticator struct{}
 
 func (testAuthenticator) Apply(request *http.Request) { request.SetBasicAuth("user", "pass") }
+func loopbackClientConfig() ClientConfig {
+	return ClientConfig{HTTPClient: &http.Client{}}
+}
 
 func TestClientAcceptsOnlyBoundedJSONAtTargetServiceRoot(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -27,7 +33,7 @@ func TestClientAcceptsOnlyBoundedJSONAtTargetServiceRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := NewClient(ClientConfig{}).GetDocument(context.Background(), address, "Systems/1")
+	document, err := NewClient(loopbackClientConfig()).GetDocument(context.Background(), address, "Systems/1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +71,7 @@ func TestClientDeniesRedirectAndMalformedResponses(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = NewClient(ClientConfig{}).GetDocument(context.Background(), address, "Systems/1")
+			_, err = NewClient(loopbackClientConfig()).GetDocument(context.Background(), address, "Systems/1")
 			var failure DiscoveryError
 			if !errors.As(err, &failure) || failure.Kind != test.want {
 				t.Fatalf("GetDocument error = %v, want kind %q", err, test.want)
@@ -83,7 +89,9 @@ func TestClientHonorsTotalDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewClient(ClientConfig{Total: time.Millisecond}).GetDocument(context.Background(), address, "Systems/1")
+	config := loopbackClientConfig()
+	config.Total = time.Millisecond
+	_, err = NewClient(config).GetDocument(context.Background(), address, "Systems/1")
 	var failure DiscoveryError
 	if !errors.As(err, &failure) || failure.Kind != ErrorTimeout {
 		t.Fatalf("GetDocument error = %v, want timeout", err)
@@ -102,10 +110,10 @@ func TestClientAppliesAuthenticatorWithoutChangingOriginRules(t *testing.T) {
 	}))
 	defer server.Close()
 	address, _ := ParseTargetAddress(server.URL, "rack-a")
-	if _, err := NewClient(ClientConfig{}).GetDocumentAuthenticated(context.Background(), address, "Systems/1", testAuthenticator{}); err != nil {
+	if _, err := NewClient(loopbackClientConfig()).GetDocumentAuthenticated(context.Background(), address, "Systems/1", testAuthenticator{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewClient(ClientConfig{}).GetDocumentAuthenticated(context.Background(), address, "Systems/1", nil); err == nil {
+	if _, err := NewClient(loopbackClientConfig()).GetDocumentAuthenticated(context.Background(), address, "Systems/1", nil); err == nil {
 		t.Fatal("nil authenticator accepted")
 	}
 }
@@ -120,5 +128,36 @@ func TestDiscoveryErrorRetryabilityFailsClosed(t *testing.T) {
 		if kind.Retryable() {
 			t.Fatalf("%q must not be retryable", kind)
 		}
+	}
+}
+
+func TestProductionDialBindsResolutionToAllowedCIDR(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan struct{})
+	go func() {
+		connection, err := listener.Accept()
+		if err == nil {
+			connection.Close()
+			close(accepted)
+		}
+	}()
+	dial := dialApprovedIP([]netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+	})
+	connection, err := dial(context.Background(), "tcp", "simulator.example:"+strconv.Itoa(listener.Addr().(*net.TCPAddr).Port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection.Close()
+	<-accepted
+	denied := dialApprovedIP(nil, func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("198.51.100.8")}, nil
+	})
+	if _, err := denied(context.Background(), "tcp", "simulator.example:443"); !errors.Is(err, ErrForbiddenAddress) {
+		t.Fatalf("unapproved resolution error=%v", err)
 	}
 }
