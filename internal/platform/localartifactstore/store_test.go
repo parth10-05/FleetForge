@@ -32,4 +32,11 @@ func TestStorePreservesExactVersionAndRejectsOverwrite(t *testing.T) {
 	if string(body) != "hello world" {
 		t.Fatalf("body=%q", body)
 	}
+	if err := store.Verify(first); err != nil {
+		t.Fatal(err)
+	}
+	missing, _ := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "same-key", "v3", 11, digest)
+	if err := store.Verify(missing); !errors.Is(err, ErrVersionAbsent) {
+		t.Fatalf("different version verification=%v", err)
+	}
 }

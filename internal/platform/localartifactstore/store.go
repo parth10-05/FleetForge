@@ -62,6 +62,18 @@ func (store *Store) Open(identity artifact.ObjectIdentity) (io.ReadCloser, error
 	return io.NopCloser(bytes.NewReader(body)), nil
 }
 
+// Verify reopens exactly the bound object version and streams it through the
+// domain verifier. A replacement under the same key has a new version ID and
+// cannot satisfy this identity.
+func (store *Store) Verify(identity artifact.ObjectIdentity) error {
+	reader, err := store.Open(identity)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	return artifact.VerifyContent(identity, reader)
+}
+
 func identityKey(identity artifact.ObjectIdentity) string {
 	return identity.Provider() + "\x00" + identity.Container() + "\x00" + identity.Key() + "\x00" + identity.VersionID()
 }
