@@ -21,6 +21,12 @@ type Snapshot struct{}
 
 func (Snapshot) command() {}
 
+// Reset rebuilds the deterministic scenario state without deleting the
+// retained journal. It is available only through the isolated admin plane.
+type Reset struct{}
+
+func (Reset) command() {}
+
 // AcceptUpdate creates a distinct synthetic operation and task. AttemptID is a
 // correlation input, never a deduplication key.
 type AcceptUpdate struct{ TargetID, Version, AttemptID string }

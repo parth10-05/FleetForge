@@ -20,6 +20,7 @@ func (reader) Status(context.Context) (simulator.Status, error) {
 func (reader) Journal(context.Context) (simulator.JournalStatus, error) {
 	return simulator.JournalStatus{Entries: 2, LastHash: "abc"}, nil
 }
+func (reader) Reset(context.Context) error { return nil }
 
 func TestAdminAuthAndListenerIsolation(t *testing.T) {
 	admin := New(simulator.New(reader{}), []byte("admin-secret"), time.Second).Routes()
@@ -47,6 +48,13 @@ func TestAdminAuthAndListenerIsolation(t *testing.T) {
 	admin.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "entries") {
 		t.Fatalf("journal = %d: %s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/admin/v1/reset", nil)
+	request.Header.Set(credentialHeader, "admin-secret")
+	response = httptest.NewRecorder()
+	admin.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("reset = %d: %s", response.Code, response.Body.String())
 	}
 	request = httptest.NewRequest(http.MethodGet, "/admin/v1/status", nil)
 	response = httptest.NewRecorder()

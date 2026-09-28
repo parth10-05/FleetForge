@@ -29,6 +29,9 @@ type JournalStatus struct {
 type JournalReader interface {
 	Journal(context.Context) (JournalStatus, error)
 }
+type ResetController interface {
+	Reset(context.Context) error
+}
 
 type Service struct{ reader StatusReader }
 
@@ -58,4 +61,14 @@ func (s *Service) Journal(ctx context.Context) (JournalStatus, error) {
 		return JournalStatus{}, ErrUnavailable
 	}
 	return reader.Journal(ctx)
+}
+func (s *Service) Reset(ctx context.Context) error {
+	if s == nil || s.reader == nil {
+		return ErrUnavailable
+	}
+	controller, ok := s.reader.(ResetController)
+	if !ok {
+		return ErrUnavailable
+	}
+	return controller.Reset(ctx)
 }

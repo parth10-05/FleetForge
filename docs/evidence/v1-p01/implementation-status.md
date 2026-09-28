@@ -13,7 +13,7 @@ on the final integration SHA. It makes no external-device claim.
 | T05 Redfish resources and authentication | `internal/delivery/redfishsim`; route and fixture tests | Implemented locally | Only the selected V1 surface is implemented. |
 | T06 accepted-update ordering | Typed request/acceptance records in `redfishsim`; journal replay tests | Implemented locally | A request receipt can exist without acceptance when validation rejects it. |
 | T07 update/event fault behavior | Transport, observation, lifecycle, and callback dispatcher fault paths | Implemented locally | Fault behavior is synthetic and bounded to the catalog. |
-| T08 separate admin boundary | Separate admin listener, independent secret, status/metrics/journal endpoints | Partially implemented | Explicit reset and scenario replacement controls are intentionally not yet exposed. |
+| T08 separate admin boundary | Separate admin listener, independent secret, status/metrics/journal/reset endpoints | Implemented locally | Reset rebuilds only same-scenario synthetic state and preserves the immutable journal; scenario replacement remains a new-run operation. |
 | T09 resource limits and readiness | Body/header limits, request concurrency, callback workers/queue, journal-entry cap, post-recovery readiness | Implemented locally | Export size is bounded to journal status rather than raw journal download. |
 | T10 safe metrics | Admin-only aggregate request/task/fault counters | Implemented locally | Counters intentionally exclude credentials, destinations, and firmware bytes. |
 | T11 canonical scenarios | Healthy, lost-event, post-accept, task-disappearance, and canary-health-failure fixtures | Implemented locally | Later phase acceptance tests consume these saved inputs. |
@@ -31,9 +31,9 @@ on the final integration SHA. It makes no external-device claim.
 - Full local verification at the current branch head: `go test -count=1 ./...`,
   `go vet ./...`, and all three process builds.
 
-## Remaining scope
+## Admin lifecycle boundary
 
-The only intentional P01 gap is an authenticated admin reset/scenario
-replacement workflow. It is not required for a retained deterministic run and
-is kept separate because replacing a scenario must not overwrite a live or
-recoverable run. No public Redfish route can invoke it.
+The authenticated reset endpoint rebuilds the active run's same-scenario
+synthetic state without deleting its journal. Scenario replacement creates a
+separate deterministic retained run; it never overwrites a live/recoverable
+run. No public Redfish route can invoke either administration operation.

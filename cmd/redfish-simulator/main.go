@@ -79,7 +79,7 @@ func run() error {
 	mux.Handle("/virtual-bmcs/", targets.Routes())
 	mux.Handle("/", health.Routes())
 	server := &http.Server{Addr: cfg.Address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
-	admin := &http.Server{Addr: cfg.AdminAddress, Handler: simulatoradmin.New(appsim.New(runtimeStatus{runID: run.ID, journalPath: run.JournalPath, targets: targets}), []byte(cfg.AdminSecret), cfg.ReadinessTimeout).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
+	admin := &http.Server{Addr: cfg.AdminAddress, Handler: simulatoradmin.New(appsim.New(runtimeStatus{runID: run.ID, journalPath: run.JournalPath, run: run, engine: engine, writer: writer, targets: targets}), []byte(cfg.AdminSecret), cfg.ReadinessTimeout).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errorsChannel := make(chan error, 2)
@@ -173,6 +173,9 @@ func shutdownServers(server, admin *http.Server, timeout time.Duration) {
 
 type runtimeStatus struct {
 	runID, journalPath string
+	run                simulatorstate.Run
+	engine             *core.Engine
+	writer             *journal.Writer
 	targets            *redfishsim.Handler
 }
 
@@ -193,4 +196,13 @@ func (r runtimeStatus) Journal(context.Context) (appsim.JournalStatus, error) {
 		status.LastHash = entries[len(entries)-1].Hash
 	}
 	return status, nil
+}
+func (r runtimeStatus) Reset(ctx context.Context) error {
+	if _, err := r.engine.Submit(ctx, core.Reset{}); err != nil {
+		return err
+	}
+	if _, err := r.writer.Append(journal.Record{Kind: journal.Diagnostic, Payload: journal.Payload{Detail: "admin reset"}}); err != nil {
+		return err
+	}
+	return checkpoint(r.run, r.engine, ctx)
 }

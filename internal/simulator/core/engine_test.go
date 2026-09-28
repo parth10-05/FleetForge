@@ -174,6 +174,29 @@ func TestEngineSubscriptionsAreBoundedAndSnapshotsAreStable(t *testing.T) {
 	}
 }
 
+func TestResetRebuildsScenarioStateWithoutRemovingAcceptanceHistoryFromJournal(t *testing.T) {
+	input := testScenario()
+	engine, err := Start(input, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	target, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Submit(context.Background(), AcceptUpdate{TargetID: target, Version: "2", AttemptID: "reset-attempt"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := engine.Submit(context.Background(), Reset{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Operations) != 0 || len(result.Tasks) != 0 || result.State[0].RequestCount != 0 || result.State[0].Version != "1" {
+		t.Fatalf("reset result = %#v", result)
+	}
+}
+
 func TestEngineConsumesEverySupportedFaultAndHonorsCancellation(t *testing.T) {
 	input := testScenario()
 	faultNames := []string{"RF-F01", "RF-F02", "RF-F03", "RF-F04", "RF-F05", "RF-F06", "RF-F07", "RF-F08", "RF-F10", "RF-F11"}

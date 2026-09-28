@@ -131,18 +131,25 @@ func Start(input scenario.Scenario, queueSize int) (*Engine, error) {
 	if queueSize < 1 || queueSize > 4096 {
 		return nil, fmt.Errorf("invalid engine queue size")
 	}
+	m, err := initialModel(input)
+	if err != nil {
+		return nil, err
+	}
+	return startModel(m, queueSize)
+}
+func initialModel(input scenario.Scenario) (model, error) {
 	m := model{input: input, targets: map[string]target{}, operations: map[string]OperationState{}, tasks: map[string]TaskState{}, subscriptions: map[string]SubscriptionState{}, events: map[string]EventState{}, faults: map[string]FaultState{}}
 	for _, v := range input.Targets {
 		id, err := scenario.ID(input, "target", v.Index)
 		if err != nil {
-			return nil, err
+			return model{}, err
 		}
 		m.targets[id] = target{TargetState: TargetState{ID: id, Site: v.Site, Rack: v.Rack, Version: v.InitialVersion, Healthy: true, Reachable: true, Phase: LifecycleHealthy}, ExpectedVersion: v.ExpectedVersion}
 	}
 	for _, v := range input.Faults {
 		m.faults[v.FaultID] = FaultState{ID: v.FaultID, Name: v.Name, Scope: v.Scope, ScopeKey: v.ScopeKey, TriggerKind: v.Trigger.Kind, TriggerValue: v.Trigger.Value, Remaining: v.Consumption, Priority: v.Priority}
 	}
-	return startModel(m, queueSize)
+	return m, nil
 }
 
 func startModel(m model, queueSize int) (*Engine, error) {
@@ -209,6 +216,13 @@ func (m *model) apply(c Command, now *clock.Manual, s *clock.Scheduler, seq uint
 	switch v := c.(type) {
 	case Snapshot:
 		// result construction below returns copied, sorted values only.
+	case Reset:
+		fresh, err := initialModel(m.input)
+		if err != nil {
+			return Result{}, err
+		}
+		*m = fresh
+		*s = clock.Scheduler{}
 	case Observe:
 		if _, ok := m.targets[v.TargetID]; !ok {
 			return Result{}, ErrUnknownTarget
