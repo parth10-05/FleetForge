@@ -7,18 +7,41 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/parth10-05/fleetforge/internal/domain/artifact"
 )
 
 var (
-	ErrVersionExists = errors.New("artifact object version already exists")
-	ErrVersionAbsent = errors.New("artifact object version absent")
+	ErrVersionExists      = errors.New("artifact object version already exists")
+	ErrVersionAbsent      = errors.New("artifact object version absent")
+	ErrUploadGrantExpired = errors.New("artifact upload grant expired")
 )
 
 type Store struct {
 	mu       sync.RWMutex
 	versions map[string][]byte
+}
+
+// UploadGrant is an opaque, one-object local direct-upload authorization.
+// Its identity is intentionally not reconstructable by callers.
+type UploadGrant struct {
+	identity  artifact.ObjectIdentity
+	expiresAt time.Time
+}
+
+func (store *Store) AuthorizeUpload(identity artifact.ObjectIdentity, now, expiresAt time.Time) (UploadGrant, error) {
+	if now.IsZero() || !expiresAt.After(now) {
+		return UploadGrant{}, ErrUploadGrantExpired
+	}
+	return UploadGrant{identity: identity, expiresAt: expiresAt.UTC()}, nil
+}
+
+func (store *Store) PutAuthorized(grant UploadGrant, now time.Time, source io.Reader) error {
+	if now.IsZero() || !now.Before(grant.expiresAt) {
+		return ErrUploadGrantExpired
+	}
+	return store.Put(grant.identity, source)
 }
 
 func New() *Store { return &Store{versions: make(map[string][]byte)} }
