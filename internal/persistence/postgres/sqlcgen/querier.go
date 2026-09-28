@@ -129,6 +129,10 @@ type Querier interface {
 	// Access pattern: atomic target-update save with expected-revision guard.
 	// Zero rows affected → revision conflict (caller maps to conflict error).
 	SaveTargetUpdateWithRevision(ctx context.Context, arg SaveTargetUpdateWithRevisionParams) (int64, error)
+	// P02-Q30: schedule-artifact-verification.sql
+	// Access pattern: schedule one active immutable-version verification intent.
+	// Conflict is an idempotent replay while a worker still owns or awaits work.
+	ScheduleArtifactVerification(ctx context.Context, arg ScheduleArtifactVerificationParams) (pgtype.UUID, error)
 	// P02-Q29: schedule-target-discovery.sql
 	// Access pattern: schedule one active read-only discovery job per target
 	// configuration revision. Conflict means an active equivalent job already
