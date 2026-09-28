@@ -57,13 +57,16 @@ func (address TargetAddress) ResolveResource(raw string) (string, error) {
 
 func ValidateDialIP(raw string, allow []netip.Prefix) error {
 	address, err := netip.ParseAddr(raw)
-	if err != nil || !address.IsValid() || address.IsLoopback() || address.IsPrivate() || address.IsLinkLocalUnicast() || address.IsUnspecified() || address.IsMulticast() {
+	if err != nil || !address.IsValid() {
 		return ErrForbiddenAddress
 	}
 	for _, prefix := range allow {
 		if prefix.Contains(address) {
 			return nil
 		}
+	}
+	if address.IsLoopback() || address.IsPrivate() || address.IsLinkLocalUnicast() || address.IsUnspecified() || address.IsMulticast() {
+		return ErrForbiddenAddress
 	}
 	return ErrForbiddenAddress
 }

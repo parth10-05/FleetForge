@@ -34,4 +34,7 @@ func TestDialPolicyRejectsPrivateMetadataAndLoopback(t *testing.T) {
 			t.Fatalf("ValidateDialIP(%q) allowed", raw)
 		}
 	}
+	if err := ValidateDialIP("10.0.0.1", []netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")}); err != nil {
+		t.Fatalf("explicitly allowlisted address rejected: %v", err)
+	}
 }
