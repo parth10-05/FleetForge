@@ -138,6 +138,11 @@ type Querier interface {
 	// configuration revision. Conflict means an active equivalent job already
 	// exists and is a successful idempotent outcome.
 	ScheduleTargetDiscovery(ctx context.Context, arg ScheduleTargetDiscoveryParams) (pgtype.UUID, error)
+	// P02-Q31: select-targets-by-labels.sql
+	// Access pattern: evaluate the bounded exact-label selector using only typed
+	// array parameters. The query has no caller-controlled SQL fragments and its
+	// UUID ordering is the canonical membership order before snapshot freezing.
+	SelectTargetsByLabels(ctx context.Context, arg SelectTargetsByLabelsParams) ([]SelectTargetsByLabelsRow, error)
 	// P03-Q08: target-update-evidence-timeline.sql
 	// Access pattern: reconstruct a target-update evidence timeline.
 	// Index: device_observations_update_time_index ON device_observations (target_update_id, observed_at DESC)
