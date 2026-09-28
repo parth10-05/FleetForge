@@ -32,6 +32,13 @@ func TestP02ArtifactBindingAndVerificationPersistOneImmutableResult(t *testing.T
 	if err := persistence.StartArtifactVerification(ctx, pool, artifactID); err != nil {
 		t.Fatal(err)
 	}
+	wrongObject, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/substituted.bin", object.VersionID(), object.Size(), digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistence.RecordArtifactVerification(ctx, pool, persistence.ArtifactVerificationRequest{ArtifactID: artifactID, VersionID: object.VersionID(), Object: wrongObject, Verified: true, ReasonCode: "digest_exact"}); !errors.Is(err, persistence.ErrArtifactBindingConflict) {
+		t.Fatalf("substituted tuple error=%v", err)
+	}
 	if err := persistence.RecordArtifactVerification(ctx, pool, persistence.ArtifactVerificationRequest{ArtifactID: artifactID, VersionID: object.VersionID(), Object: object, Verified: true, ReasonCode: "digest_exact"}); err != nil {
 		t.Fatal(err)
 	}
