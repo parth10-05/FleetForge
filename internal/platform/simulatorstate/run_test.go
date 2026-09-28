@@ -67,6 +67,21 @@ func TestRecoveryInvalidatesLeadingSnapshot(t *testing.T) {
 	}
 }
 
+func TestOpenOrCreateRunRecoversExistingScenarioRun(t *testing.T) {
+	root := t.TempDir()
+	first, err := OpenOrCreateRun(root, testRunScenario())
+	if err != nil {
+		t.Fatalf("OpenOrCreateRun() error = %v", err)
+	}
+	second, err := OpenOrCreateRun(root, testRunScenario())
+	if err != nil {
+		t.Fatalf("OpenOrCreateRun() recovery error = %v", err)
+	}
+	if first.ID != second.ID || first.Root != second.Root {
+		t.Fatalf("OpenOrCreateRun() = %#v, want recovered %#v", second, first)
+	}
+}
+
 func TestRunWritesSnapshotBoundToJournalCheckpoint(t *testing.T) {
 	run, err := CreateRun(t.TempDir(), testRunScenario())
 	if err != nil {

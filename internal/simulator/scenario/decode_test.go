@@ -36,12 +36,14 @@ func TestGoldenFixtures(t *testing.T) {
 		t.Fatal("runtime.Caller() failed")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-	valid, err := os.ReadFile(filepath.Join(root, "test", "fixtures", "simulator", "v1", "healthy.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Decode(valid); err != nil {
-		t.Fatalf("Decode(healthy fixture) = %v", err)
+	for _, name := range []string{"healthy.json", "lost-event.json", "post-accept-disconnect.json", "task-disappearance.json", "canary-health-failure.json"} {
+		valid, err := os.ReadFile(filepath.Join(root, "test", "fixtures", "simulator", "v1", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Decode(valid); err != nil {
+			t.Fatalf("Decode(%s) = %v", name, err)
+		}
 	}
 	invalid, err := os.ReadFile(filepath.Join(root, "test", "fixtures", "simulator", "v1", "invalid-duplicate-key.json"))
 	if err != nil {

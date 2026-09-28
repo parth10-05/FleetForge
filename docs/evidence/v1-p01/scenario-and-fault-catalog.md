@@ -22,3 +22,12 @@ The v1 scenario decoder must reject RF-F09, RF-F12, RF-F13, RF-F14, and
 RF-F15 as unsupported; they are not partially implemented. Each supported
 fault will later declare scope, deterministic trigger, bounded consumption,
 and priority without logging sensitive request data.
+
+## Canonical saved scenarios
+
+- `test/fixtures/simulator/v1/healthy.json` is the baseline six-target run.
+- `lost-event.json`, `post-accept-disconnect.json`,
+  `task-disappearance.json`, and `canary-health-failure.json` are saved
+  deterministic fault inputs for later adapter and lifecycle evidence. Each
+  preserves the same bounded two-site, four-rack topology while changing only
+  seed and fault schedule.

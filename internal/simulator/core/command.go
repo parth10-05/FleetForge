@@ -21,13 +21,22 @@ type Snapshot struct{}
 
 func (Snapshot) command() {}
 
+// Reset rebuilds the deterministic scenario state without deleting the
+// retained journal. It is available only through the isolated admin plane.
+type Reset struct{}
+
+func (Reset) command() {}
+
 // AcceptUpdate creates a distinct synthetic operation and task. AttemptID is a
 // correlation input, never a deduplication key.
 type AcceptUpdate struct{ TargetID, Version, AttemptID string }
 
 func (AcceptUpdate) command() {}
 
-type CreateSubscription struct{ TargetID, Fingerprint string }
+// CreateSubscription stores only a validated callback destination and a
+// request fingerprint. Neither caller credentials nor callback payloads enter
+// the deterministic core state.
+type CreateSubscription struct{ TargetID, Fingerprint, Destination string }
 
 func (CreateSubscription) command() {}
 

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -171,6 +172,63 @@ func TestEngineSubscriptionsAreBoundedAndSnapshotsAreStable(t *testing.T) {
 	second, err := engine.Submit(context.Background(), Observe{TargetID: target})
 	if err != nil || len(second.Subscriptions) != 1 || second.Subscriptions[0] != first.Subscriptions[0] {
 		t.Fatalf("snapshot changed unexpectedly: %#v, %v", second.Subscriptions, err)
+	}
+}
+
+func TestResetRebuildsScenarioStateWithoutRemovingAcceptanceHistoryFromJournal(t *testing.T) {
+	input := testScenario()
+	engine, err := Start(input, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	target, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Submit(context.Background(), AcceptUpdate{TargetID: target, Version: "2", AttemptID: "reset-attempt"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := engine.Submit(context.Background(), Reset{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Operations) != 0 || len(result.Tasks) != 0 || result.State[0].RequestCount != 0 || result.State[0].Version != "1" {
+		t.Fatalf("reset result = %#v", result)
+	}
+}
+
+func TestSameScenarioAndCommandSequenceProduceIdenticalProjection(t *testing.T) {
+	input := testScenario()
+	first, err := Start(input, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := Start(input, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	target, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := []Command{AcceptUpdate{TargetID: target, Version: "2", AttemptID: "same-sequence"}, AdvanceTo{Time: 10}, Snapshot{}}
+	for _, command := range commands {
+		left, err := first.Submit(context.Background(), command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		right, err := second.Submit(context.Background(), command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		leftJSON, _ := json.Marshal(left)
+		rightJSON, _ := json.Marshal(right)
+		if string(leftJSON) != string(rightJSON) {
+			t.Fatalf("deterministic result differs for %#v:\n%s\n%s", command, leftJSON, rightJSON)
+		}
 	}
 }
 

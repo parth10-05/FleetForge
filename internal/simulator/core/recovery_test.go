@@ -187,7 +187,7 @@ func TestStartFromSnapshotRetainsSubscriptionCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := source.Submit(context.Background(), CreateSubscription{TargetID: target, Fingerprint: "callback-1"}); err != nil {
+	if _, err := source.Submit(context.Background(), CreateSubscription{TargetID: target, Fingerprint: "callback-1", Destination: "http://127.0.0.1/events"}); err != nil {
 		t.Fatal(err)
 	}
 	raw, _, err := SnapshotBytes(context.Background(), source)
@@ -200,7 +200,7 @@ func TestStartFromSnapshotRetainsSubscriptionCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	if _, err := restored.Submit(context.Background(), CreateSubscription{TargetID: target, Fingerprint: "callback-2"}); !errors.Is(err, ErrLimitExceeded) {
+	if _, err := restored.Submit(context.Background(), CreateSubscription{TargetID: target, Fingerprint: "callback-2", Destination: "http://127.0.0.1/events"}); !errors.Is(err, ErrLimitExceeded) {
 		t.Fatalf("subscription limit error = %v", err)
 	}
 }
