@@ -131,6 +131,14 @@ func TestDiscoveryErrorRetryabilityFailsClosed(t *testing.T) {
 	}
 }
 
+func TestForbiddenDialPolicyIsMalformedNotRetryable(t *testing.T) {
+	err := classifyTransportError(ErrForbiddenAddress)
+	var failure DiscoveryError
+	if !errors.As(err, &failure) || failure.Kind != ErrorMalformed || failure.Kind.Retryable() {
+		t.Fatalf("forbidden dial classification = %v", err)
+	}
+}
+
 func TestProductionDialBindsResolutionToAllowedCIDR(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

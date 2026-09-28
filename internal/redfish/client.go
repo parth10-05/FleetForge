@@ -205,6 +205,9 @@ func jsonContentType(raw string) bool {
 }
 
 func classifyTransportError(err error) error {
+	if IsForbidden(err) {
+		return DiscoveryError{Kind: ErrorMalformed, err: err}
+	}
 	if errors.Is(err, ErrRedirectDenied) {
 		return DiscoveryError{Kind: ErrorMalformed, err: err}
 	}
