@@ -51,6 +51,14 @@ func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
 	if err := persistence.PersistPreflightCandidate(ctx, pool, conflicting); !errors.Is(err, persistence.ErrPreflightCandidateConflict) {
 		t.Fatalf("conflicting candidate error=%v", err)
 	}
+	if err := persistence.RetireVerifiedArtifact(ctx, pool, artifactID); err != nil {
+		t.Fatal(err)
+	}
+	retiredAttempt := request
+	retiredAttempt.CandidateID = "00000000-0000-0000-2701-000000000004"
+	if err := persistence.PersistPreflightCandidate(ctx, pool, retiredAttempt); !errors.Is(err, persistence.ErrPreflightInputStale) {
+		t.Fatalf("retired artifact candidate error=%v", err)
+	}
 	if _, err := pool.Exec(ctx, "UPDATE targets SET revision=1 WHERE id=$1", targetID); err != nil {
 		t.Fatal(err)
 	}

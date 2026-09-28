@@ -80,7 +80,7 @@ func validateCandidateInputs(ctx context.Context, tx pgx.Tx, snapshot preflight.
 	object := snapshot.ObjectIdentity()
 	var state, provider, container, key, versionID, digest string
 	var size int64
-	if err := tx.QueryRow(ctx, `SELECT a.state, o.provider, o.container, o.object_key, o.version_id, o.object_size, o.sha256_digest FROM firmware_artifacts a JOIN artifact_object_versions o ON o.artifact_id = a.id WHERE a.id=$1::uuid FOR KEY SHARE`, snapshot.ArtifactID().String()).Scan(&state, &provider, &container, &key, &versionID, &size, &digest); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT a.state, o.provider, o.container, o.object_key, o.version_id, o.object_size, o.sha256_digest FROM firmware_artifacts a JOIN artifact_object_versions o ON o.artifact_id = a.id WHERE a.id=$1::uuid FOR SHARE OF a, o`, snapshot.ArtifactID().String()).Scan(&state, &provider, &container, &key, &versionID, &size, &digest); err != nil {
 		return fmt.Errorf("validate preflight artifact: %w", err)
 	}
 	if state != "VERIFIED" || provider != object.Provider() || container != object.Container() || key != object.Key() || versionID != object.VersionID() || size != object.Size() || digest != object.Digest().String() {
@@ -90,7 +90,7 @@ func validateCandidateInputs(ctx context.Context, tx pgx.Tx, snapshot preflight.
 		var revision int64
 		var administrativeState, site, rack, family string
 		var trusted bool
-		if err := tx.QueryRow(ctx, `SELECT t.revision, t.administrative_state, t.trust_metadata_complete, t.site_key, t.rack_key, l.value FROM targets t JOIN target_labels l ON l.target_id=t.id AND l.key='family' WHERE t.id=$1::uuid FOR KEY SHARE`, target.ID.String()).Scan(&revision, &administrativeState, &trusted, &site, &rack, &family); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT t.revision, t.administrative_state, t.trust_metadata_complete, t.site_key, t.rack_key, l.value FROM targets t JOIN target_labels l ON l.target_id=t.id AND l.key='family' WHERE t.id=$1::uuid FOR SHARE OF t`, target.ID.String()).Scan(&revision, &administrativeState, &trusted, &site, &rack, &family); err != nil {
 			return fmt.Errorf("validate preflight target %s: %w", target.ID.String(), err)
 		}
 		if revision < 0 || uint64(revision) != target.Revision.Uint64() || administrativeState != "ACTIVE" || !trusted || site != target.Labels.Site().String() || rack != target.Labels.Rack().String() || family != target.Family.String() {
