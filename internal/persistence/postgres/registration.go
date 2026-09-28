@@ -47,6 +47,11 @@ func RegisterTarget(ctx context.Context, pool *pgxpool.Pool, targetID string, re
 		if parseErr != nil {
 			return RegistrationResult{}, parseErr
 		}
+		for key, label := range labels.AsMap() {
+			if _, err := tx.Exec(ctx, `INSERT INTO target_labels (target_id, key, value) VALUES ($1, $2, $3)`, row.ID, key, label); err != nil {
+				return RegistrationResult{}, fmt.Errorf("insert target label %q: %w", key, err)
+			}
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return RegistrationResult{}, fmt.Errorf("commit target registration: %w", err)
 		}
