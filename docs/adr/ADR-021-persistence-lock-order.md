@@ -21,14 +21,17 @@ within each family by stable UUID/subject key:
 4. global, site, and rack scope-capacity rows in that order;
 5. submission-admission rows;
 6. operation-reservation rows;
-7. due-work and outbox rows;
-8. audit and decision-input append rows.
+7. inventory, artifact, and frozen-preflight rows;
+8. due-work and outbox rows;
+9. audit and decision-input append rows.
 
 Writers skip row families that are not part of their operation; skipped rows do
 not permit reordering of the remaining families. The query catalog repeats this
 sequence verbatim and must be updated with this ADR.
 
-Readiness locks its campaign before sorted targets and enrollment claims.
+Inventory and artifact writers lock their aggregate before any associated
+frozen-preflight row. Readiness locks its campaign before sorted targets and
+enrollment claims, then candidate/artifact evidence in the listed order.
 Admission locks campaign, target update, enrollment, scope capacity, admission,
 and reservation in the listed order. Pause/abort locks the campaign first.
 Evaluator, result, and repair paths reload the campaign/target state and obey

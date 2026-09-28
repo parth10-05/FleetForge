@@ -12,9 +12,9 @@ func (state State) IsTerminal() bool {
 func CanTransition(from, to State) bool {
 	switch from {
 	case StateInitiated:
-		return to == StateUploading
+		return to == StateUploading || to == StateExpired
 	case StateUploading:
-		return to == StateUploaded
+		return to == StateUploaded || to == StateExpired
 	case StateUploaded:
 		return to == StateVerifying
 	case StateVerifying:
