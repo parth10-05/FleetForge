@@ -1,0 +1,89 @@
+//go:build postgresintegration
+
+package postgres
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/parth10-05/fleetforge/internal/domain/artifact"
+	"github.com/parth10-05/fleetforge/internal/domain/inventory"
+	"github.com/parth10-05/fleetforge/internal/domain/preflight"
+	"github.com/parth10-05/fleetforge/internal/domain/value"
+	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
+)
+
+func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	const artifactID = "00000000-0000-0000-2701-000000000001"
+	const targetID = "00000000-0000-0000-2701-000000000002"
+	if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,state) VALUES ($1,'v1','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','bound','VERIFIED')", artifactID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,'candidate-target','endpoint','west','rack-a','ACTIVE')", targetID); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := mustCandidateSnapshot(t, artifactID, targetID, "rack-a")
+	request := persistence.PreflightCandidateRequest{CandidateID: "00000000-0000-0000-2701-000000000003", Snapshot: snapshot, Report: []byte(`{"checks":{"state":"passed"}}`)}
+	if err := persistence.PersistPreflightCandidate(ctx, pool, request); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistence.PersistPreflightCandidate(ctx, pool, request); err != nil {
+		t.Fatalf("same snapshot replay: %v", err)
+	}
+	var hash string
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT snapshot_hash FROM preflight_candidates WHERE id=$1", request.CandidateID).Scan(&hash); err != nil || hash != snapshot.Hash().String() {
+		t.Fatalf("snapshot hash=%q err=%v", hash, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM preflight_candidate_targets WHERE candidate_id=$1", request.CandidateID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("frozen member count=%d err=%v", count, err)
+	}
+	conflicting := request
+	conflicting.Snapshot = mustCandidateSnapshot(t, artifactID, targetID, "rack-b")
+	if err := persistence.PersistPreflightCandidate(ctx, pool, conflicting); !errors.Is(err, persistence.ErrPreflightCandidateConflict) {
+		t.Fatalf("conflicting candidate error=%v", err)
+	}
+}
+
+func mustCandidateSnapshot(t *testing.T, artifactID, targetID, rack string) preflight.Snapshot {
+	t.Helper()
+	selector, err := inventory.ParseSelector([]byte(`{"version":"fleetforge.selector/v1","all":[{"key":"site","value":"west"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := value.ParseSHA256Digest("sha256:" + strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	object, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/firmware.bin", "version-1", 3, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedArtifact, err := value.ParseArtifactID(artifactID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedTarget, err := value.ParseTargetID(targetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, err := value.NewFailureDomainLabels(map[string]string{"site": "west", "rack": rack, "family": "synthetic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	family, err := value.ParseLabelValue("synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := artifact.EvaluateCompatibility(artifact.CompatibilityPolicyV1, artifact.StateVerified, family, family)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := preflight.NewSnapshot(selector, parsedArtifact, object, []preflight.Target{{ID: parsedTarget, Revision: 0, Labels: labels, Family: family, Compatibility: decision}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
