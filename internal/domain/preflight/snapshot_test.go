@@ -10,7 +10,7 @@ import (
 )
 
 func TestSnapshotHashIsStableAcrossInputOrdering(t *testing.T) {
-	selector, _ := inventory.ParseSelector([]byte(`{"site":"west"}`))
+	selector, _ := inventory.ParseSelector([]byte(`{"version":"fleetforge.selector/v1","all":[{"key":"site","value":"west"}]}`))
 	digest, _ := value.ParseSHA256Digest("sha256:" + strings.Repeat("a", 64))
 	object, _ := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "firmware", "objects/a", "v1", 42, digest)
 	artifactID, _ := value.ParseArtifactID("11111111-1111-4111-8111-111111111111")

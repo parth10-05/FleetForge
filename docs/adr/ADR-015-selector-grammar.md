@@ -5,15 +5,18 @@
 
 ## Decision
 
-V1 selection is a JSON object whose members are exact label equalities. Only
-`site`, `rack`, `group`, and `family` are accepted. Values are case-sensitive,
-bounded label values. A selector has at most eight terms and is canonicalized
-by lexicographic key order before persistence, hashing, or SQL compilation.
+V1 selection has the versioned shape
+`{"version":"fleetforge.selector/v1","all":[{"key":"site","value":"iad"}]}`.
+Only `site`, `rack`, `group`, and `family` are accepted. Values are
+case-sensitive, bounded label values. A selector has one to eight terms and is
+canonicalized by lexicographic key order before persistence, hashing, or SQL
+compilation.
 
 There are no boolean alternatives, negation, wildcard, JSON-path, regular
 expression, arbitrary field, or string-SQL operators in V1. Duplicate keys and
-unknown keys fail closed. An empty object is the bounded selector for all
-otherwise eligible inventory; the application still applies its result cap.
+unknown keys fail closed. Empty conjunctions are rejected; a controlled
+all-demo fixture must instead pass explicit target IDs and cannot rely on a
+dynamic selector.
 
 ## Consequences
 
