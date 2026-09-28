@@ -51,6 +51,16 @@ func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
 	if err := persistence.PersistPreflightCandidate(ctx, pool, conflicting); !errors.Is(err, persistence.ErrPreflightCandidateConflict) {
 		t.Fatalf("conflicting candidate error=%v", err)
 	}
+	if _, err := pool.Exec(ctx, "UPDATE targets SET revision=1 WHERE id=$1", targetID); err != nil {
+		t.Fatal(err)
+	}
+	drift, err := persistence.ReportPreflightCandidateDrift(ctx, pool, request.CandidateID)
+	if err != nil || len(drift) != 1 || drift[0].TargetID != targetID || len(drift[0].Reasons) != 1 || drift[0].Reasons[0] != "revision_changed" {
+		t.Fatalf("drift=%+v err=%v", drift, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT frozen_target_revision FROM preflight_candidate_targets WHERE candidate_id=$1 AND target_id=$2", request.CandidateID, targetID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("frozen revision=%d err=%v", count, err)
+	}
 }
 
 func mustCandidateSnapshot(t *testing.T, artifactID, targetID, rack string) preflight.Snapshot {

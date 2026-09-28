@@ -104,6 +104,10 @@ type Querier interface {
 	// Access pattern: inspect oldest publishable outbox rows for planning and
 	// query-plan evidence without scanning published history.
 	OldestOutbox(ctx context.Context, dollar_1 int32) ([]OldestOutboxRow, error)
+	// P02-Q32: preflight-candidate-drift.sql
+	// Access pattern: compare immutable candidate target facts to current
+	// inventory. It is diagnostic-only and never changes frozen membership.
+	PreflightCandidateDrift(ctx context.Context, candidateID pgtype.UUID) ([]PreflightCandidateDriftRow, error)
 	// P02-Q27: register-trusted-target.sql
 	// Access pattern: insert a fully validated simulator registration exactly once.
 	// A caller that receives no row must lock/read the existing external identity
