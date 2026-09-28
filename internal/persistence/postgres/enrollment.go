@@ -11,7 +11,7 @@
 //  5. Insert an outbox event.
 //
 // If any target's enrollment is already owned by another active campaign or
-// its operation reservation is in QUARANTINED state, the entire transaction
+// its operation reservation is unresolved (ACTIVE or QUARANTINED), the entire transaction
 // rolls back and ReleaseBlockedBy is returned describing the first conflict.
 //
 // No network client, storage API, queue call, or log exporter is invoked
@@ -191,15 +191,16 @@ func checkAndEnroll(ctx context.Context, tx pgx.Tx, campaignID string, entry Tar
 		return fmt.Errorf("check active enrollment for target %s: %w", entry.TargetID, err)
 	}
 
-	// Check for QUARANTINED operation reservations that block readiness.
-	var quarantineID string
+	// Every unresolved operation reservation blocks readiness. A live ACTIVE
+	// reservation is no less conflicting than a QUARANTINED one.
+	var reservationID, reservationState string
 	qErr := tx.QueryRow(ctx,
-		"SELECT id FROM operation_reservations WHERE target_id=$1::uuid AND state='QUARANTINED' LIMIT 1 FOR UPDATE",
+		"SELECT id, state FROM operation_reservations WHERE target_id=$1::uuid AND state IN ('ACTIVE', 'QUARANTINED') ORDER BY id FOR UPDATE LIMIT 1",
 		entry.TargetID,
-	).Scan(&quarantineID)
+	).Scan(&reservationID, &reservationState)
 	if qErr == nil {
-		return fmt.Errorf("%w: target %s has quarantined operation reservation %s",
-			ErrEnrollmentBlocked, entry.TargetID, quarantineID)
+		return fmt.Errorf("%w: target %s has unresolved %s operation reservation %s",
+			ErrEnrollmentBlocked, entry.TargetID, reservationState, reservationID)
 	}
 	if !errors.Is(qErr, pgx.ErrNoRows) {
 		return fmt.Errorf("check quarantine for target %s: %w", entry.TargetID, qErr)

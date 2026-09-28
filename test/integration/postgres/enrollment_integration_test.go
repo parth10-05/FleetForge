@@ -78,28 +78,29 @@ func TestReadinessEnrollmentBlockedByExistingActiveEnrollment(t *testing.T) {
 	}
 }
 
-// TestReadinessEnrollmentBlockedByQuarantinedReservation proves that a target
-// with a QUARANTINED operation reservation blocks the readiness transaction.
-func TestReadinessEnrollmentBlockedByQuarantinedReservation(t *testing.T) {
-	_, pool, ctx := migratedHarness(t)
-	fixture := seedOwnershipFixture(t, pool, ctx)
-	prepareReadinessCampaign(t, pool, ctx, fixture)
-	admissionID := "00000000-0000-0000-9003-000000000001"
-	insertAdmission(t, pool, ctx, admissionID, "00000000-0000-0000-9003-000000000002", fixture)
-
-	// Insert a QUARANTINED operation reservation for the target.
-	if _, err := pool.Exec(ctx,
-		"INSERT INTO operation_reservations (id, admission_id, target_id, campaign_id, scope_level, scope_key, state) "+
-			"VALUES ('00000000-0000-0000-9003-000000000010', $1, $2, $3, 'GLOBAL', 'GLOBAL', 'QUARANTINED')",
-		admissionID, fixture.targetID, fixture.campaignID,
-	); err != nil {
-		t.Fatalf("insert quarantined reservation: %v", err)
-	}
-
-	req := enrollmentRequest(fixture, "00000000-0000-0000-9003-000000000020", "00000000-0000-0000-9003-000000000021")
-	err := persistence.AcquireReadinessEnrollment(ctx, pool, req)
-	if !errors.Is(err, persistence.ErrEnrollmentBlocked) {
-		t.Errorf("quarantined target error = %v, want ErrEnrollmentBlocked", err)
+// TestReadinessEnrollmentBlockedByUnresolvedReservation proves that neither a
+// live nor quarantined physical-operation reservation can be bypassed by a
+// later readiness transaction.
+func TestReadinessEnrollmentBlockedByUnresolvedReservation(t *testing.T) {
+	for _, reservationState := range []string{"ACTIVE", "QUARANTINED"} {
+		t.Run(reservationState, func(t *testing.T) {
+			_, pool, ctx := migratedHarness(t)
+			fixture := seedOwnershipFixture(t, pool, ctx)
+			prepareReadinessCampaign(t, pool, ctx, fixture)
+			admissionID := "00000000-0000-0000-9003-000000000001"
+			insertAdmission(t, pool, ctx, admissionID, "00000000-0000-0000-9003-000000000002", fixture)
+			if _, err := pool.Exec(ctx,
+				"INSERT INTO operation_reservations (id, admission_id, target_id, campaign_id, scope_level, scope_key, state) "+
+					"VALUES ('00000000-0000-0000-9003-000000000010', $1, $2, $3, 'GLOBAL', 'GLOBAL', $4)",
+				admissionID, fixture.targetID, fixture.campaignID, reservationState,
+			); err != nil {
+				t.Fatalf("insert %s reservation: %v", reservationState, err)
+			}
+			req := enrollmentRequest(fixture, "00000000-0000-0000-9003-000000000020", "00000000-0000-0000-9003-000000000021")
+			if err := persistence.AcquireReadinessEnrollment(ctx, pool, req); !errors.Is(err, persistence.ErrEnrollmentBlocked) {
+				t.Errorf("%s target error = %v, want ErrEnrollmentBlocked", reservationState, err)
+			}
+		})
 	}
 }
 
