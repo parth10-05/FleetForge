@@ -129,6 +129,11 @@ type Querier interface {
 	// Access pattern: atomic target-update save with expected-revision guard.
 	// Zero rows affected → revision conflict (caller maps to conflict error).
 	SaveTargetUpdateWithRevision(ctx context.Context, arg SaveTargetUpdateWithRevisionParams) (int64, error)
+	// P02-Q29: schedule-target-discovery.sql
+	// Access pattern: schedule one active read-only discovery job per target
+	// configuration revision. Conflict means an active equivalent job already
+	// exists and is a successful idempotent outcome.
+	ScheduleTargetDiscovery(ctx context.Context, arg ScheduleTargetDiscoveryParams) (pgtype.UUID, error)
 	// P03-Q08: target-update-evidence-timeline.sql
 	// Access pattern: reconstruct a target-update evidence timeline.
 	// Index: device_observations_update_time_index ON device_observations (target_update_id, observed_at DESC)
