@@ -14,6 +14,7 @@ import (
 )
 
 var ErrPreflightCandidateConflict = errors.New("preflight candidate conflicts with existing immutable snapshot")
+var ErrPreflightInputStale = errors.New("preflight candidate input is no longer trusted")
 
 // PreflightCandidateRequest holds only already-evaluated, bounded evidence.
 // Report must be a JSON object without credentials or raw device documents.
@@ -39,6 +40,9 @@ func PersistPreflightCandidate(ctx context.Context, pool *pgxpool.Pool, request 
 		return fmt.Errorf("begin preflight candidate: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := validateCandidateInputs(ctx, tx, request.Snapshot); err != nil {
+		return err
+	}
 	command := `INSERT INTO preflight_candidates (id, artifact_id, artifact_version_id, selector_version, selector_json, snapshot_hash, state, report) VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6, 'PASSED', $7::jsonb) ON CONFLICT (id) DO NOTHING RETURNING id`
 	var inserted string
 	err = tx.QueryRow(ctx, command, candidateID, request.Snapshot.ArtifactID().String(), request.Snapshot.ObjectIdentity().VersionID(), request.Snapshot.SelectorVersion(), string(request.Snapshot.Selector()), request.Snapshot.Hash().String(), string(request.Report)).Scan(&inserted)
@@ -68,6 +72,30 @@ func PersistPreflightCandidate(ctx context.Context, pool *pgxpool.Pool, request 
 			return fmt.Errorf("%w: candidate commit", ErrPreflightCandidateConflict)
 		}
 		return fmt.Errorf("commit preflight candidate: %w", err)
+	}
+	return nil
+}
+
+func validateCandidateInputs(ctx context.Context, tx pgx.Tx, snapshot preflight.Snapshot) error {
+	object := snapshot.ObjectIdentity()
+	var state, provider, container, key, versionID, digest string
+	var size int64
+	if err := tx.QueryRow(ctx, `SELECT a.state, o.provider, o.container, o.object_key, o.version_id, o.object_size, o.sha256_digest FROM firmware_artifacts a JOIN artifact_object_versions o ON o.artifact_id = a.id WHERE a.id=$1::uuid FOR KEY SHARE`, snapshot.ArtifactID().String()).Scan(&state, &provider, &container, &key, &versionID, &size, &digest); err != nil {
+		return fmt.Errorf("validate preflight artifact: %w", err)
+	}
+	if state != "VERIFIED" || provider != object.Provider() || container != object.Container() || key != object.Key() || versionID != object.VersionID() || size != object.Size() || digest != object.Digest().String() {
+		return ErrPreflightInputStale
+	}
+	for _, target := range snapshot.Targets() {
+		var revision int64
+		var administrativeState, site, rack, family string
+		var trusted bool
+		if err := tx.QueryRow(ctx, `SELECT t.revision, t.administrative_state, t.trust_metadata_complete, t.site_key, t.rack_key, l.value FROM targets t JOIN target_labels l ON l.target_id=t.id AND l.key='family' WHERE t.id=$1::uuid FOR KEY SHARE`, target.ID.String()).Scan(&revision, &administrativeState, &trusted, &site, &rack, &family); err != nil {
+			return fmt.Errorf("validate preflight target %s: %w", target.ID.String(), err)
+		}
+		if revision < 0 || uint64(revision) != target.Revision.Uint64() || administrativeState != "ACTIVE" || !trusted || site != target.Labels.Site().String() || rack != target.Labels.Rack().String() || family != target.Family.String() {
+			return fmt.Errorf("%w: target %s", ErrPreflightInputStale, target.ID.String())
+		}
 	}
 	return nil
 }

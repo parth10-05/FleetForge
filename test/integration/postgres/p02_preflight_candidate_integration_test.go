@@ -21,7 +21,13 @@ func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,state) VALUES ($1,'v1','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','bound','VERIFIED')", artifactID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,'candidate-target','endpoint','west','rack-a','ACTIVE')", targetID); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO artifact_object_versions (artifact_id,provider,container,object_key,version_id,object_size,sha256_digest,verification_policy_version,declared_target_family) VALUES ($1,'local-versioned-v1','artifacts','artifacts/v1/firmware.bin','version-1',3,'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','synthetic-sha256-v1','synthetic')", artifactID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state,target_key,contract_version,credential_provider,credential_reference,transport_policy_version,registration_hash,trust_metadata_complete) VALUES ($1,'candidate-target','https://simulator.example','west','rack-a','ACTIVE','candidate-target','synthetic-redfish-v1','synthetic-test','synthetic-test:candidate-target','synthetic-transport-v1','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',true)", targetID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO target_labels (target_id,key,value) VALUES ($1,'family','synthetic')", targetID); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := mustCandidateSnapshot(t, artifactID, targetID, "rack-a")
