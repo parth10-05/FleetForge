@@ -51,7 +51,7 @@ type Querier interface {
 	// P02-Q33: expire-abandoned-artifact-uploads.sql
 	// Access pattern: bounded cleanup candidates. A row with a bound immutable
 	// object version is never eligible, regardless of age.
-	ExpireAbandonedArtifactUploads(ctx context.Context, arg ExpireAbandonedArtifactUploadsParams) ([]pgtype.UUID, error)
+	ExpireAbandonedArtifactUploads(ctx context.Context, arg ExpireAbandonedArtifactUploadsParams) ([]ExpireAbandonedArtifactUploadsRow, error)
 	// P03-Q22: fail-due-work.sql
 	// Access pattern: fenced non-success result commit. A worker can only return
 	// pending work while it still owns the token and captured aggregate fence.

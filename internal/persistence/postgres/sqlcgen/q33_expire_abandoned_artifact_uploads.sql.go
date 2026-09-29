@@ -17,6 +17,7 @@ WITH candidates AS (
       FROM firmware_artifacts a
      WHERE a.state = 'UPLOADING'
        AND a.created_at <= $1::timestamptz
+       AND a.upload_grant_id IS NOT NULL
        AND NOT EXISTS (
            SELECT 1 FROM artifact_object_versions object_version
             WHERE object_version.artifact_id = a.id
@@ -33,7 +34,7 @@ UPDATE firmware_artifacts artifact
    SET state = 'EXPIRED', revision = artifact.revision + 1, updated_at = now()
   FROM candidates
  WHERE artifact.id = candidates.id
- RETURNING artifact.id
+ RETURNING artifact.id, artifact.upload_grant_id
 `
 
 type ExpireAbandonedArtifactUploadsParams struct {
@@ -41,22 +42,27 @@ type ExpireAbandonedArtifactUploadsParams struct {
 	Limit   int32              `json:"limit"`
 }
 
+type ExpireAbandonedArtifactUploadsRow struct {
+	ID            pgtype.UUID `json:"id"`
+	UploadGrantID pgtype.Text `json:"upload_grant_id"`
+}
+
 // P02-Q33: expire-abandoned-artifact-uploads.sql
 // Access pattern: bounded cleanup candidates. A row with a bound immutable
 // object version is never eligible, regardless of age.
-func (q *Queries) ExpireAbandonedArtifactUploads(ctx context.Context, arg ExpireAbandonedArtifactUploadsParams) ([]pgtype.UUID, error) {
+func (q *Queries) ExpireAbandonedArtifactUploads(ctx context.Context, arg ExpireAbandonedArtifactUploadsParams) ([]ExpireAbandonedArtifactUploadsRow, error) {
 	rows, err := q.db.Query(ctx, expireAbandonedArtifactUploads, arg.Column1, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []ExpireAbandonedArtifactUploadsRow{}
 	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ExpireAbandonedArtifactUploadsRow
+		if err := rows.Scan(&i.ID, &i.UploadGrantID); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

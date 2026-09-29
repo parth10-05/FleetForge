@@ -12,11 +12,19 @@ import (
 
 const maxArtifactCleanupBatch = 25
 
+// ExpiredUpload is the only authority an external cleanup caller receives
+// after the expiration transaction commits. It contains no mutable key/path
+// and must be resolved through a grant-scoped receipt before exact deletion.
+type ExpiredUpload struct {
+	ArtifactID string
+	GrantID    string
+}
+
 // ExpireAbandonedArtifactUploads expires only unbound UPLOADING artifacts
 // older than cutoff. It never deletes bytes and never affects verified or
 // campaign-held artifact evidence; physical deletion remains a separate exact
 // object-store operation after this workflow decision has committed.
-func ExpireAbandonedArtifactUploads(ctx context.Context, pool *pgxpool.Pool, cutoff time.Time, limit int) ([]string, error) {
+func ExpireAbandonedArtifactUploads(ctx context.Context, pool *pgxpool.Pool, cutoff time.Time, limit int) ([]ExpiredUpload, error) {
 	if pool == nil || cutoff.IsZero() || limit <= 0 || limit > maxArtifactCleanupBatch {
 		return nil, fmt.Errorf("invalid artifact cleanup request")
 	}
@@ -24,13 +32,16 @@ func ExpireAbandonedArtifactUploads(ctx context.Context, pool *pgxpool.Pool, cut
 	if err != nil {
 		return nil, fmt.Errorf("expire abandoned artifact uploads: %w", err)
 	}
-	result := make([]string, 0, len(rows))
+	result := make([]ExpiredUpload, 0, len(rows))
 	for _, row := range rows {
-		id, err := sqlcUUIDText(row)
+		id, err := sqlcUUIDText(row.ID)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, id)
+		if !row.UploadGrantID.Valid || row.UploadGrantID.String == "" {
+			return nil, fmt.Errorf("expired upload missing durable grant authority")
+		}
+		result = append(result, ExpiredUpload{ArtifactID: id, GrantID: row.UploadGrantID.String})
 	}
 	return result, nil
 }

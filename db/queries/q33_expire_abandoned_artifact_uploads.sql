@@ -7,6 +7,7 @@ WITH candidates AS (
       FROM firmware_artifacts a
      WHERE a.state = 'UPLOADING'
        AND a.created_at <= $1::timestamptz
+       AND a.upload_grant_id IS NOT NULL
        AND NOT EXISTS (
            SELECT 1 FROM artifact_object_versions object_version
             WHERE object_version.artifact_id = a.id
@@ -23,4 +24,4 @@ UPDATE firmware_artifacts artifact
    SET state = 'EXPIRED', revision = artifact.revision + 1, updated_at = now()
   FROM candidates
  WHERE artifact.id = candidates.id
- RETURNING artifact.id;
+ RETURNING artifact.id, artifact.upload_grant_id;

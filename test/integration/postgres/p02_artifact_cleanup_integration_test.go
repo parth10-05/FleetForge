@@ -15,8 +15,8 @@ func TestP02CleanupExpiresOnlyOldUnboundUploadingArtifacts(t *testing.T) {
 	const expiredID = "00000000-0000-0000-2801-000000000001"
 	const boundID = "00000000-0000-0000-2801-000000000002"
 	const verifiedID = "00000000-0000-0000-2801-000000000003"
-	for _, fixture := range []struct{ id, state string }{{expiredID, "UPLOADING"}, {boundID, "UPLOADING"}, {verifiedID, "VERIFIED"}} {
-		if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,state,created_at) VALUES ($1,'v1','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','pending',$2,$3)", fixture.id, fixture.state, now.Add(-25*time.Hour)); err != nil {
+	for _, fixture := range []struct{ id, state, grant string }{{expiredID, "UPLOADING", "cleanup-grant-1"}, {boundID, "UPLOADING", "cleanup-grant-2"}, {verifiedID, "VERIFIED", "cleanup-grant-3"}} {
+		if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,upload_grant_id,state,created_at) VALUES ($1,'v1','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','pending',$2,$3,$4)", fixture.id, fixture.grant, fixture.state, now.Add(-25*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -24,7 +24,7 @@ func TestP02CleanupExpiresOnlyOldUnboundUploadingArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	expired, err := persistence.ExpireAbandonedArtifactUploads(ctx, pool, now.Add(-24*time.Hour), 25)
-	if err != nil || len(expired) != 1 || expired[0] != expiredID {
+	if err != nil || len(expired) != 1 || expired[0].ArtifactID != expiredID || expired[0].GrantID != "cleanup-grant-1" {
 		t.Fatalf("expired=%v err=%v", expired, err)
 	}
 	for _, fixture := range []struct{ id, want string }{{expiredID, "EXPIRED"}, {boundID, "UPLOADING"}, {verifiedID, "VERIFIED"}} {
