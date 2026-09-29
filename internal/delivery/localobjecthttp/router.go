@@ -1,19 +1,24 @@
 package localobjecthttp
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/parth10-05/fleetforge/internal/domain/artifact"
 	"github.com/parth10-05/fleetforge/internal/platform/localartifactstore"
 )
 
 const GrantHeader = "X-FleetForge-Upload-Grant"
 
 type Handler struct {
-	store  *localartifactstore.DiskStore
-	secret []byte
-	now    func() time.Time
+	store      *localartifactstore.DiskStore
+	secret     []byte
+	now        func() time.Time
+	completion interface {
+		CompleteUpload(context.Context, string, artifact.ObjectIdentity) error
+	}
 }
 
 func New(store *localartifactstore.DiskStore, secret []byte, now func() time.Time) *Handler {
@@ -22,6 +27,9 @@ func New(store *localartifactstore.DiskStore, secret []byte, now func() time.Tim
 	}
 	return &Handler{store: store, secret: append([]byte(nil), secret...), now: now}
 }
+func (h *Handler) WithCompletion(completion interface {
+	CompleteUpload(context.Context, string, artifact.ObjectIdentity) error
+}) *Handler { h.completion = completion; return h }
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /v1/objects/upload", h.upload)
@@ -48,6 +56,12 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "upload rejected", http.StatusBadRequest)
 		return
+	}
+	if h.completion != nil {
+		if err := h.completion.CompleteUpload(r.Context(), claims.ArtifactID, identity); err != nil {
+			http.Error(w, "upload receipt pending", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")

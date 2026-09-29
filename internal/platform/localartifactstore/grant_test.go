@@ -9,7 +9,7 @@ import (
 func TestSignedGrantBindsClaimsAndExpires(t *testing.T) {
 	secret := []byte("01234567890123456789012345678901")
 	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
-	claims := UploadGrantClaims{Version: "fleetforge.upload-grant/v1", GrantID: "grant-1", Method: "PUT", Provider: "local-versioned-v1", Container: "artifacts", Key: "objects/a.bin", VersionID: "version-1", Size: 11, Digest: "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", MediaType: "application/octet-stream", ExpiresAt: now.Add(time.Minute)}
+	claims := UploadGrantClaims{Version: "fleetforge.upload-grant/v1", GrantID: "grant-1", ArtifactID: "artifact-1", Method: "PUT", Provider: "local-versioned-v1", Container: "artifacts", Key: "objects/a.bin", VersionID: "version-1", Size: 11, Digest: "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", MediaType: "application/octet-stream", ExpiresAt: now.Add(time.Minute)}
 	grant, err := IssueSignedGrant(secret, claims)
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +29,7 @@ func TestSignedGrantBindsClaimsAndExpires(t *testing.T) {
 func TestDiskStoreAcceptsOnlySignedExactGrant(t *testing.T) {
 	secret := []byte("01234567890123456789012345678901")
 	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
-	claims := UploadGrantClaims{Version: "fleetforge.upload-grant/v1", GrantID: "grant-2", Method: "PUT", Provider: "local-versioned-v1", Container: "artifacts", Key: "objects/b.bin", VersionID: "version-1", Size: 11, Digest: "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", MediaType: "application/octet-stream", ExpiresAt: now.Add(time.Minute)}
+	claims := UploadGrantClaims{Version: "fleetforge.upload-grant/v1", GrantID: "grant-2", ArtifactID: "artifact-2", Method: "PUT", Provider: "local-versioned-v1", Container: "artifacts", Key: "objects/b.bin", VersionID: "version-1", Size: 11, Digest: "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", MediaType: "application/octet-stream", ExpiresAt: now.Add(time.Minute)}
 	grant, _ := IssueSignedGrant(secret, claims)
 	store, err := OpenDisk(t.TempDir())
 	if err != nil {
@@ -49,7 +49,7 @@ func TestDiskStoreAcceptsOnlySignedExactGrant(t *testing.T) {
 func TestDiskStoreRecoversDurableGrantReceipt(t *testing.T) {
 	secret := []byte("01234567890123456789012345678901")
 	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
-	claims := UploadGrantClaims{Version: "fleetforge.upload-grant/v1", GrantID: "grant-recovery", Method: "PUT", Provider: "local-versioned-v1", Container: "artifacts", Key: "objects/recovery.bin", VersionID: "version-1", Size: 11, Digest: "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", MediaType: "application/octet-stream", ExpiresAt: now.Add(time.Minute)}
+	claims := UploadGrantClaims{Version: "fleetforge.upload-grant/v1", GrantID: "grant-recovery", ArtifactID: "artifact-recovery", Method: "PUT", Provider: "local-versioned-v1", Container: "artifacts", Key: "objects/recovery.bin", VersionID: "version-1", Size: 11, Digest: "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", MediaType: "application/octet-stream", ExpiresAt: now.Add(time.Minute)}
 	grant, err := IssueSignedGrant(secret, claims)
 	if err != nil {
 		t.Fatal(err)

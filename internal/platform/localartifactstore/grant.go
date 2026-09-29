@@ -19,17 +19,18 @@ type SignedGrant struct{ Payload, Signature string }
 // UploadGrantClaims are the complete, canonical authorization facts for one
 // direct object PUT. No caller-supplied path or method is accepted outside it.
 type UploadGrantClaims struct {
-	Version   string    `json:"version"`
-	GrantID   string    `json:"grant_id"`
-	Method    string    `json:"method"`
-	Provider  string    `json:"provider"`
-	Container string    `json:"container"`
-	Key       string    `json:"key"`
-	VersionID string    `json:"version_id"`
-	Size      int64     `json:"size"`
-	Digest    string    `json:"digest"`
-	MediaType string    `json:"media_type"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Version    string    `json:"version"`
+	GrantID    string    `json:"grant_id"`
+	ArtifactID string    `json:"artifact_id"`
+	Method     string    `json:"method"`
+	Provider   string    `json:"provider"`
+	Container  string    `json:"container"`
+	Key        string    `json:"key"`
+	VersionID  string    `json:"version_id"`
+	Size       int64     `json:"size"`
+	Digest     string    `json:"digest"`
+	MediaType  string    `json:"media_type"`
+	ExpiresAt  time.Time `json:"expires_at"`
 }
 
 func IssueSignedGrant(secret []byte, claims UploadGrantClaims) (SignedGrant, error) {
@@ -69,7 +70,7 @@ func (g SignedGrant) Verify(secret []byte, now time.Time) (UploadGrantClaims, er
 }
 
 func validClaims(claims UploadGrantClaims) bool {
-	if claims.Version != "fleetforge.upload-grant/v1" || claims.GrantID == "" || claims.Method != "PUT" || claims.Provider == "" || claims.Container == "" || claims.Key == "" || claims.VersionID == "" || claims.Size <= 0 || claims.MediaType != "application/octet-stream" || claims.ExpiresAt.IsZero() {
+	if claims.Version != "fleetforge.upload-grant/v1" || claims.GrantID == "" || claims.ArtifactID == "" || claims.Method != "PUT" || claims.Provider == "" || claims.Container == "" || claims.Key == "" || claims.VersionID == "" || claims.Size <= 0 || claims.MediaType != "application/octet-stream" || claims.ExpiresAt.IsZero() {
 		return false
 	}
 	_, err := value.ParseSHA256Digest(claims.Digest)

@@ -26,11 +26,12 @@ type UploadDeclarationWriter interface {
 // UploadCapabilityRequest contains only the exact facts a direct capability
 // may authorize. The issuer owns signing and provider version assignment.
 type UploadCapabilityRequest struct {
-	GrantID   string
-	Container string
-	Key       string
-	Metadata  artifact.UploadMetadata
-	ExpiresAt time.Time
+	ArtifactID string
+	GrantID    string
+	Container  string
+	Key        string
+	Metadata   artifact.UploadMetadata
+	ExpiresAt  time.Time
 }
 
 type UploadCapability struct {
@@ -103,7 +104,7 @@ func (service *Service) InitiateUpload(ctx context.Context, request InitiateUplo
 	if key == "" {
 		return UploadReceipt{}, fmt.Errorf("reserve artifact upload: %w", ErrInvalidUploadRequest)
 	}
-	capability, err := service.issuer.IssueUploadCapability(ctx, UploadCapabilityRequest{GrantID: request.GrantID, Container: request.Container, Key: key, Metadata: request.Declaration.Metadata, ExpiresAt: request.ExpiresAt.UTC()})
+	capability, err := service.issuer.IssueUploadCapability(ctx, UploadCapabilityRequest{ArtifactID: request.Declaration.ArtifactID, GrantID: request.GrantID, Container: request.Container, Key: key, Metadata: request.Declaration.Metadata, ExpiresAt: request.ExpiresAt.UTC()})
 	if err != nil {
 		return UploadReceipt{}, fmt.Errorf("issue direct upload capability: %w", err)
 	}
