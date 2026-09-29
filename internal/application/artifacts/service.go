@@ -52,6 +52,14 @@ type UploadedObjectBinder interface {
 	BindUploadedObject(context.Context, string, artifact.ObjectIdentity) error
 }
 
+type VerificationArtifactReader interface {
+	LoadVerificationArtifact(context.Context, string) (artifact.ObjectIdentity, error)
+}
+
+type VerificationResultWriter interface {
+	RecordVerification(context.Context, string, artifact.ObjectIdentity, bool, string) error
+}
+
 type InitiateUploadRequest struct {
 	Declaration UploadDeclaration
 	GrantID     string
@@ -66,11 +74,18 @@ type UploadReceipt struct {
 }
 
 type Service struct {
-	declarations UploadDeclarationWriter
-	issuer       UploadCapabilityIssuer
-	verifier     UploadedObjectVerifier
-	binder       UploadedObjectBinder
-	now          func() time.Time
+	declarations       UploadDeclarationWriter
+	issuer             UploadCapabilityIssuer
+	verifier           UploadedObjectVerifier
+	binder             UploadedObjectBinder
+	verificationReader VerificationArtifactReader
+	verificationWriter VerificationResultWriter
+	now                func() time.Time
+}
+
+func (service *Service) WithVerification(reader VerificationArtifactReader, writer VerificationResultWriter) *Service {
+	service.verificationReader, service.verificationWriter = reader, writer
+	return service
 }
 
 func NewWithCompletion(declarations UploadDeclarationWriter, issuer UploadCapabilityIssuer, verifier UploadedObjectVerifier, binder UploadedObjectBinder, now func() time.Time) *Service {
@@ -126,6 +141,28 @@ func (service *Service) CompleteUpload(ctx context.Context, artifactID string, o
 	}
 	if err := service.binder.BindUploadedObject(ctx, artifactID, object); err != nil {
 		return fmt.Errorf("bind verified uploaded object: %w", err)
+	}
+	return nil
+}
+
+// VerifyBoundArtifact loads the already-bound immutable version, performs
+// storage I/O outside persistence, and records exactly one stable outcome.
+func (service *Service) VerifyBoundArtifact(ctx context.Context, artifactID string) error {
+	if service == nil || service.verificationReader == nil || service.verificationWriter == nil || service.verifier == nil || artifactID == "" {
+		return ErrInvalidUploadRequest
+	}
+	object, err := service.verificationReader.LoadVerificationArtifact(ctx, artifactID)
+	if err != nil {
+		return fmt.Errorf("load verification artifact: %w", err)
+	}
+	if err := service.verifier.VerifyObject(ctx, object); err != nil {
+		if recordErr := service.verificationWriter.RecordVerification(ctx, artifactID, object, false, "artifact.verification.failed"); recordErr != nil {
+			return fmt.Errorf("record rejected artifact verification: %w", recordErr)
+		}
+		return nil
+	}
+	if err := service.verificationWriter.RecordVerification(ctx, artifactID, object, true, "digest_exact"); err != nil {
+		return fmt.Errorf("record verified artifact: %w", err)
 	}
 	return nil
 }

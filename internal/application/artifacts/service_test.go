@@ -133,3 +133,62 @@ type binderFunc func(context.Context, string, artifact.ObjectIdentity) error
 func (fn binderFunc) BindUploadedObject(ctx context.Context, id string, object artifact.ObjectIdentity) error {
 	return fn(ctx, id, object)
 }
+
+func TestVerifyBoundArtifactRecordsExactSuccess(t *testing.T) {
+	metadata := testMetadata(t)
+	object, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/a.bin", "local-1", metadata.Size(), metadata.Digest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := verificationRecord{}
+	service := New(nil, nil, nil).WithVerification(verificationReaderFunc(func(context.Context, string) (artifact.ObjectIdentity, error) { return object, nil }), verificationWriterFunc(func(_ context.Context, id string, got artifact.ObjectIdentity, verified bool, reason string) error {
+		recorded = verificationRecord{id, got, verified, reason}
+		return nil
+	}))
+	service.verifier = verifierFunc(func(context.Context, artifact.ObjectIdentity) error { return nil })
+	if err := service.VerifyBoundArtifact(context.Background(), "artifact-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !recorded.verified || recorded.reason != "digest_exact" || recorded.object != object {
+		t.Fatalf("record=%+v", recorded)
+	}
+}
+
+func TestVerifyBoundArtifactRecordsRejectedExactVersion(t *testing.T) {
+	metadata := testMetadata(t)
+	object, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/a.bin", "local-1", metadata.Size(), metadata.Digest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := verificationRecord{}
+	service := New(nil, nil, nil).WithVerification(verificationReaderFunc(func(context.Context, string) (artifact.ObjectIdentity, error) { return object, nil }), verificationWriterFunc(func(_ context.Context, id string, got artifact.ObjectIdentity, verified bool, reason string) error {
+		recorded = verificationRecord{id, got, verified, reason}
+		return nil
+	}))
+	service.verifier = verifierFunc(func(context.Context, artifact.ObjectIdentity) error { return errors.New("digest mismatch") })
+	if err := service.VerifyBoundArtifact(context.Background(), "artifact-1"); err != nil {
+		t.Fatal(err)
+	}
+	if recorded.verified || recorded.reason != "artifact.verification.failed" || recorded.object != object {
+		t.Fatalf("record=%+v", recorded)
+	}
+}
+
+type verificationReaderFunc func(context.Context, string) (artifact.ObjectIdentity, error)
+
+func (fn verificationReaderFunc) LoadVerificationArtifact(ctx context.Context, id string) (artifact.ObjectIdentity, error) {
+	return fn(ctx, id)
+}
+
+type verificationWriterFunc func(context.Context, string, artifact.ObjectIdentity, bool, string) error
+
+func (fn verificationWriterFunc) RecordVerification(ctx context.Context, id string, object artifact.ObjectIdentity, verified bool, reason string) error {
+	return fn(ctx, id, object, verified, reason)
+}
+
+type verificationRecord struct {
+	id       string
+	object   artifact.ObjectIdentity
+	verified bool
+	reason   string
+}
