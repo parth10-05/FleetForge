@@ -113,7 +113,14 @@ func RunMigrations(ctx context.Context, settings config.PostgreSQL, migrations f
 	}
 	defer database.Close()
 	return WithMigrationLock(ctx, database, func(ctx context.Context) error {
-		provider, err := goose.NewProvider(goose.DialectPostgres, database, migrations)
+		providerOptions := []goose.ProviderOption{}
+		if schemaName := migrationSchemaName(settings.MigrationDSN); schemaName != "" {
+			// Goose checks its version table by current_schema(), not search_path.
+			// Qualify the table explicitly so each isolated integration schema owns
+			// its migration history instead of inheriting public's version record.
+			providerOptions = append(providerOptions, goose.WithTableName(schemaName+".goose_db_version"))
+		}
+		provider, err := goose.NewProvider(goose.DialectPostgres, database, migrations, providerOptions...)
 		if err != nil {
 			return fmt.Errorf("configure migration provider: %w", err)
 		}
@@ -125,6 +132,26 @@ func RunMigrations(ctx context.Context, settings config.PostgreSQL, migrations f
 		}
 		return nil
 	})
+}
+
+// migrationSchemaName returns a simple schema identifier suitable for Goose's
+// raw table-name option. Complex search paths remain supported for connection
+// setup, but intentionally use Goose's default migration-history table.
+func migrationSchemaName(dsn string) string {
+	schemaName := migrationSearchPath(dsn)
+	if schemaName == "" {
+		return ""
+	}
+	for index, character := range schemaName {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			character == '_' ||
+			(index > 0 && character >= '0' && character <= '9') {
+			continue
+		}
+		return ""
+	}
+	return schemaName
 }
 
 // VersionReader obtains the migration version that an application requires.

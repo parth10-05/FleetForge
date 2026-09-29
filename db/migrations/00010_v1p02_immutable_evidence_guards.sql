@@ -1,6 +1,7 @@
 -- +goose Up
 -- P02 evidence is append-only. Administrative lifecycle transitions live on
 -- firmware_artifacts; they never rewrite the object version or frozen snapshot.
+-- +goose StatementBegin
 CREATE FUNCTION fleetforge_reject_immutable_evidence_mutation() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -8,6 +9,7 @@ BEGIN
         USING ERRCODE = '55000';
 END;
 $$;
+-- +goose StatementEnd
 
 CREATE TRIGGER artifact_object_versions_immutable
     BEFORE UPDATE OR DELETE ON artifact_object_versions
@@ -25,6 +27,7 @@ CREATE TRIGGER artifact_holds_immutable
     BEFORE DELETE ON artifact_holds
     FOR EACH ROW EXECUTE FUNCTION fleetforge_reject_immutable_evidence_mutation();
 -- Holds may only be released once; changing their identity is forbidden.
+-- +goose StatementBegin
 CREATE FUNCTION fleetforge_guard_artifact_hold_update() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -41,6 +44,7 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+-- +goose StatementEnd
 DROP TRIGGER artifact_holds_immutable ON artifact_holds;
 CREATE TRIGGER artifact_holds_release_once
     BEFORE UPDATE OR DELETE ON artifact_holds

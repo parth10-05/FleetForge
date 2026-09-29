@@ -51,6 +51,26 @@ func TestReadinessProbeClassifiesUnavailableAndIncompatible(t *testing.T) {
 	}
 }
 
+func TestMigrationSchemaNameAcceptsOnlySimpleSchemaIdentifiers(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want string
+	}{
+		{name: "simple", dsn: "postgres://migrate:secret@127.0.0.1:5432/fleetforge?search_path=ff_it_123", want: "ff_it_123"},
+		{name: "missing", dsn: "postgres://migrate:secret@127.0.0.1:5432/fleetforge", want: ""},
+		{name: "multiple schemas", dsn: "postgres://migrate:secret@127.0.0.1:5432/fleetforge?search_path=tenant%2Cpublic", want: ""},
+		{name: "quoted", dsn: "postgres://migrate:secret@127.0.0.1:5432/fleetforge?search_path=%22tenant%22", want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := migrationSchemaName(test.dsn); got != test.want {
+				t.Fatalf("migrationSchemaName() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func testSettings() config.PostgreSQL {
 	return config.PostgreSQL{
 		ApplicationDSN:     "postgres://app:secret@127.0.0.1:5432/fleetforge?sslmode=disable",
