@@ -31,6 +31,16 @@ func TestP02CleanupExpiresOnlyOldUnboundUploadingArtifacts(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT grant_id,state FROM artifact_cleanup_intents WHERE artifact_id=$1", expiredID).Scan(&intentGrant, &intentState); err != nil || intentGrant != "cleanup-grant-1" || intentState != "PENDING" {
 		t.Fatalf("cleanup intent grant=%q state=%q err=%v", intentGrant, intentState, err)
 	}
+	claim, err := persistence.ClaimArtifactCleanupIntent(ctx, pool, "cleanup-worker", "00000000-0000-0000-2801-000000000099", now, now.Add(time.Minute))
+	if err != nil || claim == nil || claim.ArtifactID != expiredID || claim.GrantID != "cleanup-grant-1" {
+		t.Fatalf("cleanup claim=%+v err=%v", claim, err)
+	}
+	if err := persistence.CompleteArtifactCleanupIntent(ctx, pool, *claim, now.Add(time.Second)); err != nil {
+		t.Fatalf("complete cleanup intent: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT state FROM artifact_cleanup_intents WHERE artifact_id=$1", expiredID).Scan(&intentState); err != nil || intentState != "COMPLETED" {
+		t.Fatalf("completed intent state=%q err=%v", intentState, err)
+	}
 	for _, fixture := range []struct{ id, want string }{{expiredID, "EXPIRED"}, {boundID, "UPLOADING"}, {verifiedID, "VERIFIED"}} {
 		var state string
 		if err := pool.QueryRow(ctx, "SELECT state FROM firmware_artifacts WHERE id=$1", fixture.id).Scan(&state); err != nil || state != fixture.want {
