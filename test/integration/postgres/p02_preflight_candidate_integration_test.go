@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/parth10-05/fleetforge/internal/domain/artifact"
 	"github.com/parth10-05/fleetforge/internal/domain/inventory"
@@ -30,6 +31,13 @@ func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO target_labels (target_id,key,value) VALUES ($1,'family','synthetic')", targetID); err != nil {
 		t.Fatal(err)
 	}
+	const observationID = "00000000-0000-0000-2701-000000000005"
+	if _, err := pool.Exec(ctx, "INSERT INTO device_observations (id,target_id,kind,observed_at,normalized_data) VALUES ($1,$2,'INVENTORY',now(),'{}')", observationID, targetID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO target_discovery_heads (target_id,head_revision,configuration_revision,latest_attempt_id,last_good_id) VALUES ($1,1,0,$2,$2)", targetID, observationID); err != nil {
+		t.Fatal(err)
+	}
 	snapshot := mustCandidateSnapshot(t, artifactID, targetID, "rack-a")
 	request := persistence.PreflightCandidateRequest{CandidateID: "00000000-0000-0000-2701-000000000003", Snapshot: snapshot, Report: []byte(`{"checks":{"state":"passed"}}`)}
 	if err := persistence.PersistPreflightCandidate(ctx, pool, request); err != nil {
@@ -51,11 +59,22 @@ func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
 	if err := persistence.PersistPreflightCandidate(ctx, pool, conflicting); !errors.Is(err, persistence.ErrPreflightCandidateConflict) {
 		t.Fatalf("conflicting candidate error=%v", err)
 	}
+	if err := persistence.RecordDiscoveryFailure(ctx, pool, persistence.DiscoveryObservationRequest{ObservationID: "00000000-0000-0000-2701-000000000006", TargetID: targetID, ExpectedTargetRevision: 0, ObservedAt: time.Now().UTC(), NormalizedData: []byte(`{"error_kind":"timeout"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	failedEvidenceAttempt := request
+	failedEvidenceAttempt.CandidateID = "00000000-0000-0000-2701-000000000004"
+	if err := persistence.PersistPreflightCandidate(ctx, pool, failedEvidenceAttempt); !errors.Is(err, persistence.ErrPreflightInputStale) {
+		t.Fatalf("latest discovery failure candidate error=%v", err)
+	}
+	if err := persistence.RecordDiscoverySuccess(ctx, pool, persistence.DiscoveryObservationRequest{ObservationID: "00000000-0000-0000-2701-000000000007", TargetID: targetID, ExpectedTargetRevision: 0, ObservedAt: time.Now().UTC(), NormalizedData: []byte(`{"reachable":true}`)}); err != nil {
+		t.Fatal(err)
+	}
 	if err := persistence.RetireVerifiedArtifact(ctx, pool, artifactID); err != nil {
 		t.Fatal(err)
 	}
 	retiredAttempt := request
-	retiredAttempt.CandidateID = "00000000-0000-0000-2701-000000000004"
+	retiredAttempt.CandidateID = "00000000-0000-0000-2701-000000000008"
 	if err := persistence.PersistPreflightCandidate(ctx, pool, retiredAttempt); !errors.Is(err, persistence.ErrPreflightInputStale) {
 		t.Fatalf("retired artifact candidate error=%v", err)
 	}

@@ -96,6 +96,26 @@ func validateCandidateInputs(ctx context.Context, tx pgx.Tx, snapshot preflight.
 		if revision < 0 || uint64(revision) != target.Revision.Uint64() || administrativeState != "ACTIVE" || !trusted || site != target.Labels.Site().String() || rack != target.Labels.Rack().String() || family != target.Family.String() {
 			return fmt.Errorf("%w: target %s", ErrPreflightInputStale, target.ID.String())
 		}
+		if err := validateCurrentDiscoveryEvidence(ctx, tx, target.ID.String(), revision); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateCurrentDiscoveryEvidence(ctx context.Context, tx pgx.Tx, targetID string, revision int64) error {
+	var configurationRevision int64
+	var latestAttemptID, lastGoodID string
+	var fresh bool
+	err := tx.QueryRow(ctx, `SELECT head.configuration_revision, head.latest_attempt_id::text, head.last_good_id::text, good.observed_at >= now() - interval '120 seconds' AND good.observed_at <= now() + interval '1 second' FROM target_discovery_heads head JOIN device_observations good ON good.id=head.last_good_id WHERE head.target_id=$1::uuid FOR SHARE OF head`, targetID).Scan(&configurationRevision, &latestAttemptID, &lastGoodID, &fresh)
+	if err != nil {
+		return fmt.Errorf("%w: target %s has no successful discovery evidence: %v", ErrPreflightInputStale, targetID, err)
+	}
+	if configurationRevision != revision || latestAttemptID != lastGoodID {
+		return fmt.Errorf("%w: target %s discovery evidence is stale or latest attempt failed", ErrPreflightInputStale, targetID)
+	}
+	if !fresh {
+		return fmt.Errorf("%w: target %s discovery evidence is not fresh", ErrPreflightInputStale, targetID)
 	}
 	return nil
 }
