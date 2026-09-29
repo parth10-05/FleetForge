@@ -60,6 +60,11 @@ type Querier interface {
 	// Access pattern: find a target's campaign memberships before enrollment and readiness decisions.
 	// Index: campaign_targets_target_index ON campaign_targets (target_id, campaign_id)
 	FindTargetCampaignMembership(ctx context.Context, targetID pgtype.UUID) ([]CampaignTarget, error)
+	// P02-Q34: initiate-artifact-upload.sql
+	// Access pattern: reserve one immutable artifact declaration before a scoped
+	// direct-upload grant is issued. The display name is deliberately not stored
+	// as an object key.
+	InitiateArtifactUpload(ctx context.Context, arg InitiateArtifactUploadParams) (pgtype.UUID, error)
 	// P03-Q16: insert-audit-event.sql
 	// Access pattern: append a single audit event within a unit-of-work transaction.
 	// Append-only enforced by reject_audit_event_mutation trigger.
