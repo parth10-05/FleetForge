@@ -42,6 +42,16 @@ func TestLoadObjectStoreUsesDedicatedBoundedConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadArtifactWorkerDoesNotRequireUploadSigningKey(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv(objectStoreRootKey, t.TempDir())
+	t.Setenv(objectStoreHMACSecretKey, "")
+	loaded, err := LoadArtifactWorker()
+	if err != nil || loaded.Root == "" || loaded.Owner == "" {
+		t.Fatalf("LoadArtifactWorker()=%#v err=%v", loaded, err)
+	}
+}
+
 func TestLoadObjectStoreRedactsInvalidSecret(t *testing.T) {
 	const secret = "credential-that-must-not-appear"
 	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")

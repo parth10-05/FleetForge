@@ -56,6 +56,11 @@ type API struct {
 	Address string
 }
 type Worker struct{ Common }
+type ArtifactWorker struct {
+	Common
+	Root  string
+	Owner string
+}
 type Simulator struct {
 	Common
 	Address, RunRoot, ScenarioPath, Username, Password, AdminAddress, AdminSecret string
@@ -104,6 +109,24 @@ func LoadWorker() (Worker, error) {
 		return Worker{}, err
 	}
 	return Worker{Common: common}, nil
+}
+
+// LoadArtifactWorker gives the verification worker access to the exact local
+// object root but deliberately not to the upload capability signing key.
+func LoadArtifactWorker() (ArtifactWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return ArtifactWorker{}, err
+	}
+	root, err := requiredAbsolutePath(os.LookupEnv, objectStoreRootKey)
+	if err != nil {
+		return ArtifactWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_ARTIFACT_WORKER_OWNER", "artifact-verifier")
+	if len(owner) > 128 || strings.TrimSpace(owner) == "" {
+		return ArtifactWorker{}, &Error{Key: "FLEETFORGE_ARTIFACT_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	return ArtifactWorker{Common: common, Root: root, Owner: owner}, nil
 }
 
 func LoadSimulator() (Simulator, error) {
