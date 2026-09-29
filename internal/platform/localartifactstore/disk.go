@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/parth10-05/fleetforge/internal/domain/artifact"
+	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
 
 // DiskStore is the local P02 data-plane persistence primitive. It publishes an
@@ -18,6 +20,28 @@ import (
 type DiskStore struct {
 	root string
 	mu   sync.Mutex
+}
+
+// PutSignedGrant verifies the capability before deriving the only object
+// identity accepted for publication. The request body cannot choose a path,
+// version, digest, or size independently of the signed grant.
+func (store *DiskStore) PutSignedGrant(secret []byte, grant SignedGrant, now time.Time, source io.Reader) (artifact.ObjectIdentity, error) {
+	claims, err := grant.Verify(secret, now)
+	if err != nil {
+		return artifact.ObjectIdentity{}, err
+	}
+	digest, err := value.ParseSHA256Digest(claims.Digest)
+	if err != nil {
+		return artifact.ObjectIdentity{}, ErrInvalidGrant
+	}
+	identity, err := artifact.NewObjectIdentity(claims.Provider, claims.Container, claims.Key, claims.VersionID, claims.Size, digest)
+	if err != nil {
+		return artifact.ObjectIdentity{}, ErrInvalidGrant
+	}
+	if err := store.Put(identity, source); err != nil {
+		return artifact.ObjectIdentity{}, err
+	}
+	return identity, nil
 }
 
 func OpenDisk(root string) (*DiskStore, error) {
