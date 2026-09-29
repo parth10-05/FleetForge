@@ -43,6 +43,14 @@ type UploadCapabilityIssuer interface {
 	IssueUploadCapability(context.Context, UploadCapabilityRequest) (UploadCapability, error)
 }
 
+type UploadedObjectVerifier interface {
+	VerifyObject(context.Context, artifact.ObjectIdentity) error
+}
+
+type UploadedObjectBinder interface {
+	BindUploadedObject(context.Context, string, artifact.ObjectIdentity) error
+}
+
 type InitiateUploadRequest struct {
 	Declaration UploadDeclaration
 	GrantID     string
@@ -59,7 +67,15 @@ type UploadReceipt struct {
 type Service struct {
 	declarations UploadDeclarationWriter
 	issuer       UploadCapabilityIssuer
+	verifier     UploadedObjectVerifier
+	binder       UploadedObjectBinder
 	now          func() time.Time
+}
+
+func NewWithCompletion(declarations UploadDeclarationWriter, issuer UploadCapabilityIssuer, verifier UploadedObjectVerifier, binder UploadedObjectBinder, now func() time.Time) *Service {
+	service := New(declarations, issuer, now)
+	service.verifier, service.binder = verifier, binder
+	return service
 }
 
 func New(declarations UploadDeclarationWriter, issuer UploadCapabilityIssuer, now func() time.Time) *Service {
@@ -95,4 +111,20 @@ func (service *Service) InitiateUpload(ctx context.Context, request InitiateUplo
 		return UploadReceipt{}, fmt.Errorf("issue direct upload capability: %w", ErrInvalidUploadRequest)
 	}
 	return UploadReceipt{Authorization: capability.Authorization, Object: capability.Object, ExpiresAt: capability.ExpiresAt.UTC()}, nil
+}
+
+// CompleteUpload verifies bytes through the data-plane adapter before it asks
+// persistence to bind the immutable receipt. There is no storage I/O inside
+// the binding transaction.
+func (service *Service) CompleteUpload(ctx context.Context, artifactID string, object artifact.ObjectIdentity) error {
+	if service == nil || service.verifier == nil || service.binder == nil || artifactID == "" || object.Provider() != artifact.ObjectProviderLocalV1 || object.VersionID() == "" {
+		return ErrInvalidUploadRequest
+	}
+	if err := service.verifier.VerifyObject(ctx, object); err != nil {
+		return fmt.Errorf("verify uploaded object: %w", err)
+	}
+	if err := service.binder.BindUploadedObject(ctx, artifactID, object); err != nil {
+		return fmt.Errorf("bind verified uploaded object: %w", err)
+	}
+	return nil
 }

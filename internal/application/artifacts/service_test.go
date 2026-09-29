@@ -86,3 +86,50 @@ func (issuer *capabilityIssuer) IssueUploadCapability(_ context.Context, request
 	}
 	return UploadCapability{Authorization: "opaque-grant", Object: object, ExpiresAt: request.ExpiresAt}, nil
 }
+
+func TestCompleteUploadVerifiesBeforeBinding(t *testing.T) {
+	metadata := testMetadata(t)
+	object, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/a.bin", "local-1", metadata.Size(), metadata.Digest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequence := []string{}
+	service := NewWithCompletion(nil, nil, verifierFunc(func(context.Context, artifact.ObjectIdentity) error {
+		sequence = append(sequence, "verify")
+		return nil
+	}), binderFunc(func(context.Context, string, artifact.ObjectIdentity) error {
+		sequence = append(sequence, "bind")
+		return nil
+	}), nil)
+	if err := service.CompleteUpload(context.Background(), "00000000-0000-0000-2401-000000000001", object); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(sequence, ",") != "verify,bind" {
+		t.Fatalf("sequence=%v", sequence)
+	}
+}
+
+func TestCompleteUploadDoesNotBindUnverifiedObject(t *testing.T) {
+	metadata := testMetadata(t)
+	object, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/a.bin", "local-1", metadata.Size(), metadata.Digest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binderCalls := 0
+	service := NewWithCompletion(nil, nil, verifierFunc(func(context.Context, artifact.ObjectIdentity) error { return errors.New("not present") }), binderFunc(func(context.Context, string, artifact.ObjectIdentity) error { binderCalls++; return nil }), nil)
+	if err := service.CompleteUpload(context.Background(), "00000000-0000-0000-2401-000000000001", object); err == nil || binderCalls != 0 {
+		t.Fatalf("err=%v binder=%d", err, binderCalls)
+	}
+}
+
+type verifierFunc func(context.Context, artifact.ObjectIdentity) error
+
+func (fn verifierFunc) VerifyObject(ctx context.Context, object artifact.ObjectIdentity) error {
+	return fn(ctx, object)
+}
+
+type binderFunc func(context.Context, string, artifact.ObjectIdentity) error
+
+func (fn binderFunc) BindUploadedObject(ctx context.Context, id string, object artifact.ObjectIdentity) error {
+	return fn(ctx, id, object)
+}

@@ -1,6 +1,7 @@
 package localartifactstore
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -235,6 +236,10 @@ func (store *DiskStore) Verify(identity artifact.ObjectIdentity) error {
 	}
 	defer reader.Close()
 	return artifact.VerifyContent(identity, reader)
+}
+
+func (store *DiskStore) VerifyObject(_ context.Context, identity artifact.ObjectIdentity) error {
+	return store.Verify(identity)
 }
 
 func (store *DiskStore) DeleteExact(identity artifact.ObjectIdentity) error {
