@@ -137,6 +137,21 @@ func (store *Store) Verify(identity artifact.ObjectIdentity) error {
 	return artifact.VerifyContent(identity, reader)
 }
 
+// DeleteExact removes only the supplied immutable provider/container/key/
+// version tuple. Callers must obtain this identity from an already-committed
+// workflow decision; the store intentionally exposes no list or broad-delete
+// operation that could remove verified or referenced versions by age alone.
+func (store *Store) DeleteExact(identity artifact.ObjectIdentity) error {
+	key := identityKey(identity)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if _, exists := store.versions[key]; !exists {
+		return ErrVersionAbsent
+	}
+	delete(store.versions, key)
+	return nil
+}
+
 func identityKey(identity artifact.ObjectIdentity) string {
 	return identity.Provider() + "\x00" + identity.Container() + "\x00" + identity.Key() + "\x00" + identity.VersionID()
 }

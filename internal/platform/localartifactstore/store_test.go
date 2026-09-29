@@ -84,3 +84,25 @@ func TestNewUploadGrantAssignsVersionOnlyAfterExactContentAccepted(t *testing.T)
 		t.Fatalf("bad content error=%v", err)
 	}
 }
+
+func TestDeleteExactCannotRemoveSiblingVersion(t *testing.T) {
+	digest, _ := value.ParseSHA256Digest("sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
+	first, _ := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "objects/shared.bin", "version-1", 11, digest)
+	second, _ := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "objects/shared.bin", "version-2", 11, digest)
+	store := New()
+	if err := store.PutBytes(first, []byte("hello world")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutBytes(second, []byte("hello world")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteExact(first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Open(first); !errors.Is(err, ErrVersionAbsent) {
+		t.Fatalf("deleted version open error=%v", err)
+	}
+	if err := store.Verify(second); err != nil {
+		t.Fatalf("sibling version verification=%v", err)
+	}
+}
