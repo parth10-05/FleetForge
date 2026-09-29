@@ -8,6 +8,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ArtifactCleanupIntent struct {
+	ArtifactID              pgtype.UUID        `json:"artifact_id"`
+	GrantID                 string             `json:"grant_id"`
+	ExpectedExpiredRevision int64              `json:"expected_expired_revision"`
+	State                   string             `json:"state"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	CompletedAt             pgtype.Timestamptz `json:"completed_at"`
+}
+
 type ArtifactHold struct {
 	ArtifactID      pgtype.UUID        `json:"artifact_id"`
 	CampaignID      pgtype.UUID        `json:"campaign_id"`
