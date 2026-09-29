@@ -29,12 +29,18 @@ WITH candidates AS (
      ORDER BY a.created_at ASC, a.id ASC
      LIMIT $2
      FOR UPDATE SKIP LOCKED
-)
+), expired AS (
 UPDATE firmware_artifacts artifact
    SET state = 'EXPIRED', revision = artifact.revision + 1, updated_at = now()
   FROM candidates
  WHERE artifact.id = candidates.id
- RETURNING artifact.id, artifact.upload_grant_id
+ RETURNING artifact.id, artifact.upload_grant_id, artifact.revision
+)
+INSERT INTO artifact_cleanup_intents (artifact_id, grant_id, expected_expired_revision)
+SELECT id, upload_grant_id, revision
+  FROM expired
+ON CONFLICT (artifact_id) DO NOTHING
+RETURNING artifact_id, grant_id
 `
 
 type ExpireAbandonedArtifactUploadsParams struct {
@@ -43,8 +49,8 @@ type ExpireAbandonedArtifactUploadsParams struct {
 }
 
 type ExpireAbandonedArtifactUploadsRow struct {
-	ID            pgtype.UUID `json:"id"`
-	UploadGrantID pgtype.Text `json:"upload_grant_id"`
+	ArtifactID pgtype.UUID `json:"artifact_id"`
+	GrantID    string      `json:"grant_id"`
 }
 
 // P02-Q33: expire-abandoned-artifact-uploads.sql
@@ -59,7 +65,7 @@ func (q *Queries) ExpireAbandonedArtifactUploads(ctx context.Context, arg Expire
 	items := []ExpireAbandonedArtifactUploadsRow{}
 	for rows.Next() {
 		var i ExpireAbandonedArtifactUploadsRow
-		if err := rows.Scan(&i.ID, &i.UploadGrantID); err != nil {
+		if err := rows.Scan(&i.ArtifactID, &i.GrantID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

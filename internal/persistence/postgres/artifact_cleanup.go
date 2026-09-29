@@ -34,14 +34,14 @@ func ExpireAbandonedArtifactUploads(ctx context.Context, pool *pgxpool.Pool, cut
 	}
 	result := make([]ExpiredUpload, 0, len(rows))
 	for _, row := range rows {
-		id, err := sqlcUUIDText(row.ID)
+		id, err := sqlcUUIDText(row.ArtifactID)
 		if err != nil {
 			return nil, err
 		}
-		if !row.UploadGrantID.Valid || row.UploadGrantID.String == "" {
+		if row.GrantID == "" {
 			return nil, fmt.Errorf("expired upload missing durable grant authority")
 		}
-		result = append(result, ExpiredUpload{ArtifactID: id, GrantID: row.UploadGrantID.String})
+		result = append(result, ExpiredUpload{ArtifactID: id, GrantID: row.GrantID})
 	}
 	return result, nil
 }

@@ -19,9 +19,15 @@ WITH candidates AS (
      ORDER BY a.created_at ASC, a.id ASC
      LIMIT $2
      FOR UPDATE SKIP LOCKED
-)
+), expired AS (
 UPDATE firmware_artifacts artifact
    SET state = 'EXPIRED', revision = artifact.revision + 1, updated_at = now()
   FROM candidates
  WHERE artifact.id = candidates.id
- RETURNING artifact.id, artifact.upload_grant_id;
+ RETURNING artifact.id, artifact.upload_grant_id, artifact.revision
+)
+INSERT INTO artifact_cleanup_intents (artifact_id, grant_id, expected_expired_revision)
+SELECT id, upload_grant_id, revision
+  FROM expired
+ON CONFLICT (artifact_id) DO NOTHING
+RETURNING artifact_id, grant_id;
