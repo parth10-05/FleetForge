@@ -1,6 +1,7 @@
 package localartifactstore
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,13 @@ func TestDiskStoreAcceptsOnlySignedExactGrant(t *testing.T) {
 	}
 	if _, err := store.PutSignedGrant(secret, grant, now, strings.NewReader("wrong bytes")); err == nil {
 		t.Fatal("grant replay accepted different bytes")
+	}
+	receipt, err := store.Receipt(claims.GrantID)
+	if err != nil || receipt.VersionID() != claims.VersionID || receipt.Key() != claims.Key {
+		t.Fatalf("grant-scoped receipt=%+v err=%v", receipt, err)
+	}
+	if _, err := store.Receipt("unknown-grant"); !errors.Is(err, ErrVersionAbsent) {
+		t.Fatalf("unknown receipt error=%v", err)
 	}
 }
 

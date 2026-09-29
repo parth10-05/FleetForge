@@ -252,6 +252,22 @@ func (store *DiskStore) VerifyObject(_ context.Context, identity artifact.Object
 	return store.Verify(identity)
 }
 
+// Receipt resolves one durable upload grant to the immutable version it
+// published. It has no key-prefix or broad-listing fallback, so a caller that
+// holds a cleanup intent cannot widen its deletion authority.
+func (store *DiskStore) Receipt(grantID string) (artifact.ObjectIdentity, error) {
+	if store == nil || grantID == "" {
+		return artifact.ObjectIdentity{}, ErrInvalidGrant
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	identity, exists := store.receipts[grantID]
+	if !exists {
+		return artifact.ObjectIdentity{}, ErrVersionAbsent
+	}
+	return identity, nil
+}
+
 // ReportOrphans compares physical immutable-version files with the committed
 // receipt index. It deliberately never changes either side: an unknown file
 // requires an explicit database-aware deletion workflow before it may be
