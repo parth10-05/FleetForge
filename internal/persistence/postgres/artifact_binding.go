@@ -28,12 +28,15 @@ func BindUploadedArtifactObject(ctx context.Context, pool *pgxpool.Pool, request
 		return fmt.Errorf("begin artifact binding: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	var state string
-	if err := tx.QueryRow(ctx, "SELECT state FROM firmware_artifacts WHERE id=$1::uuid FOR UPDATE", request.ArtifactID).Scan(&state); err != nil {
+	var state, declaredDigest, declaredKey string
+	if err := tx.QueryRow(ctx, "SELECT state,sha256_digest,object_reference FROM firmware_artifacts WHERE id=$1::uuid FOR UPDATE", request.ArtifactID).Scan(&state, &declaredDigest, &declaredKey); err != nil {
 		return fmt.Errorf("lock artifact: %w", err)
 	}
 	if state != "UPLOADING" && state != "UPLOADED" {
 		return fmt.Errorf("%w: artifact state %s", ErrArtifactBindingConflict, state)
+	}
+	if request.Object.Provider() != artifact.ObjectProviderLocalV1 || request.Object.Key() != declaredKey || request.Object.Digest().String() != declaredDigest {
+		return ErrArtifactBindingConflict
 	}
 	var existingVersion string
 	err = tx.QueryRow(ctx, "SELECT version_id FROM artifact_object_versions WHERE artifact_id=$1::uuid", request.ArtifactID).Scan(&existingVersion)

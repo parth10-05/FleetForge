@@ -20,12 +20,31 @@ func TestP02ArtifactBindingAndVerificationPersistOneImmutableResult(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	object, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/firmware.bin", "version-1", 3, digest)
+	const key = "artifacts/v1/firmware.bin"
+	object, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", key, "version-1", 3, digest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,state) VALUES ($1,'v1',$2,'pending','UPLOADING')", artifactID, digest.String()); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,state) VALUES ($1,'v1',$2,$3,'UPLOADING')", artifactID, digest.String(), key); err != nil {
 		t.Fatal(err)
+	}
+	wrongKey, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/other.bin", "version-1", 3, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistence.BindUploadedArtifactObject(ctx, pool, persistence.ArtifactBindingRequest{ArtifactID: artifactID, Object: wrongKey}); !errors.Is(err, persistence.ErrArtifactBindingConflict) {
+		t.Fatalf("wrong key binding error=%v", err)
+	}
+	wrongDigest, err := value.ParseSHA256Digest("sha256:" + strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongContent, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", key, "version-1", 3, wrongDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistence.BindUploadedArtifactObject(ctx, pool, persistence.ArtifactBindingRequest{ArtifactID: artifactID, Object: wrongContent}); !errors.Is(err, persistence.ErrArtifactBindingConflict) {
+		t.Fatalf("wrong digest binding error=%v", err)
 	}
 	if err := persistence.BindUploadedArtifactObject(ctx, pool, persistence.ArtifactBindingRequest{ArtifactID: artifactID, Object: object}); err != nil {
 		t.Fatal(err)
