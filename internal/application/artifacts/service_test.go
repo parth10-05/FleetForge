@@ -64,7 +64,7 @@ type declarationWriter struct {
 	calls int
 }
 
-func (writer *declarationWriter) InitiateUpload(context.Context, UploadDeclaration) (string, error) {
+func (writer *declarationWriter) InitiateUpload(context.Context, UploadDeclaration, string) (string, error) {
 	writer.calls++
 	return writer.key, writer.err
 }

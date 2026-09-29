@@ -22,7 +22,7 @@ func TestP02ArtifactUploadInitiationReservesGeneratedKeyIdempotently(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := persistence.ArtifactUploadInitiation{ArtifactID: "00000000-0000-0000-2901-000000000001", FirmwareVersion: "v1", Metadata: metadata}
+	request := persistence.ArtifactUploadInitiation{ArtifactID: "00000000-0000-0000-2901-000000000001", FirmwareVersion: "v1", Metadata: metadata, GrantID: "grant-initiation-1"}
 	key, err := persistence.InitiateArtifactUpload(ctx, pool, request)
 	if err != nil || key != "artifacts/v1/00000000-0000-0000-2901-000000000001.bin" {
 		t.Fatalf("key=%q err=%v", key, err)

@@ -12,8 +12,8 @@ import (
 )
 
 const initiateArtifactUpload = `-- name: InitiateArtifactUpload :one
-INSERT INTO firmware_artifacts (id, firmware_version, sha256_digest, object_reference, state)
-VALUES ($1, $2, $3, $4, 'UPLOADING')
+INSERT INTO firmware_artifacts (id, firmware_version, sha256_digest, object_reference, upload_grant_id, state)
+VALUES ($1, $2, $3, $4, $5, 'UPLOADING')
 ON CONFLICT (id) DO NOTHING
 RETURNING id
 `
@@ -23,6 +23,7 @@ type InitiateArtifactUploadParams struct {
 	FirmwareVersion string      `json:"firmware_version"`
 	Sha256Digest    string      `json:"sha256_digest"`
 	ObjectReference string      `json:"object_reference"`
+	UploadGrantID   pgtype.Text `json:"upload_grant_id"`
 }
 
 // P02-Q34: initiate-artifact-upload.sql
@@ -35,6 +36,7 @@ func (q *Queries) InitiateArtifactUpload(ctx context.Context, arg InitiateArtifa
 		arg.FirmwareVersion,
 		arg.Sha256Digest,
 		arg.ObjectReference,
+		arg.UploadGrantID,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)

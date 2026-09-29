@@ -12,9 +12,9 @@ import (
 // serializable P02 persistence transaction.
 type ArtifactUploadAdapter struct{ Pool *pgxpool.Pool }
 
-func (adapter ArtifactUploadAdapter) InitiateUpload(ctx context.Context, declaration app.UploadDeclaration) (string, error) {
+func (adapter ArtifactUploadAdapter) InitiateUpload(ctx context.Context, declaration app.UploadDeclaration, grantID string) (string, error) {
 	if adapter.Pool == nil {
 		return "", fmt.Errorf("artifact upload persistence is unavailable")
 	}
-	return InitiateArtifactUpload(ctx, adapter.Pool, ArtifactUploadInitiation{ArtifactID: declaration.ArtifactID, FirmwareVersion: declaration.FirmwareVersion, Metadata: declaration.Metadata})
+	return InitiateArtifactUpload(ctx, adapter.Pool, ArtifactUploadInitiation{ArtifactID: declaration.ArtifactID, FirmwareVersion: declaration.FirmwareVersion, Metadata: declaration.Metadata, GrantID: grantID})
 }

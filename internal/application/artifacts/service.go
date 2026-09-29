@@ -20,7 +20,7 @@ type UploadDeclaration struct {
 }
 
 type UploadDeclarationWriter interface {
-	InitiateUpload(context.Context, UploadDeclaration) (string, error)
+	InitiateUpload(context.Context, UploadDeclaration, string) (string, error)
 }
 
 // UploadCapabilityRequest contains only the exact facts a direct capability
@@ -112,7 +112,7 @@ func (service *Service) InitiateUpload(ctx context.Context, request InitiateUplo
 	if now.IsZero() || !request.ExpiresAt.After(now) || request.ExpiresAt.After(now.Add(5*time.Minute)) {
 		return UploadReceipt{}, ErrInvalidUploadRequest
 	}
-	key, err := service.declarations.InitiateUpload(ctx, request.Declaration)
+	key, err := service.declarations.InitiateUpload(ctx, request.Declaration, request.GrantID)
 	if err != nil {
 		return UploadReceipt{}, fmt.Errorf("reserve artifact upload: %w", err)
 	}

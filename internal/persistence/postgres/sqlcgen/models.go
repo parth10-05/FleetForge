@@ -147,6 +147,7 @@ type FirmwareArtifact struct {
 	Revision        int64              `json:"revision"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	UploadGrantID   pgtype.Text        `json:"upload_grant_id"`
 }
 
 type IdempotencyRecord struct {
