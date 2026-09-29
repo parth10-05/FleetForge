@@ -17,7 +17,7 @@ claim.
 | T07 frozen preflight | `internal/domain/preflight`, application evaluator, PostgreSQL candidate writer, Q32 drift report | Implemented locally | Runnable composition and real PostgreSQL execution remain required. |
 | T08 readiness recheck | strengthened `AcquireReadinessEnrollment` active/quarantine checks | Partial | P03-owned campaign construction and candidate/artifact/freshness recheck wiring remain open. |
 | T09 artifact identity/lifecycle | `internal/domain/artifact`, migrations 00008/00010, immutable guards | Implemented locally | Real PostgreSQL migration/guard execution remains required. |
-| T10 direct upload | upload initiation Q34; `localartifactstore` signed, persisted grant receipts; `localobjecthttp`; `cmd/local-object-store` | Implemented locally | The control-plane issuance/binding transaction and a real PostgreSQL-backed end-to-end proof remain open. |
+| T10 direct upload | Q34; artifact upload application/PG adapters; signed artifact-bound grants; durable `localartifactstore`; `localobjecthttp`; `cmd/local-object-store` completion composition | Implemented locally | A process-level listener-to-Neon component run and final retained evidence remain open. |
 | T11 verification work | bounded verifier, atomic `UPLOADED -> VERIFYING` plus due work, exact tuple fence | Implemented locally | Worker lease/stream/result composition and tagged database execution remain open. |
 | T12 stable eligibility | immutable verification result, retirement and preflight-state gates | Partial | Readiness transaction must consume these rechecks in the P03 boundary. |
 | T13 compatibility | exact synthetic family policy and frozen per-target decision | Implemented locally | Final component proof against all required target profiles remains open. |
@@ -31,12 +31,13 @@ claim.
 - The tagged PostgreSQL package compiles with
   `go test -tags postgresintegration -run '^$' ./test/integration/postgres`.
 - `go test -count=1 ./cmd/local-object-store ./internal/platform/config ./internal/delivery/localobjecthttp ./internal/platform/localartifactstore` passed, including a listener composition test and durable signed-grant receipt recovery after reopening the disk store.
+- `TestP02ArtifactUploadCapabilityReservesDatabaseKeyBeforeSigning` passed against a generated isolated Neon schema: durable key reservation, signed artifact-bound capability, direct disk upload, exact streamed verification, and immutable PostgreSQL binding.
 
 ## Unexecuted or deferred gates
 
-- The real tagged PostgreSQL suite requires `FLEETFORGE_TEST_POSTGRES_DSN`.
-  A direct local execution was attempted and failed solely because that
-  required DSN was absent; this is not passing database evidence.
+- The complete tagged PostgreSQL suite has not yet been retained at the final
+  integration SHA. Focused P02 artifact lifecycle and direct-upload tests have
+  passed against generated isolated Neon schemas.
 - The direct object-store listener is locally implemented, but no real
   PostgreSQL-backed control-plane-to-listener flow or P03 operator-facing
   campaign readiness flow has been declared complete.
