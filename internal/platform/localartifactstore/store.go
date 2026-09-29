@@ -5,11 +5,13 @@ package localartifactstore
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
 
 	"github.com/parth10-05/fleetforge/internal/domain/artifact"
+	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
 
 var (
@@ -19,15 +21,23 @@ var (
 )
 
 type Store struct {
-	mu       sync.RWMutex
-	versions map[string][]byte
+	mu          sync.RWMutex
+	versions    map[string][]byte
+	nextVersion uint64
 }
 
 // UploadGrant is an opaque, one-object local direct-upload authorization.
 // Its identity is intentionally not reconstructable by callers.
 type UploadGrant struct {
 	identity  artifact.ObjectIdentity
+	pending   *pendingUpload
 	expiresAt time.Time
+}
+
+type pendingUpload struct {
+	provider, container, key string
+	size                     int64
+	digest                   value.SHA256Digest
 }
 
 func (store *Store) AuthorizeUpload(identity artifact.ObjectIdentity, now, expiresAt time.Time) (UploadGrant, error) {
@@ -42,6 +52,36 @@ func (store *Store) PutAuthorized(grant UploadGrant, now time.Time, source io.Re
 		return ErrUploadGrantExpired
 	}
 	return store.Put(grant.identity, source)
+}
+
+// AuthorizeNewUpload grants one exact new object key without preassigning a
+// version ID. The version is assigned only by PutAuthorizedNew after content
+// validation, matching a versioned object-store upload receipt.
+func (store *Store) AuthorizeNewUpload(provider, container, key string, size int64, digest value.SHA256Digest, now, expiresAt time.Time) (UploadGrant, error) {
+	if now.IsZero() || !expiresAt.After(now) {
+		return UploadGrant{}, ErrUploadGrantExpired
+	}
+	if _, err := artifact.NewObjectIdentity(provider, container, key, "pending", size, digest); err != nil {
+		return UploadGrant{}, err
+	}
+	return UploadGrant{pending: &pendingUpload{provider: provider, container: container, key: key, size: size, digest: digest}, expiresAt: expiresAt.UTC()}, nil
+}
+
+// PutAuthorizedNew writes exactly one authorized object and returns the
+// provider-assigned immutable identity. The caller cannot select the version.
+func (store *Store) PutAuthorizedNew(grant UploadGrant, now time.Time, source io.Reader) (artifact.ObjectIdentity, error) {
+	if grant.pending == nil || now.IsZero() || !now.Before(grant.expiresAt) {
+		return artifact.ObjectIdentity{}, ErrUploadGrantExpired
+	}
+	versionID := store.allocateVersionID()
+	identity, err := artifact.NewObjectIdentity(grant.pending.provider, grant.pending.container, grant.pending.key, versionID, grant.pending.size, grant.pending.digest)
+	if err != nil {
+		return artifact.ObjectIdentity{}, err
+	}
+	if err := store.Put(identity, source); err != nil {
+		return artifact.ObjectIdentity{}, err
+	}
+	return identity, nil
 }
 
 func New() *Store { return &Store{versions: make(map[string][]byte)} }
@@ -99,4 +139,11 @@ func (store *Store) Verify(identity artifact.ObjectIdentity) error {
 
 func identityKey(identity artifact.ObjectIdentity) string {
 	return identity.Provider() + "\x00" + identity.Container() + "\x00" + identity.Key() + "\x00" + identity.VersionID()
+}
+
+func (store *Store) allocateVersionID() string {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.nextVersion++
+	return fmt.Sprintf("local-%020d", store.nextVersion)
 }

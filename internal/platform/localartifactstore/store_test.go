@@ -60,3 +60,27 @@ func TestUploadGrantExpiresBeforeObjectWrite(t *testing.T) {
 		t.Fatalf("expired grant error=%v", err)
 	}
 }
+
+func TestNewUploadGrantAssignsVersionOnlyAfterExactContentAccepted(t *testing.T) {
+	digest, _ := value.ParseSHA256Digest("sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
+	store := New()
+	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+	grant, err := store.AuthorizeNewUpload(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/new.bin", 11, digest, now, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := store.PutAuthorizedNew(grant, now, strings.NewReader("hello world"))
+	if err != nil || identity.VersionID() == "" || identity.VersionID() == "pending" {
+		t.Fatalf("identity=%+v err=%v", identity, err)
+	}
+	if err := store.Verify(identity); err != nil {
+		t.Fatal(err)
+	}
+	badGrant, err := store.AuthorizeNewUpload(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/bad.bin", 11, digest, now, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PutAuthorizedNew(badGrant, now, strings.NewReader("wrong bytes")); !errors.Is(err, artifact.ErrObjectDigestMismatch) {
+		t.Fatalf("bad content error=%v", err)
+	}
+}
