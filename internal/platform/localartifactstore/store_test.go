@@ -3,6 +3,8 @@ package localartifactstore
 import (
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -137,5 +139,31 @@ func TestDiskStorePublishesOnlyVerifiedExactVersion(t *testing.T) {
 		t.Fatal(err)
 	} else {
 		reader.Close()
+	}
+}
+
+func TestDiskStoreReportOrphansIsBoundedAndReadOnly(t *testing.T) {
+	digest, _ := value.ParseSHA256Digest("sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
+	identity, _ := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "objects/report.bin", "version-1", 11, digest)
+	store, err := OpenDisk(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(identity, strings.NewReader("hello world")); err != nil {
+		t.Fatal(err)
+	}
+	store.receipts["known-grant"] = identity
+	if err := os.WriteFile(filepath.Join(store.root, "uncommitted.object"), []byte("orphan"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := store.ReportOrphans(1)
+	if err != nil || report.Truncated || len(report.UnknownObjectFiles) != 1 || report.UnknownObjectFiles[0] != "uncommitted.object" {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if _, err := os.Stat(filepath.Join(store.root, "uncommitted.object")); err != nil {
+		t.Fatalf("report mutated orphan: %v", err)
+	}
+	if _, err := store.ReportOrphans(maxOrphanReportPage + 1); err == nil {
+		t.Fatal("expected invalid report limit")
 	}
 }

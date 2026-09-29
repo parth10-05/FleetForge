@@ -27,6 +27,16 @@ type DiskStore struct {
 
 const receiptsFilename = ".fleetforge-upload-receipts.json"
 
+const maxOrphanReportPage = 100
+
+// OrphanReport is a bounded, read-only diagnostic view of physical version
+// files which have no committed upload receipt. File names are content-safe
+// opaque hashes, not client-controlled paths or object keys.
+type OrphanReport struct {
+	UnknownObjectFiles []string
+	Truncated          bool
+}
+
 // PutSignedGrant verifies the capability before deriving the only object
 // identity accepted for publication. The request body cannot choose a path,
 // version, digest, or size independently of the signed grant.
@@ -240,6 +250,42 @@ func (store *DiskStore) Verify(identity artifact.ObjectIdentity) error {
 
 func (store *DiskStore) VerifyObject(_ context.Context, identity artifact.ObjectIdentity) error {
 	return store.Verify(identity)
+}
+
+// ReportOrphans compares physical immutable-version files with the committed
+// receipt index. It deliberately never changes either side: an unknown file
+// requires an explicit database-aware deletion workflow before it may be
+// removed. The report is bounded so diagnostics cannot scan unbounded storage.
+func (store *DiskStore) ReportOrphans(limit int) (OrphanReport, error) {
+	if store == nil || limit <= 0 || limit > maxOrphanReportPage {
+		return OrphanReport{}, errors.New("invalid orphan report limit")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	known := make(map[string]struct{}, len(store.receipts))
+	for _, identity := range store.receipts {
+		known[filepath.Base(store.path(identity))] = struct{}{}
+	}
+	entries, err := os.ReadDir(store.root)
+	if err != nil {
+		return OrphanReport{}, err
+	}
+	report := OrphanReport{UnknownObjectFiles: make([]string, 0, limit)}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".object" {
+			continue
+		}
+		if _, exists := known[entry.Name()]; exists {
+			continue
+		}
+		if len(report.UnknownObjectFiles) == limit {
+			report.Truncated = true
+			break
+		}
+		report.UnknownObjectFiles = append(report.UnknownObjectFiles, entry.Name())
+	}
+	return report, nil
 }
 
 func (store *DiskStore) DeleteExact(identity artifact.ObjectIdentity) error {
