@@ -124,6 +124,9 @@ func TestDiskStorePublishesOnlyVerifiedExactVersion(t *testing.T) {
 	if err := store.Put(first, strings.NewReader("hello world")); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.Verify(first); err != nil {
+		t.Fatalf("exact disk verification=%v", err)
+	}
 	if err := store.Put(second, strings.NewReader("hello world")); err != nil {
 		t.Fatal(err)
 	}

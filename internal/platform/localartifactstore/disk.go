@@ -226,6 +226,17 @@ func (store *DiskStore) Open(identity artifact.ObjectIdentity) (io.ReadCloser, e
 	return file, err
 }
 
+// Verify reopens only the exact immutable version and streams it through the
+// domain verifier. It exposes neither a directory nor a mutable object key.
+func (store *DiskStore) Verify(identity artifact.ObjectIdentity) error {
+	reader, err := store.Open(identity)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	return artifact.VerifyContent(identity, reader)
+}
+
 func (store *DiskStore) DeleteExact(identity artifact.ObjectIdentity) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
