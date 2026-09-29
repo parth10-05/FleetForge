@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
@@ -24,6 +25,31 @@ func TestLoadValidRoleConfigurations(t *testing.T) {
 	}
 	if _, err := LoadSimulator(); err != nil {
 		t.Fatalf("LoadSimulator() error = %v", err)
+	}
+}
+
+func TestLoadObjectStoreUsesDedicatedBoundedConfiguration(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")
+	t.Setenv(objectStoreRootKey, t.TempDir())
+	t.Setenv(objectStoreHMACSecretKey, base64.RawStdEncoding.EncodeToString([]byte("01234567890123456789012345678901")))
+	loaded, err := LoadObjectStore()
+	if err != nil {
+		t.Fatalf("LoadObjectStore() error = %v", err)
+	}
+	if loaded.Address != "127.0.0.1:8090" || len(loaded.HMACKey) != 32 {
+		t.Fatalf("LoadObjectStore() = %#v, want validated listener settings", loaded)
+	}
+}
+
+func TestLoadObjectStoreRedactsInvalidSecret(t *testing.T) {
+	const secret = "credential-that-must-not-appear"
+	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")
+	t.Setenv(objectStoreRootKey, t.TempDir())
+	t.Setenv(objectStoreHMACSecretKey, secret)
+	_, err := LoadObjectStore()
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("LoadObjectStore() error = %v, want redacted failure", err)
 	}
 }
 

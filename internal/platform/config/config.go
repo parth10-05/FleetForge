@@ -2,10 +2,12 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,9 @@ const (
 	simulatorPasswordKey              = "FLEETFORGE_SIMULATOR_PASSWORD"
 	simulatorAdminAddressKey          = "FLEETFORGE_SIMULATOR_ADMIN_ADDR"
 	simulatorAdminSecretKey           = "FLEETFORGE_SIMULATOR_ADMIN_SECRET"
+	objectStoreAddressKey             = "FLEETFORGE_OBJECT_STORE_ADDR"
+	objectStoreRootKey                = "FLEETFORGE_OBJECT_STORE_ROOT"
+	objectStoreHMACSecretKey          = "FLEETFORGE_OBJECT_STORE_HMAC_SECRET"
 	postgresApplicationDSNKey         = "FLEETFORGE_POSTGRES_APP_DSN"
 	postgresMigrationDSNKey           = "FLEETFORGE_POSTGRES_MIGRATION_DSN"
 	postgresApplicationDSNFallbackKey = "DATABASE_URL"
@@ -54,6 +59,12 @@ type Worker struct{ Common }
 type Simulator struct {
 	Common
 	Address, RunRoot, ScenarioPath, Username, Password, AdminAddress, AdminSecret string
+}
+type ObjectStore struct {
+	Common
+	Address string
+	Root    string
+	HMACKey []byte
 }
 
 // PostgreSQL holds bounded, role-specific database settings. DSNs are opaque
@@ -126,6 +137,29 @@ func LoadSimulator() (Simulator, error) {
 		return Simulator{}, &Error{Key: simulatorAdminSecretKey, Reason: "is required"}
 	}
 	return Simulator{Common: common, Address: address, RunRoot: runRoot, ScenarioPath: scenarioPath, Username: username, Password: password, AdminAddress: adminAddress, AdminSecret: adminSecret}, nil
+}
+
+// LoadObjectStore configures the independent local data-plane listener. Its
+// HMAC key is decoded only for process use and must never be logged.
+func LoadObjectStore() (ObjectStore, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	address, err := requiredAddress(os.LookupEnv, objectStoreAddressKey)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	root, err := requiredAbsolutePath(os.LookupEnv, objectStoreRootKey)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	encoded := optional(os.LookupEnv, objectStoreHMACSecretKey, "")
+	key, err := base64.RawStdEncoding.DecodeString(encoded)
+	if encoded == "" || err != nil || len(key) < 32 {
+		return ObjectStore{}, &Error{Key: objectStoreHMACSecretKey, Reason: "must be base64 and decode to at least 32 bytes"}
+	}
+	return ObjectStore{Common: common, Address: address, Root: root, HMACKey: key}, nil
 }
 
 // LoadPostgreSQL is opt-in: Phase 01 process startup does not call it, so
@@ -232,6 +266,16 @@ func requiredPath(lookup lookupEnv, key string) (string, error) {
 		return "", &Error{Key: key, Reason: "is required"}
 	}
 	return value, nil
+}
+func requiredAbsolutePath(lookup lookupEnv, key string) (string, error) {
+	value, err := requiredPath(lookup, key)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(value) {
+		return "", &Error{Key: key, Reason: "must be an absolute path"}
+	}
+	return filepath.Clean(value), nil
 }
 func requiredPostgresDSN(lookup lookupEnv, key string) (string, error) {
 	value, ok := lookup(key)
