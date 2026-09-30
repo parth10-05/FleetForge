@@ -128,6 +128,30 @@ func TestP02DiscoveryStopsAfterThreeRetryableAttempts(t *testing.T) {
 	}
 }
 
+func TestP02DiscoveryLeaseRepairCompletesExhaustedAttemptBudget(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	const targetID = "00000000-0000-0000-2805-000000000001"
+	const workID = "00000000-0000-0000-2805-000000000002"
+	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,'exhausted-repair-target','endpoint','site','rack','ACTIVE')", targetID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 30, 0, 4, 0, 0, time.UTC)
+	if ok, err := persistence.ScheduleDiscovery(ctx, pool, persistence.DiscoveryScheduleRequest{WorkID: workID, CommandID: "00000000-0000-0000-2805-000000000003", TargetID: targetID, TargetRevision: 0, NotBefore: now}); err != nil || !ok {
+		t.Fatalf("schedule discovery=%v err=%v", ok, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE due_work SET delivery_state='CLAIMED',discovery_attempts=3,lease_token='00000000-0000-0000-2805-000000000004',lease_owner='crashed-worker',lease_expires_at=$2 WHERE id=$1", workID, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := persistence.RepairExpiredDueWork(ctx, pool, now, 1)
+	if err != nil || len(repaired) != 1 || repaired[0] != workID {
+		t.Fatalf("repair=%v err=%v", repaired, err)
+	}
+	var state string
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1", workID).Scan(&state); err != nil || state != "COMPLETED" {
+		t.Fatalf("repaired discovery state=%q err=%v", state, err)
+	}
+}
+
 type fixedDiscoveryExecutor struct{ result app.DiscoveryResult }
 
 func (e fixedDiscoveryExecutor) Discover(context.Context, app.DiscoveryWork) (app.DiscoveryResult, error) {
