@@ -80,7 +80,21 @@ WHERE id=$1::uuid AND delivery_state='PENDING'`, work.ID, request.LeaseToken, re
 }
 
 func (adapter DiscoveryWorkAdapter) RecordDiscoveryResult(ctx context.Context, work app.DiscoveryWork, result app.DiscoveryResult) error {
-	if adapter.Pool == nil || work.ID == "" || work.TargetID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 || result.ObservationID == "" || result.ObservedAt.IsZero() || len(result.Normalized) == 0 || len(result.Normalized) > 32768 || !json.Valid(result.Normalized) {
+	return adapter.persistDiscoveryResult(ctx, work, result, result.ObservedAt, nil)
+}
+
+// RecordDiscoveryRetry retains a normalized retryable failure and releases the
+// exact lease in one transaction. A crash therefore cannot leave the latest
+// failure evidence committed while the old lease remains live.
+func (adapter DiscoveryWorkAdapter) RecordDiscoveryRetry(ctx context.Context, work app.DiscoveryWork, result app.DiscoveryResult, now, retryAt time.Time) error {
+	if now.IsZero() || retryAt.IsZero() || retryAt.Before(now) {
+		return fmt.Errorf("invalid discovery retry time")
+	}
+	return adapter.persistDiscoveryResult(ctx, work, result, now, &retryAt)
+}
+
+func (adapter DiscoveryWorkAdapter) persistDiscoveryResult(ctx context.Context, work app.DiscoveryWork, result app.DiscoveryResult, finishedAt time.Time, retryAt *time.Time) error {
+	if adapter.Pool == nil || work.ID == "" || work.TargetID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 || result.ObservationID == "" || result.ObservedAt.IsZero() || finishedAt.IsZero() || len(result.Normalized) == 0 || len(result.Normalized) > 32768 || !json.Valid(result.Normalized) {
 		return fmt.Errorf("invalid discovery result persistence request")
 	}
 	var object map[string]json.RawMessage
@@ -143,11 +157,20 @@ ON CONFLICT (target_id) DO UPDATE SET
 	if err != nil {
 		return fmt.Errorf("advance discovery head: %w", err)
 	}
-	tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',
+	var tag pgconnCommandTag
+	if retryAt == nil {
+		tag, err = tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',
     lease_token=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=$5
 WHERE id=$1::uuid AND subject_type='TARGET' AND subject_id=$2::uuid
   AND work_type='DISCOVER' AND delivery_state='CLAIMED' AND lease_token=$3::uuid
-  AND expected_revision=$4 AND expected_command_epoch IS NULL`, work.ID, work.TargetID, work.LeaseToken, work.ExpectedRevision, result.ObservedAt.UTC())
+& expected_revision=$4 AND expected_command_epoch IS NULL`, work.ID, work.TargetID, work.LeaseToken, work.ExpectedRevision, finishedAt.UTC())
+	} else {
+		tag, err = tx.Exec(ctx, `UPDATE due_work SET delivery_state='PENDING', not_before=$5,
+    lease_token=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=$6
+WHERE id=$1::uuid AND subject_type='TARGET' AND subject_id=$2::uuid
+  AND work_type='DISCOVER' AND delivery_state='CLAIMED' AND lease_token=$3::uuid
+  AND expected_revision=$4 AND expected_command_epoch IS NULL`, work.ID, work.TargetID, work.LeaseToken, work.ExpectedRevision, retryAt.UTC(), finishedAt.UTC())
+	}
 	if err != nil {
 		return fmt.Errorf("complete discovery work: %w", err)
 	}

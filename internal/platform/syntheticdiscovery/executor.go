@@ -52,7 +52,11 @@ func (executor Executor) Discover(ctx context.Context, work app.DiscoveryWork) (
 	if err != nil {
 		var discoveryError redfish.DiscoveryError
 		if errors.As(err, &discoveryError) && discoveryError.Kind.Retryable() {
-			return app.DiscoveryResult{}, err
+			result, resultErr := executor.failureResult(string(discoveryError.Kind))
+			if resultErr != nil {
+				return app.DiscoveryResult{}, resultErr
+			}
+			return result, err
 		}
 		kind := "unavailable"
 		if errors.As(err, &discoveryError) {

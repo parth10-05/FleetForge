@@ -44,6 +44,7 @@ type DiscoveryExecutor interface {
 }
 type DiscoveryResultWriter interface {
 	RecordDiscoveryResult(context.Context, DiscoveryWork, DiscoveryResult) error
+	RecordDiscoveryRetry(context.Context, DiscoveryWork, DiscoveryResult, time.Time, time.Time) error
 	RetryDiscoveryWork(context.Context, DiscoveryWork, time.Time, time.Time) error
 }
 
@@ -66,13 +67,20 @@ func RunDiscoveryOnce(ctx context.Context, claimer DiscoveryWorkClaimer, executo
 	}
 	result, err := executor.Discover(ctx, *work)
 	if err != nil {
+		if validDiscoveryResult(result) {
+			return true, writer.RecordDiscoveryRetry(ctx, *work, result, request.Now, retryAt)
+		}
 		return true, writer.RetryDiscoveryWork(ctx, *work, request.Now, retryAt)
 	}
-	if result.ObservationID == "" || result.ObservedAt.IsZero() || len(result.Normalized) == 0 {
+	if !validDiscoveryResult(result) {
 		return true, fmt.Errorf("invalid discovery result")
 	}
 	if err := writer.RecordDiscoveryResult(ctx, *work, result); err != nil {
 		return true, fmt.Errorf("record discovery result: %w", err)
 	}
 	return true, nil
+}
+
+func validDiscoveryResult(result DiscoveryResult) bool {
+	return result.ObservationID != "" && !result.ObservedAt.IsZero() && len(result.Normalized) != 0
 }

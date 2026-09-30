@@ -67,8 +67,40 @@ func TestP02DiscoveryResultRejectsStaleLeaseWithoutPersistingEvidence(t *testing
 	}
 }
 
+func TestP02DiscoveryRetryAtomicallyPersistsFailureAndReleasesLease(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	const targetID = "00000000-0000-0000-2803-000000000001"
+	const workID = "00000000-0000-0000-2803-000000000002"
+	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,'retry-worker-target','endpoint','site','rack','ACTIVE')", targetID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 30, 0, 2, 0, 0, time.UTC)
+	if ok, err := persistence.ScheduleDiscovery(ctx, pool, persistence.DiscoveryScheduleRequest{WorkID: workID, CommandID: "00000000-0000-0000-2803-000000000003", TargetID: targetID, TargetRevision: 0, NotBefore: now}); err != nil || !ok {
+		t.Fatalf("schedule discovery=%v err=%v", ok, err)
+	}
+	adapter := persistence.DiscoveryWorkAdapter{Pool: pool}
+	processed, err := app.RunDiscoveryOnce(ctx, adapter, retryingDiscoveryExecutor{result: app.DiscoveryResult{ObservationID: "00000000-0000-0000-2803-000000000004", ObservedAt: now, Normalized: []byte(`{"error_kind":"timeout"}`)}}, adapter, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: "00000000-0000-0000-2803-000000000005", Now: now, LeaseExpiresAt: now.Add(30 * time.Second)}, now.Add(time.Second))
+	if err != nil || !processed {
+		t.Fatalf("run discovery retry processed=%v err=%v", processed, err)
+	}
+	var state, latest string
+	var lastGoodMissing bool
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1", workID).Scan(&state); err != nil || state != "PENDING" {
+		t.Fatalf("retry work state=%q err=%v", state, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT latest_attempt_id::text,last_good_id IS NULL FROM target_discovery_heads WHERE target_id=$1", targetID).Scan(&latest, &lastGoodMissing); err != nil || latest != "00000000-0000-0000-2803-000000000004" || !lastGoodMissing {
+		t.Fatalf("retry head latest=%q lastGoodMissing=%v err=%v", latest, lastGoodMissing, err)
+	}
+}
+
 type fixedDiscoveryExecutor struct{ result app.DiscoveryResult }
 
 func (e fixedDiscoveryExecutor) Discover(context.Context, app.DiscoveryWork) (app.DiscoveryResult, error) {
 	return e.result, nil
+}
+
+type retryingDiscoveryExecutor struct{ result app.DiscoveryResult }
+
+func (e retryingDiscoveryExecutor) Discover(context.Context, app.DiscoveryWork) (app.DiscoveryResult, error) {
+	return e.result, errors.New("timeout")
 }
