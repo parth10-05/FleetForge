@@ -3,6 +3,7 @@
 package postgres
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,7 @@ func TestP02CleanupExpiresOnlyOldUnboundUploadingArtifacts(t *testing.T) {
 	if err != nil || claim == nil || claim.ArtifactID != expiredID || claim.GrantID != "cleanup-grant-1" {
 		t.Fatalf("cleanup claim=%+v err=%v", claim, err)
 	}
+	staleClaim := *claim
 	repaired, err := persistence.RepairExpiredArtifactCleanupIntents(ctx, pool, now.Add(2*time.Minute), 1)
 	if err != nil || len(repaired) != 1 || repaired[0] != expiredID {
 		t.Fatalf("repair=%v err=%v", repaired, err)
@@ -46,6 +48,9 @@ func TestP02CleanupExpiresOnlyOldUnboundUploadingArtifacts(t *testing.T) {
 	claim, err = persistence.ClaimArtifactCleanupIntent(ctx, pool, "recovery-worker", "00000000-0000-0000-2801-000000000098", now.Add(2*time.Minute), now.Add(3*time.Minute))
 	if err != nil || claim == nil || claim.ArtifactID != expiredID || claim.GrantID != "cleanup-grant-1" {
 		t.Fatalf("reclaimed cleanup intent=%+v err=%v", claim, err)
+	}
+	if err := persistence.CompleteArtifactCleanupIntent(ctx, pool, staleClaim, now.Add(2*time.Minute)); !errors.Is(err, persistence.ErrLeaseConflict) {
+		t.Fatalf("stale cleanup completion error=%v", err)
 	}
 	if err := persistence.CompleteArtifactCleanupIntent(ctx, pool, *claim, now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("complete cleanup intent: %v", err)
