@@ -28,7 +28,7 @@ func TestMigrationCompatibilityEmptyAndLastSupportedReachLatest(t *testing.T) {
 		t.Fatalf("migrate empty schema: %v", err)
 	}
 	freshFingerprint := schemaFingerprint(t, freshHarness, ctx)
-	assertMigrationVersion(t, freshHarness, ctx, 12)
+	assertMigrationVersion(t, freshHarness, ctx, 15)
 
 	upgradeHarness := New(t)
 	settings := integrationSettings(upgradeHarness.ScopedDSN(t))
@@ -37,7 +37,7 @@ func TestMigrationCompatibilityEmptyAndLastSupportedReachLatest(t *testing.T) {
 	if err := persistence.RunMigrations(ctx, settings, migrationFiles()); err != nil {
 		t.Fatalf("upgrade last supported schema: %v", err)
 	}
-	assertMigrationVersion(t, upgradeHarness, ctx, 12)
+	assertMigrationVersion(t, upgradeHarness, ctx, 15)
 	if upgradedFingerprint := schemaFingerprint(t, upgradeHarness, ctx); upgradedFingerprint != freshFingerprint {
 		t.Fatalf("upgraded schema fingerprint = %s, want %s from empty-to-latest migration", upgradedFingerprint, freshFingerprint)
 	}
@@ -65,7 +65,7 @@ func TestConcurrentMigrationRunnersReachOneStableLatestSchema(t *testing.T) {
 			t.Fatalf("concurrent migration runner: %v", err)
 		}
 	}
-	assertMigrationVersion(t, harness, context.Background(), 12)
+	assertMigrationVersion(t, harness, context.Background(), 15)
 	if fingerprint := schemaFingerprint(t, harness, context.Background()); fingerprint == "" {
 		t.Fatal("latest schema fingerprint is empty")
 	}

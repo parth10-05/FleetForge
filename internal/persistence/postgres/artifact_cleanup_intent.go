@@ -15,6 +15,8 @@ type CleanupIntentClaim struct {
 	LeaseToken string
 }
 
+const maxArtifactCleanupRepairBatch = 25
+
 // ClaimArtifactCleanupIntent obtains one bounded, fenced deletion authority.
 // It does not resolve storage receipts or issue any external I/O.
 func ClaimArtifactCleanupIntent(ctx context.Context, pool *pgxpool.Pool, owner, leaseToken string, now, expiresAt time.Time) (*CleanupIntentClaim, error) {
@@ -62,4 +64,56 @@ func CompleteArtifactCleanupIntent(ctx context.Context, pool *pgxpool.Pool, clai
 		return ErrLeaseConflict
 	}
 	return nil
+}
+
+// RepairExpiredArtifactCleanupIntents restores only abandoned cleanup leases
+// to PENDING. It does not touch artifacts or objects; a later worker must
+// claim the same exact grant-scoped intent before it can resolve a receipt.
+func RepairExpiredArtifactCleanupIntents(ctx context.Context, pool *pgxpool.Pool, now time.Time, limit int) ([]string, error) {
+	if pool == nil || now.IsZero() || limit <= 0 || limit > maxArtifactCleanupRepairBatch {
+		return nil, fmt.Errorf("invalid cleanup intent repair request")
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return nil, fmt.Errorf("begin cleanup intent repair: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	rows, err := tx.Query(ctx, `SELECT artifact_id::text FROM artifact_cleanup_intents
+WHERE state='CLAIMED' AND lease_expires_at <= $1
+ORDER BY lease_expires_at,created_at,artifact_id LIMIT $2 FOR UPDATE SKIP LOCKED`, now.UTC(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("lock expired cleanup intents: %w", err)
+	}
+	ids := make([]string, 0, limit)
+	for rows.Next() {
+		var artifactID string
+		if err := rows.Scan(&artifactID); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan expired cleanup intent: %w", err)
+		}
+		ids = append(ids, artifactID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("read expired cleanup intents: %w", err)
+	}
+	rows.Close()
+	for _, artifactID := range ids {
+		tag, err := tx.Exec(ctx, `UPDATE artifact_cleanup_intents
+SET state='PENDING',lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL
+WHERE artifact_id=$1::uuid AND state='CLAIMED' AND lease_expires_at <= $2`, artifactID, now.UTC())
+		if err != nil {
+			return nil, fmt.Errorf("repair expired cleanup intent: %w", err)
+		}
+		if tag.RowsAffected() != 1 {
+			return nil, ErrLeaseConflict
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if isSerialization(err) {
+			return nil, fmt.Errorf("%w: cleanup intent repair", ErrLeaseConflict)
+		}
+		return nil, fmt.Errorf("commit cleanup intent repair: %w", err)
+	}
+	return ids, nil
 }

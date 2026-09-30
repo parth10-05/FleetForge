@@ -39,7 +39,15 @@ func TestP02CleanupExpiresOnlyOldUnboundUploadingArtifacts(t *testing.T) {
 	if err != nil || claim == nil || claim.ArtifactID != expiredID || claim.GrantID != "cleanup-grant-1" {
 		t.Fatalf("cleanup claim=%+v err=%v", claim, err)
 	}
-	if err := persistence.CompleteArtifactCleanupIntent(ctx, pool, *claim, now.Add(time.Second)); err != nil {
+	repaired, err := persistence.RepairExpiredArtifactCleanupIntents(ctx, pool, now.Add(2*time.Minute), 1)
+	if err != nil || len(repaired) != 1 || repaired[0] != expiredID {
+		t.Fatalf("repair=%v err=%v", repaired, err)
+	}
+	claim, err = persistence.ClaimArtifactCleanupIntent(ctx, pool, "recovery-worker", "00000000-0000-0000-2801-000000000098", now.Add(2*time.Minute), now.Add(3*time.Minute))
+	if err != nil || claim == nil || claim.ArtifactID != expiredID || claim.GrantID != "cleanup-grant-1" {
+		t.Fatalf("reclaimed cleanup intent=%+v err=%v", claim, err)
+	}
+	if err := persistence.CompleteArtifactCleanupIntent(ctx, pool, *claim, now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("complete cleanup intent: %v", err)
 	}
 	if err := pool.QueryRow(ctx, "SELECT state FROM artifact_cleanup_intents WHERE artifact_id=$1", expiredID).Scan(&intentState); err != nil || intentState != "COMPLETED" {
