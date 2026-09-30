@@ -6,18 +6,21 @@ import (
 	"errors"
 	"testing"
 
+	app "github.com/parth10-05/fleetforge/internal/application/inventory"
 	"github.com/parth10-05/fleetforge/internal/domain/inventory"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
 func TestP02RegistrationIsIdempotentAndRejectsEndpointMutation(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
-	registration := mustP02Registration(t, "https://simulator.example")
-	first, err := persistence.RegisterTarget(ctx, pool, "00000000-0000-0000-2101-000000000001", registration)
+	service := app.New(persistence.RegistrationAdapter{Pool: pool})
+	request := app.RegisterTargetRequest{TargetID: "00000000-0000-0000-2101-000000000001", ExternalID: "rack-a-bmc-01", Origin: "https://simulator.example", TargetKey: "rack-a-bmc-01", CredentialReference: "synthetic-test:rack-a", TransportPolicy: inventory.SyntheticTransportPolicyV1, Labels: map[string]string{"site": "iad", "rack": "a-01", "family": "synthetic"}}
+	first, err := service.RegisterTarget(ctx, request)
 	if err != nil || !first.Created {
 		t.Fatalf("first registration=%+v err=%v", first, err)
 	}
-	replay, err := persistence.RegisterTarget(ctx, pool, "00000000-0000-0000-2101-000000000002", registration)
+	request.TargetID = "00000000-0000-0000-2101-000000000002"
+	replay, err := service.RegisterTarget(ctx, request)
 	if err != nil || replay.Created || replay.TargetID != first.TargetID {
 		t.Fatalf("replay=%+v first=%+v err=%v", replay, first, err)
 	}
