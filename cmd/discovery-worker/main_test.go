@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -29,6 +30,12 @@ func TestRetryAtUsesAttemptAwareDeterministicBoundedBackoff(t *testing.T) {
 	}
 	if !second.Equal(secondAgain) {
 		t.Fatalf("retry jitter must be deterministic: %s != %s", second, secondAgain)
+	}
+	for i := 0; i < 1_000; i++ {
+		retry := retryAt(app.DiscoveryWork{ID: fmt.Sprintf("work-%d", i), Attempt: 2}, now)
+		if retry.Before(now.Add(2*time.Second)) || retry.After(now.Add(2250*time.Millisecond)) {
+			t.Fatalf("work %d retry=%s exceeds jitter cap", i, retry)
+		}
 	}
 }
 

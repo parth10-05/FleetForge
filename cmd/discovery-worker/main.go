@@ -86,7 +86,7 @@ func retryAt(work app.DiscoveryWork, now time.Time) time.Time {
 	delay := time.Second
 	if work.Attempt > 1 {
 		digest := sha256.Sum256([]byte(work.ID))
-		delay = 2*time.Second + time.Duration(digest[0])*time.Millisecond
+		delay = 2*time.Second + time.Duration(digest[0]%251)*time.Millisecond
 	}
 	return now.Add(delay)
 }
