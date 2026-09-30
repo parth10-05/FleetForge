@@ -12,6 +12,8 @@ import (
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 )
 
+const requiredP02MigrationVersion int64 = 16
+
 func main() {
 	if err := run(); err != nil {
 		log.Print("v1-p02 check failed")
@@ -42,9 +44,20 @@ func run() error {
 	if !migrationTable {
 		return errP02SchemaUnavailable{}
 	}
+	var migrationVersion int64
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&migrationVersion); err != nil {
+		return err
+	}
+	if !p02SchemaVersionReady(migrationVersion) {
+		return errP02SchemaUnavailable{}
+	}
 	return nil
 }
 
 type errP02SchemaUnavailable struct{}
 
 func (errP02SchemaUnavailable) Error() string { return "P02 schema is unavailable" }
+
+func p02SchemaVersionReady(version int64) bool {
+	return version >= requiredP02MigrationVersion
+}
