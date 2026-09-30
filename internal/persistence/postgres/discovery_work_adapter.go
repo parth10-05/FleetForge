@@ -18,6 +18,8 @@ import (
 // with a live work lease (or vice versa).
 type DiscoveryWorkAdapter struct{ Pool *pgxpool.Pool }
 
+const maxDiscoveryAttempts = 3
+
 // LoadDiscoveryTarget reads one complete, active registration without taking a
 // transaction lock. The executor uses the resulting value only after this
 // query has returned, so network activity cannot hold workflow locks.
@@ -53,7 +55,8 @@ func (adapter DiscoveryWorkAdapter) ClaimDiscoveryWork(ctx context.Context, requ
 FROM due_work
 WHERE delivery_state='PENDING' AND not_before <= $1
   AND subject_type='TARGET' AND work_type='DISCOVER'
-ORDER BY not_before, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, request.Now.UTC()).Scan(&work.ID, &work.TargetID, &work.ExpectedRevision)
+  AND discovery_attempts < $2
+ORDER BY not_before, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, request.Now.UTC(), maxDiscoveryAttempts).Scan(&work.ID, &work.TargetID, &work.ExpectedRevision)
 	if err == pgx.ErrNoRows {
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit empty discovery claim: %w", err)
@@ -64,7 +67,8 @@ ORDER BY not_before, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, request.Now
 		return nil, fmt.Errorf("lock discovery work: %w", err)
 	}
 	tag, err := tx.Exec(ctx, `UPDATE due_work
-SET delivery_state='CLAIMED', lease_token=$2::uuid, lease_owner=$3,
+SET delivery_state='CLAIMED', discovery_attempts=discovery_attempts+1,
+    lease_token=$2::uuid, lease_owner=$3,
     lease_expires_at=$4, updated_at=$5
 WHERE id=$1::uuid AND delivery_state='PENDING'`, work.ID, request.LeaseToken, request.Owner, request.LeaseExpiresAt.UTC(), request.Now.UTC())
 	if err != nil {
@@ -117,11 +121,12 @@ func (adapter DiscoveryWorkAdapter) persistDiscoveryResult(ctx context.Context, 
 		return fmt.Errorf("%w: discovery target revision changed", ErrRevisionConflict)
 	}
 	var persistedWorkID string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM due_work
+	var attempts int
+	if err := tx.QueryRow(ctx, `SELECT id::text,discovery_attempts FROM due_work
 WHERE id=$1::uuid AND subject_type='TARGET' AND subject_id=$2::uuid
   AND work_type='DISCOVER' AND delivery_state='CLAIMED'
   AND lease_token=$3::uuid AND expected_revision=$4
-  AND expected_command_epoch IS NULL FOR UPDATE`, work.ID, work.TargetID, work.LeaseToken, work.ExpectedRevision).Scan(&persistedWorkID); err != nil {
+  AND expected_command_epoch IS NULL FOR UPDATE`, work.ID, work.TargetID, work.LeaseToken, work.ExpectedRevision).Scan(&persistedWorkID, &attempts); err != nil {
 		if err == pgx.ErrNoRows {
 			return ErrLeaseConflict
 		}
@@ -158,12 +163,12 @@ ON CONFLICT (target_id) DO UPDATE SET
 		return fmt.Errorf("advance discovery head: %w", err)
 	}
 	var tag pgconnCommandTag
-	if retryAt == nil {
+	if retryAt == nil || attempts >= maxDiscoveryAttempts {
 		tag, err = tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',
     lease_token=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=$5
 WHERE id=$1::uuid AND subject_type='TARGET' AND subject_id=$2::uuid
   AND work_type='DISCOVER' AND delivery_state='CLAIMED' AND lease_token=$3::uuid
-& expected_revision=$4 AND expected_command_epoch IS NULL`, work.ID, work.TargetID, work.LeaseToken, work.ExpectedRevision, finishedAt.UTC())
+  AND expected_revision=$4 AND expected_command_epoch IS NULL`, work.ID, work.TargetID, work.LeaseToken, work.ExpectedRevision, finishedAt.UTC())
 	} else {
 		tag, err = tx.Exec(ctx, `UPDATE due_work SET delivery_state='PENDING', not_before=$5,
     lease_token=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=$6
@@ -187,8 +192,21 @@ WHERE id=$1::uuid AND subject_type='TARGET' AND subject_id=$2::uuid
 }
 
 func (adapter DiscoveryWorkAdapter) RetryDiscoveryWork(ctx context.Context, work app.DiscoveryWork, now, retryAt time.Time) error {
-	if adapter.Pool == nil {
+	if adapter.Pool == nil || work.ID == "" || work.TargetID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 || now.IsZero() || retryAt.IsZero() || retryAt.Before(now) {
 		return fmt.Errorf("discovery persistence is unavailable")
 	}
-	return FailDueWork(ctx, adapter.Pool, DueWorkResult{ID: work.ID, LeaseToken: work.LeaseToken, ExpectedRevision: work.ExpectedRevision, Now: now, RetryAt: retryAt})
+	tag, err := adapter.Pool.Exec(ctx, `UPDATE due_work SET
+delivery_state=CASE WHEN discovery_attempts >= $5 THEN 'COMPLETED' ELSE 'PENDING' END,
+not_before=CASE WHEN discovery_attempts >= $5 THEN not_before ELSE $6 END,
+lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$7
+WHERE id=$1::uuid AND subject_type='TARGET' AND subject_id=$2::uuid
+  AND work_type='DISCOVER' AND delivery_state='CLAIMED' AND lease_token=$3::uuid
+  AND expected_revision=$4 AND expected_command_epoch IS NULL`, work.ID, work.TargetID, work.LeaseToken, work.ExpectedRevision, maxDiscoveryAttempts, retryAt.UTC(), now.UTC())
+	if err != nil {
+		return fmt.Errorf("retry discovery work: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrLeaseConflict
+	}
+	return nil
 }

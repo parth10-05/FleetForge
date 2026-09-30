@@ -93,6 +93,41 @@ func TestP02DiscoveryRetryAtomicallyPersistsFailureAndReleasesLease(t *testing.T
 	}
 }
 
+func TestP02DiscoveryStopsAfterThreeRetryableAttempts(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	const targetID = "00000000-0000-0000-2804-000000000001"
+	const workID = "00000000-0000-0000-2804-000000000002"
+	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,'bounded-retry-target','endpoint','site','rack','ACTIVE')", targetID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 30, 0, 3, 0, 0, time.UTC)
+	if ok, err := persistence.ScheduleDiscovery(ctx, pool, persistence.DiscoveryScheduleRequest{WorkID: workID, CommandID: "00000000-0000-0000-2804-000000000003", TargetID: targetID, TargetRevision: 0, NotBefore: now}); err != nil || !ok {
+		t.Fatalf("schedule discovery=%v err=%v", ok, err)
+	}
+	adapter := persistence.DiscoveryWorkAdapter{Pool: pool}
+	for attempt := 1; attempt <= 3; attempt++ {
+		token := "00000000-0000-0000-2804-00000000000" + string(rune('3'+attempt))
+		claimed, err := adapter.ClaimDiscoveryWork(ctx, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: token, Now: now, LeaseExpiresAt: now.Add(30 * time.Second)})
+		if err != nil || claimed == nil {
+			t.Fatalf("attempt %d claim=%+v err=%v", attempt, claimed, err)
+		}
+		result := app.DiscoveryResult{ObservationID: "00000000-0000-0000-2804-00000000001" + string(rune('0'+attempt)), ObservedAt: now, Normalized: []byte(`{"error_kind":"timeout"}`)}
+		if err := adapter.RecordDiscoveryRetry(ctx, *claimed, result, now, now.Add(time.Second)); err != nil {
+			t.Fatalf("attempt %d retry=%v", attempt, err)
+		}
+		now = now.Add(time.Second)
+	}
+	var state string
+	var attempts int
+	if err := pool.QueryRow(ctx, "SELECT delivery_state,discovery_attempts FROM due_work WHERE id=$1", workID).Scan(&state, &attempts); err != nil || state != "COMPLETED" || attempts != 3 {
+		t.Fatalf("bounded retry state=%q attempts=%d err=%v", state, attempts, err)
+	}
+	claimed, err := adapter.ClaimDiscoveryWork(ctx, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: "00000000-0000-0000-2804-000000000099", Now: now, LeaseExpiresAt: now.Add(time.Minute)})
+	if err != nil || claimed != nil {
+		t.Fatalf("fourth claim=%+v err=%v", claimed, err)
+	}
+}
+
 type fixedDiscoveryExecutor struct{ result app.DiscoveryResult }
 
 func (e fixedDiscoveryExecutor) Discover(context.Context, app.DiscoveryWork) (app.DiscoveryResult, error) {
