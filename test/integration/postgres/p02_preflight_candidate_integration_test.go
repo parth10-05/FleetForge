@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	app "github.com/parth10-05/fleetforge/internal/application/preflight"
 	"github.com/parth10-05/fleetforge/internal/domain/artifact"
 	"github.com/parth10-05/fleetforge/internal/domain/inventory"
 	"github.com/parth10-05/fleetforge/internal/domain/preflight"
@@ -28,7 +29,7 @@ func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state,target_key,contract_version,credential_provider,credential_reference,transport_policy_version,registration_hash,trust_metadata_complete) VALUES ($1,'candidate-target','https://simulator.example','west','rack-a','ACTIVE','candidate-target','synthetic-redfish-v1','synthetic-test','synthetic-test:candidate-target','synthetic-transport-v1','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',true)", targetID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO target_labels (target_id,key,value) VALUES ($1,'family','synthetic')", targetID); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO target_labels (target_id,key,value) VALUES ($1,'family','synthetic'),($1,'site','west'),($1,'rack','rack-a')", targetID); err != nil {
 		t.Fatal(err)
 	}
 	const observationID = "00000000-0000-0000-2701-000000000005"
@@ -37,6 +38,16 @@ func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, "INSERT INTO target_discovery_heads (target_id,head_revision,configuration_revision,latest_attempt_id,last_good_id) VALUES ($1,1,0,$2,$2)", targetID, observationID); err != nil {
 		t.Fatal(err)
+	}
+	parsedArtifact, err := value.ParseArtifactID(artifactID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := persistence.PreflightAdapter{Pool: pool}
+	service := app.New(adapter, adapter, adapter)
+	result, err := service.Evaluate(ctx, app.Request{CandidateID: "00000000-0000-0000-2701-000000000009", ArtifactID: parsedArtifact, Selector: []byte(`{"version":"fleetforge.selector/v1","all":[{"key":"site","value":"west"}]}`), Maximum: 10})
+	if err != nil || len(result.Snapshot.Targets()) != 1 {
+		t.Fatalf("application preflight result=%+v err=%v", result, err)
 	}
 	snapshot := mustCandidateSnapshot(t, artifactID, targetID, "rack-a")
 	request := persistence.PreflightCandidateRequest{CandidateID: "00000000-0000-0000-2701-000000000003", Snapshot: snapshot, Report: []byte(`{"checks":{"state":"passed"}}`)}
@@ -56,8 +67,8 @@ func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
 	}
 	conflicting := request
 	conflicting.Snapshot = mustCandidateSnapshot(t, artifactID, targetID, "rack-b")
-	if err := persistence.PersistPreflightCandidate(ctx, pool, conflicting); !errors.Is(err, persistence.ErrPreflightCandidateConflict) {
-		t.Fatalf("conflicting candidate error=%v", err)
+	if err := persistence.PersistPreflightCandidate(ctx, pool, conflicting); !errors.Is(err, persistence.ErrPreflightInputStale) {
+		t.Fatalf("stale conflicting candidate error=%v", err)
 	}
 	if err := persistence.RecordDiscoveryFailure(ctx, pool, persistence.DiscoveryObservationRequest{ObservationID: "00000000-0000-0000-2701-000000000006", TargetID: targetID, ExpectedTargetRevision: 0, ObservedAt: time.Now().UTC(), NormalizedData: []byte(`{"error_kind":"timeout"}`)}); err != nil {
 		t.Fatal(err)
