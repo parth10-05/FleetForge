@@ -11,8 +11,8 @@ claim.
 | T01 registration | `internal/application/inventory`, `internal/domain/inventory`, `internal/persistence/postgres/registration.go` | Implemented locally | Execute tagged PostgreSQL registration proof; compose the application writer in a runnable command. |
 | T02 endpoint protections | `internal/redfish/address.go`, `client.go`, `address_test.go` | Implemented locally | Final component proof against the P01 runtime and configured CIDR policy. |
 | T03 Redfish discovery bounds/errors | `internal/redfish/{client,decode,discovery,errors}.go`, synthetic integration test | Implemented locally | Run final bounded component/fuzz gates and retain results. |
-| T04 observations/last good | `discovery_observation.go`, P02 tagged observation proof | Implemented locally | Tagged PostgreSQL execution and normalized capability payload completion. |
-| T05 durable discovery | `discovery.go`, Q29, active-work index | Implemented locally | Worker claim/call/result composition and crash/retry proof remain open. |
+| T04 observations/last good | `discovery_observation.go`; `DiscoveryWorkAdapter`; `p02_discovery_worker_integration_test.go` | Implemented locally | Atomic success, terminal-failure, and retryable-failure head updates are covered in tagged tests; execute them against a reachable PostgreSQL gate. |
+| T05 durable discovery | Q29, active-work index, `DiscoveryWorkAdapter`, `syntheticdiscovery.Executor`, migration 00016 | Implemented locally | Claims are filtered to `DISCOVER`, transport runs outside DB locks, retry evidence/reschedule is atomic, and attempts are capped at three. Runnable worker composition, lease-repair/fairness barriers, and reachable PostgreSQL execution remain open. |
 | T06 bounded selectors | `internal/domain/inventory/selector.go`, Q31, `target_selection.go` | Implemented locally | Execute tagged SQL proof and retain the query-plan/large-inventory evidence. |
 | T07 frozen preflight | `internal/domain/preflight`, application evaluator, `PreflightAdapter`, PostgreSQL candidate writer, Q32 drift report, `TestP02PreflightCandidatePersistsFrozenMembershipImmutably` | Implemented locally | The tagged Neon application-path test proves selection, verified-artifact loading, fresh discovery evidence, atomic freeze, and retained negative drift/retirement checks. Runnable process composition remains open. |
 | T08 readiness recheck | strengthened `AcquireReadinessEnrollment` active/quarantine checks | Partial | P03-owned campaign construction and candidate/artifact/freshness recheck wiring remain open. |
@@ -30,6 +30,10 @@ claim.
 - `git diff --check` passed at the current branch head.
 - The tagged PostgreSQL package compiles with
   `go test -tags postgresintegration -run '^$' ./test/integration/postgres`.
+- Focused discovery application, persistence, and synthetic-executor tests
+  passed at `f8edda1`; the tagged package compiled at that SHA. The tagged
+  runtime test requires a reachable `FLEETFORGE_TEST_POSTGRES_DSN` and was not
+  claimed from the current refused localhost configuration.
 - `go test -count=1 ./cmd/local-object-store ./internal/platform/config ./internal/delivery/localobjecthttp ./internal/platform/localartifactstore` passed, including a listener composition test and durable signed-grant receipt recovery after reopening the disk store.
 - `TestP02ArtifactUploadCapabilityReservesDatabaseKeyBeforeSigning` passed against a generated isolated Neon schema: durable key reservation, signed artifact-bound capability, direct disk upload, exact streamed verification, and immutable PostgreSQL binding.
 
