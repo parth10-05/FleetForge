@@ -181,33 +181,44 @@ func validateReadinessCandidate(ctx context.Context, tx pgx.Tx, req ReadinessEnr
 	if err != nil {
 		return fmt.Errorf("%w: lock candidate targets: %v", ErrEnrollmentBlocked, err)
 	}
-	defer rows.Close()
+	type candidateTarget struct {
+		id, site, rack, family, policy, reason string
+		revision                               int64
+	}
+	candidateTargets := make([]candidateTarget, 0, len(targets))
 	for i := 0; rows.Next(); i++ {
 		if i >= len(targets) {
+			rows.Close()
 			return fmt.Errorf("%w: candidate has unexpected target", ErrEnrollmentBlocked)
 		}
-		var id, site, rack, family, policy, reason string
-		var revision int64
-		if err := rows.Scan(&id, &revision, &site, &rack, &family, &policy, &reason); err != nil {
+		var candidate candidateTarget
+		if err := rows.Scan(&candidate.id, &candidate.revision, &candidate.site, &candidate.rack, &candidate.family, &candidate.policy, &candidate.reason); err != nil {
+			rows.Close()
 			return err
 		}
-		if id != targets[i].TargetID || family != declaredFamily || policy != "synthetic-family-exact-v1" || reason != "compatible" {
+		candidateTargets = append(candidateTargets, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	for i, candidate := range candidateTargets {
+		if candidate.id != targets[i].TargetID || candidate.family != declaredFamily || candidate.policy != "synthetic-family-exact-v1" || candidate.reason != "compatible" {
 			return fmt.Errorf("%w: candidate membership or compatibility changed", ErrEnrollmentBlocked)
 		}
 		var currentRevision, discoveryRevision int64
 		var state, currentSite, currentRack, currentFamily string
 		var trusted, fresh bool
 		var latest, good string
-		err := tx.QueryRow(ctx, `SELECT t.revision,h.head_revision,t.administrative_state,t.trust_metadata_complete,t.site_key,t.rack_key,l.value,h.latest_attempt_id::text,h.last_good_id::text,o.observed_at >= now()-interval '120 seconds' AND o.observed_at <= now()+interval '1 second' FROM targets t JOIN target_labels l ON l.target_id=t.id AND l.key='family' JOIN target_discovery_heads h ON h.target_id=t.id JOIN device_observations o ON o.id=h.last_good_id WHERE t.id=$1::uuid FOR SHARE OF t,h,o`, id).Scan(&currentRevision, &discoveryRevision, &state, &trusted, &currentSite, &currentRack, &currentFamily, &latest, &good, &fresh)
+		err := tx.QueryRow(ctx, `SELECT t.revision,h.head_revision,t.administrative_state,t.trust_metadata_complete,t.site_key,t.rack_key,l.value,h.latest_attempt_id::text,h.last_good_id::text,o.observed_at >= now()-interval '120 seconds' AND o.observed_at <= now()+interval '1 second' FROM targets t JOIN target_labels l ON l.target_id=t.id AND l.key='family' JOIN target_discovery_heads h ON h.target_id=t.id JOIN device_observations o ON o.id=h.last_good_id WHERE t.id=$1::uuid FOR SHARE OF t,h,o`, candidate.id).Scan(&currentRevision, &discoveryRevision, &state, &trusted, &currentSite, &currentRack, &currentFamily, &latest, &good, &fresh)
 		if err != nil {
-			return fmt.Errorf("%w: target %s current discovery evidence unavailable: %v", ErrEnrollmentBlocked, id, err)
+			return fmt.Errorf("%w: target %s current discovery evidence unavailable: %v", ErrEnrollmentBlocked, candidate.id, err)
 		}
-		if currentRevision != revision || discoveryRevision != revision || state != "ACTIVE" || !trusted || currentSite != site || currentRack != rack || currentFamily != family || latest != good || !fresh {
-			return fmt.Errorf("%w: target %s evidence differs from candidate (candidate_revision=%d target_revision=%d discovery_revision=%d state=%s trusted=%t site=%s rack=%s family=%s latest_equals_good=%t fresh=%t)", ErrEnrollmentBlocked, id, revision, currentRevision, discoveryRevision, state, trusted, currentSite, currentRack, currentFamily, latest == good, fresh)
+		if currentRevision != candidate.revision || discoveryRevision != candidate.revision || state != "ACTIVE" || !trusted || currentSite != candidate.site || currentRack != candidate.rack || currentFamily != candidate.family || latest != good || !fresh {
+			return fmt.Errorf("%w: target %s evidence differs from candidate (candidate_revision=%d target_revision=%d discovery_revision=%d state=%s trusted=%t site=%s rack=%s family=%s latest_equals_good=%t fresh=%t)", ErrEnrollmentBlocked, candidate.id, candidate.revision, currentRevision, discoveryRevision, state, trusted, currentSite, currentRack, currentFamily, latest == good, fresh)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
 	}
 	if len(targets) == 0 {
 		return fmt.Errorf("%w: candidate has no targets", ErrEnrollmentBlocked)
