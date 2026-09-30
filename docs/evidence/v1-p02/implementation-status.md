@@ -21,7 +21,7 @@ claim.
 | T11 verification work | bounded verifier, atomic `UPLOADED -> VERIFYING` plus due work, exact tuple fence; `ArtifactVerificationWorkAdapter`; artifact verification worker; `TestP02ArtifactVerificationWorkerStreamsBoundVersionAndCompletesLease` | Implemented locally | The tagged Neon component test proves claim -> immutable local stream -> `VERIFIED` -> fenced `COMPLETED`; a process-supervision/crash-retry scenario remains open. |
 | T12 stable eligibility | immutable verification result, retirement and preflight-state gates | Partial | Readiness transaction must consume these rechecks in the P03 boundary. |
 | T13 compatibility | exact synthetic family policy and frozen per-target decision | Implemented locally | Final component proof against all required target profiles remains open. |
-| T14 cleanup/orphans | bounded DB expiration; `DiskStore.ReportOrphans` read-only receipt/file comparison with a 100-item page | Partial | The storage-level orphan report is implemented and tested. Durable DB cleanup intents plus workflow-authorized exact physical deletion remain open. |
+| T14 cleanup/orphans | bounded DB expiration; durable cleanup intents with lease fencing; `DiskStore.ReportOrphans`; exact grant receipt resolution; `RunCleanupOnce`; `TestP02CleanupWorkerDeletesOnlyClaimedGrantReceipt` | Implemented locally | The tagged Neon/disk component test proves exact claimed-version deletion and fenced completion. Lease-expiry repair/retry proof remains open. |
 
 ## Executed local evidence
 
