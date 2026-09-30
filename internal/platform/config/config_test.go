@@ -52,6 +52,26 @@ func TestLoadArtifactWorkerDoesNotRequireUploadSigningKey(t *testing.T) {
 	}
 }
 
+func TestLoadDiscoveryWorkerParsesBoundedCredentialsAndCIDRs(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv("FLEETFORGE_DISCOVERY_ALLOWED_CIDRS", "127.0.0.0/8,2001:db8::/32")
+	t.Setenv("FLEETFORGE_DISCOVERY_CREDENTIALS_JSON", `{"rack-a":{"username":"sim-user","password":"test-secret"}}`)
+	loaded, err := LoadDiscoveryWorker()
+	if err != nil || loaded.Owner == "" || len(loaded.AllowedCIDRs) != 2 || len(loaded.Credentials) != 1 {
+		t.Fatalf("LoadDiscoveryWorker()=%#v err=%v", loaded, err)
+	}
+}
+
+func TestLoadDiscoveryWorkerRedactsCredentialInput(t *testing.T) {
+	const secret = "credential-that-must-not-appear"
+	t.Setenv("FLEETFORGE_DISCOVERY_ALLOWED_CIDRS", "not-a-cidr")
+	t.Setenv("FLEETFORGE_DISCOVERY_CREDENTIALS_JSON", `{"rack-a":{"username":"sim-user","password":"`+secret+`"}}`)
+	_, err := LoadDiscoveryWorker()
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("LoadDiscoveryWorker() error=%v", err)
+	}
+}
+
 func TestLoadObjectStoreRedactsInvalidSecret(t *testing.T) {
 	const secret = "credential-that-must-not-appear"
 	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")
