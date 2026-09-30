@@ -14,6 +14,17 @@ type DiscoveryWork struct {
 	ID, TargetID, LeaseToken string
 	ExpectedRevision         int64
 }
+
+// DiscoveryTarget is the minimal trusted registration view a read-only
+// executor needs. It contains an opaque credential reference, never secret
+// material or a caller-controlled resource URI.
+type DiscoveryTarget struct {
+	Origin, TargetKey, CredentialReference string
+}
+
+type DiscoveryTargetLoader interface {
+	LoadDiscoveryTarget(context.Context, DiscoveryWork) (DiscoveryTarget, error)
+}
 type DiscoveryClaimRequest struct {
 	Owner, LeaseToken   string
 	Now, LeaseExpiresAt time.Time

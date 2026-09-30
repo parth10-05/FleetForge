@@ -18,6 +18,27 @@ import (
 // with a live work lease (or vice versa).
 type DiscoveryWorkAdapter struct{ Pool *pgxpool.Pool }
 
+// LoadDiscoveryTarget reads one complete, active registration without taking a
+// transaction lock. The executor uses the resulting value only after this
+// query has returned, so network activity cannot hold workflow locks.
+func (adapter DiscoveryWorkAdapter) LoadDiscoveryTarget(ctx context.Context, work app.DiscoveryWork) (app.DiscoveryTarget, error) {
+	if adapter.Pool == nil || work.TargetID == "" || work.ExpectedRevision < 0 {
+		return app.DiscoveryTarget{}, fmt.Errorf("invalid discovery target request")
+	}
+	var target app.DiscoveryTarget
+	err := adapter.Pool.QueryRow(ctx, `SELECT endpoint_reference,target_key,credential_reference
+FROM targets WHERE id=$1::uuid AND revision=$2 AND administrative_state='ACTIVE'
+  AND trust_metadata_complete AND contract_version='synthetic-redfish-v1'
+  AND credential_provider='synthetic-test' AND transport_policy_version='synthetic-redfish-v1'`, work.TargetID, work.ExpectedRevision).Scan(&target.Origin, &target.TargetKey, &target.CredentialReference)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return app.DiscoveryTarget{}, fmt.Errorf("discovery target is unavailable")
+		}
+		return app.DiscoveryTarget{}, fmt.Errorf("load discovery target: %w", err)
+	}
+	return target, nil
+}
+
 func (adapter DiscoveryWorkAdapter) ClaimDiscoveryWork(ctx context.Context, request app.DiscoveryClaimRequest) (*app.DiscoveryWork, error) {
 	if adapter.Pool == nil || request.Owner == "" || request.LeaseToken == "" || request.Now.IsZero() || !request.LeaseExpiresAt.After(request.Now) {
 		return nil, fmt.Errorf("invalid discovery work claim")
