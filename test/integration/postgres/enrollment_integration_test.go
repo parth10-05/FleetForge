@@ -179,6 +179,68 @@ func TestReadinessEnrollmentTerminalTargetUpdateDoesNotReleaseEnrollment(t *test
 	}
 }
 
+// TestReadinessEnrollmentRejectsInvalidatedTrustInputsAtomically proves that a
+// candidate cannot be used after its artifact is retired, its preflight result
+// is blocked, or its target revision has drifted. Every rejection occurs before
+// an enrollment, campaign transition, audit event, or outbox event is written.
+func TestReadinessEnrollmentRejectsInvalidatedTrustInputsAtomically(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*pgxpool.Pool, context.Context, ownershipFixture)
+	}{
+		{
+			name: "retired artifact",
+			mutate: func(pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture) {
+				if err := persistence.RetireVerifiedArtifact(ctx, pool, fixture.artifactID); err != nil {
+					t.Fatalf("retire verified artifact: %v", err)
+				}
+			},
+		},
+		{
+			name: "blocked candidate",
+			mutate: func(pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture) {
+				mustExecute(t, pool, ctx, "UPDATE preflight_candidates SET state='BLOCKED' WHERE id='"+fixture.candidateID+"'")
+			},
+		},
+		{
+			name: "drifted target revision",
+			mutate: func(pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture) {
+				mustExecute(t, pool, ctx, "UPDATE targets SET revision=revision+1 WHERE id='"+fixture.targetID+"'")
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, pool, ctx := migratedHarness(t)
+			fixture := seedOwnershipFixture(t, pool, ctx)
+			prepareReadinessCampaign(t, pool, ctx, fixture)
+			test.mutate(pool, ctx, fixture)
+
+			err := persistence.AcquireReadinessEnrollment(ctx, pool, enrollmentRequest(fixture, "00000000-0000-0000-9006-000000000001", "00000000-0000-0000-9006-000000000002"))
+			if !errors.Is(err, persistence.ErrEnrollmentBlocked) {
+				t.Fatalf("AcquireReadinessEnrollment error = %v, want ErrEnrollmentBlocked", err)
+			}
+
+			var campaignState string
+			var campaignRevision, enrollments, audits, outbox int
+			if err := pool.QueryRow(ctx, "SELECT state,revision FROM campaigns WHERE id=$1", fixture.campaignID).Scan(&campaignState, &campaignRevision); err != nil {
+				t.Fatalf("read campaign after blocked readiness: %v", err)
+			}
+			if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM target_enrollments WHERE campaign_id=$1", fixture.campaignID).Scan(&enrollments); err != nil {
+				t.Fatalf("count enrollments after blocked readiness: %v", err)
+			}
+			if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_events WHERE aggregate_id=$1::uuid", fixture.campaignID).Scan(&audits); err != nil {
+				t.Fatalf("count audit after blocked readiness: %v", err)
+			}
+			if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events WHERE aggregate_id=$1::uuid", fixture.campaignID).Scan(&outbox); err != nil {
+				t.Fatalf("count outbox after blocked readiness: %v", err)
+			}
+			if campaignState != "VALIDATING" || campaignRevision != 0 || enrollments != 0 || audits != 0 || outbox != 0 {
+				t.Fatalf("blocked readiness wrote durable state: campaign=%s/%d enrollments=%d audits=%d outbox=%d", campaignState, campaignRevision, enrollments, audits, outbox)
+			}
+		})
+	}
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 func enrollmentRequest(fixture ownershipFixture, enrollmentID, outboxEventID string) persistence.ReadinessEnrollmentRequest {
