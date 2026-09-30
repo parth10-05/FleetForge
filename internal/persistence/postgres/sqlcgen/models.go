@@ -15,6 +15,9 @@ type ArtifactCleanupIntent struct {
 	State                   string             `json:"state"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	CompletedAt             pgtype.Timestamptz `json:"completed_at"`
+	LeaseToken              pgtype.UUID        `json:"lease_token"`
+	LeaseOwner              pgtype.Text        `json:"lease_owner"`
+	LeaseExpiresAt          pgtype.Timestamptz `json:"lease_expires_at"`
 }
 
 type ArtifactHold struct {
@@ -145,6 +148,7 @@ type DueWork struct {
 	LeaseExpiresAt       pgtype.Timestamptz `json:"lease_expires_at"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	DiscoveryAttempts    int32              `json:"discovery_attempts"`
 }
 
 type FirmwareArtifact struct {

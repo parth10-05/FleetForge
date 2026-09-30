@@ -36,7 +36,7 @@ type Querier interface {
 	//        WHERE delivery_state = 'PENDING'
 	// The caller holds these rows in one short transaction, writes the supplied
 	// per-row fencing tokens, then commits before any external work begins.
-	ClaimDueWork(ctx context.Context, arg ClaimDueWorkParams) ([]DueWork, error)
+	ClaimDueWork(ctx context.Context, arg ClaimDueWorkParams) ([]ClaimDueWorkRow, error)
 	// P03-Q09: claim-outbox-events.sql
 	// Access pattern: ordered SKIP LOCKED publisher claims for unpublished events.
 	// Index: outbox_events_publishable_index ON outbox_events (next_attempt_at, created_at)

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 )
 
@@ -21,6 +22,20 @@ func TestOpenApplicationPoolSeparatesBoundedPooledSettings(t *testing.T) {
 	}
 	if got := pool.Config().ConnConfig.RuntimeParams["statement_timeout"]; got != "5000" {
 		t.Fatalf("statement_timeout = %q, want 5000", got)
+	}
+}
+
+func TestConfigureMigrationSchemaUsesAStartupOptionAndPreservesExistingOptions(t *testing.T) {
+	configuration, err := pgx.ParseConfig("postgres://migrate:secret@127.0.0.1:5432/fleetforge?options=endpoint%3Dfleetforge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configureMigrationSchema(configuration, "ff_it_123")
+	if got := configuration.RuntimeParams["search_path"]; got != "ff_it_123" {
+		t.Fatalf("search path=%q, want isolated schema", got)
+	}
+	if got := configuration.RuntimeParams["options"]; got != "endpoint=fleetforge -csearch_path=ff_it_123" {
+		t.Fatalf("startup options=%q", got)
 	}
 }
 

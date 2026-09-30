@@ -89,7 +89,7 @@ func TestAdmissionIsPermanentAndReservationSurvivesTargetTerminality(t *testing.
 }
 
 type ownershipFixture struct {
-	targetID, artifactID, campaignID, campaignTargetID, targetUpdateID, admissionID string
+	targetID, artifactID, campaignID, campaignTargetID, targetUpdateID, admissionID, candidateID string
 }
 
 func migratedHarness(t *testing.T) (Harness, *pgxpool.Pool, context.Context) {
@@ -105,7 +105,7 @@ func seedOwnershipFixture(t *testing.T, pool *pgxpool.Pool, ctx context.Context)
 	t.Helper()
 	fixture := ownershipFixture{
 		targetID: "00000000-0000-0000-0000-000000000201", artifactID: "00000000-0000-0000-0000-000000000202", campaignID: "00000000-0000-0000-0000-000000000203",
-		campaignTargetID: "00000000-0000-0000-0000-000000000204", targetUpdateID: "00000000-0000-0000-0000-000000000205", admissionID: "00000000-0000-0000-0000-000000000206",
+		campaignTargetID: "00000000-0000-0000-0000-000000000204", targetUpdateID: "00000000-0000-0000-0000-000000000205", admissionID: "00000000-0000-0000-0000-000000000206", candidateID: "00000000-0000-0000-0000-000000000208",
 	}
 	mustExecute(t, pool, ctx, fmt.Sprintf("INSERT INTO targets (id, external_identity, endpoint_reference, site_key, rack_key, administrative_state) VALUES ('%s', 'target-race', 'ref', 'site-a', 'rack-a', 'ACTIVE')", fixture.targetID))
 	mustExecute(t, pool, ctx, fmt.Sprintf("INSERT INTO firmware_artifacts (id, firmware_version, sha256_digest, object_reference, state) VALUES ('%s', 'v1', 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ref', 'VERIFIED')", fixture.artifactID))
@@ -120,6 +120,7 @@ func seedSecondCampaignTarget(t *testing.T, pool *pgxpool.Pool, ctx context.Cont
 	second := original
 	second.campaignID = "00000000-0000-0000-0000-000000000210"
 	second.campaignTargetID = "00000000-0000-0000-0000-000000000211"
+	second.candidateID = "00000000-0000-0000-0000-000000000213"
 	mustExecute(t, pool, ctx, fmt.Sprintf("INSERT INTO campaigns (id, artifact_id, state, policy_version_id) VALUES ('%s', '%s', 'DRAFT', '00000000-0000-0000-0000-000000000212')", second.campaignID, second.artifactID))
 	mustExecute(t, pool, ctx, fmt.Sprintf("INSERT INTO campaign_targets (id, campaign_id, target_id, artifact_id, frozen_target_revision, frozen_policy_hash) VALUES ('%s', '%s', '%s', '%s', 0, 'policy-hash')", second.campaignTargetID, second.campaignID, second.targetID, second.artifactID))
 	return second

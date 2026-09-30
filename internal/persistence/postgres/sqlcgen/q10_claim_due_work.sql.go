@@ -41,6 +41,25 @@ type ClaimDueWorkParams struct {
 	Column2 int32              `json:"column_2"`
 }
 
+type ClaimDueWorkRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	CommandID            pgtype.UUID        `json:"command_id"`
+	SubjectType          string             `json:"subject_type"`
+	SubjectID            pgtype.UUID        `json:"subject_id"`
+	WorkType             string             `json:"work_type"`
+	SchemaVersion        int32              `json:"schema_version"`
+	NotBefore            pgtype.Timestamptz `json:"not_before"`
+	ExpectedRevision     int64              `json:"expected_revision"`
+	ExpectedCommandEpoch pgtype.Int8        `json:"expected_command_epoch"`
+	DeliveryState        string             `json:"delivery_state"`
+	DeliveryGeneration   int64              `json:"delivery_generation"`
+	LeaseToken           pgtype.UUID        `json:"lease_token"`
+	LeaseOwner           pgtype.Text        `json:"lease_owner"`
+	LeaseExpiresAt       pgtype.Timestamptz `json:"lease_expires_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
 // P03-Q10: claim-due-work.sql
 // Access pattern: ordered SKIP LOCKED claims for due work.
 // Index: due_work_claimable_index ON due_work (not_before, created_at)
@@ -49,15 +68,15 @@ type ClaimDueWorkParams struct {
 //
 // The caller holds these rows in one short transaction, writes the supplied
 // per-row fencing tokens, then commits before any external work begins.
-func (q *Queries) ClaimDueWork(ctx context.Context, arg ClaimDueWorkParams) ([]DueWork, error) {
+func (q *Queries) ClaimDueWork(ctx context.Context, arg ClaimDueWorkParams) ([]ClaimDueWorkRow, error) {
 	rows, err := q.db.Query(ctx, claimDueWork, arg.Column1, arg.Column2)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []DueWork{}
+	items := []ClaimDueWorkRow{}
 	for rows.Next() {
-		var i DueWork
+		var i ClaimDueWorkRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.CommandID,

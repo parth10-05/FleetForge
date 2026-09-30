@@ -184,10 +184,11 @@ func TestReadinessEnrollmentTerminalTargetUpdateDoesNotReleaseEnrollment(t *test
 func enrollmentRequest(fixture ownershipFixture, enrollmentID, outboxEventID string) persistence.ReadinessEnrollmentRequest {
 	return persistence.ReadinessEnrollmentRequest{
 		CampaignID:               fixture.campaignID,
+		CandidateID:              fixture.candidateID,
 		PolicyVersionID:          "00000000-0000-0000-0000-000000000207",
 		ExpectedRevision:         0,
 		FrozenPolicyHash:         "policy-hash",
-		FrozenTargetSnapshotHash: "target-snapshot-hash",
+		FrozenTargetSnapshotHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		Targets: []persistence.TargetEnrollmentEntry{{
 			EnrollmentID:     enrollmentID,
 			TargetID:         fixture.targetID,
@@ -211,4 +212,14 @@ func prepareReadinessCampaign(t *testing.T, pool *pgxpool.Pool, ctx context.Cont
 	if _, err := pool.Exec(ctx, "UPDATE campaigns SET state='VALIDATING' WHERE id=$1::uuid", fixture.campaignID); err != nil {
 		t.Fatalf("prepare campaign for readiness: %v", err)
 	}
+	// P02 supplies the immutable trust input for the P03 readiness handoff.
+	// The records deliberately mirror the candidate-time checks: exact object
+	// version, verified artifact, trusted target identity, and fresh discovery.
+	mustExecute(t, pool, ctx, "UPDATE targets SET target_key='target-race-key', contract_version='synthetic-redfish-v1', credential_provider='synthetic-test', credential_reference='synthetic-test:target-race', transport_policy_version='transport-v1', registration_hash='sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', trust_metadata_complete=true WHERE id='"+fixture.targetID+"'")
+	mustExecute(t, pool, ctx, "INSERT INTO target_labels (target_id,key,value) VALUES ('"+fixture.targetID+"','family','synthetic-family') ON CONFLICT (target_id,key) DO UPDATE SET value=EXCLUDED.value")
+	mustExecute(t, pool, ctx, "INSERT INTO device_observations (id,target_id,kind,observed_at,normalized_data) VALUES ('00000000-0000-0000-0000-000000000214','"+fixture.targetID+"','DISCOVERY',now(),'{}') ON CONFLICT (id) DO NOTHING")
+	mustExecute(t, pool, ctx, "INSERT INTO target_discovery_heads (target_id,latest_attempt_id,last_good_id) VALUES ('"+fixture.targetID+"','00000000-0000-0000-0000-000000000214','00000000-0000-0000-0000-000000000214') ON CONFLICT (target_id) DO UPDATE SET latest_attempt_id=EXCLUDED.latest_attempt_id,last_good_id=EXCLUDED.last_good_id")
+	mustExecute(t, pool, ctx, "INSERT INTO artifact_object_versions (artifact_id,provider,container,object_key,version_id,object_size,sha256_digest,verification_policy_version,declared_target_family) VALUES ('"+fixture.artifactID+"','local-versioned-v1','fixture','firmware-v1','version-1',1,'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','synthetic-sha256-v1','synthetic-family') ON CONFLICT (artifact_id) DO NOTHING")
+	mustExecute(t, pool, ctx, "INSERT INTO preflight_candidates (id,artifact_id,artifact_version_id,selector_version,selector_json,snapshot_hash,state,report) VALUES ('"+fixture.candidateID+"','"+fixture.artifactID+"','version-1','selector-v1','{}','sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','PASSED','{}')")
+	mustExecute(t, pool, ctx, "INSERT INTO preflight_candidate_targets (candidate_id,target_id,frozen_target_revision,site_key,rack_key,target_family,compatibility_policy_version,compatibility_reason) VALUES ('"+fixture.candidateID+"','"+fixture.targetID+"',0,'site-a','rack-a','synthetic-family','synthetic-family-exact-v1','compatible')")
 }
