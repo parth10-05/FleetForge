@@ -37,6 +37,43 @@ func TestP02DiscoveryWorkerAtomicallyCompletesClaimAndPersistsEvidence(t *testin
 	}
 }
 
+func TestP02DiscoveryClaimsOldestDueWorkAndSkipsExistingLease(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	const firstTargetID = "00000000-0000-0000-2806-000000000001"
+	const secondTargetID = "00000000-0000-0000-2806-000000000002"
+	const firstWorkID = "00000000-0000-0000-2806-000000000003"
+	const secondWorkID = "00000000-0000-0000-2806-000000000004"
+	for _, target := range []struct{ id, identity string }{
+		{id: firstTargetID, identity: "ordered-discovery-first"},
+		{id: secondTargetID, identity: "ordered-discovery-second"},
+	} {
+		if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,$2,'endpoint','site','rack','ACTIVE')", target.id, target.identity); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Date(2026, 9, 30, 0, 5, 0, 0, time.UTC)
+	for _, request := range []persistence.DiscoveryScheduleRequest{
+		{WorkID: firstWorkID, CommandID: "00000000-0000-0000-2806-000000000005", TargetID: firstTargetID, TargetRevision: 0, NotBefore: now},
+		{WorkID: secondWorkID, CommandID: "00000000-0000-0000-2806-000000000006", TargetID: secondTargetID, TargetRevision: 0, NotBefore: now.Add(time.Second)},
+	} {
+		if scheduled, err := persistence.ScheduleDiscovery(ctx, pool, request); err != nil || !scheduled {
+			t.Fatalf("schedule=%v err=%v", scheduled, err)
+		}
+	}
+	adapter := persistence.DiscoveryWorkAdapter{Pool: pool}
+	first, err := adapter.ClaimDiscoveryWork(ctx, app.DiscoveryClaimRequest{Owner: "first-worker", LeaseToken: "00000000-0000-0000-2806-000000000007", Now: now.Add(2 * time.Second), LeaseExpiresAt: now.Add(32 * time.Second)})
+	if err != nil || first == nil || first.ID != firstWorkID {
+		t.Fatalf("first claim=%+v err=%v", first, err)
+	}
+	second, err := adapter.ClaimDiscoveryWork(ctx, app.DiscoveryClaimRequest{Owner: "second-worker", LeaseToken: "00000000-0000-0000-2806-000000000008", Now: now.Add(2 * time.Second), LeaseExpiresAt: now.Add(32 * time.Second)})
+	if err != nil || second == nil || second.ID != secondWorkID {
+		t.Fatalf("second claim=%+v err=%v", second, err)
+	}
+	if first.LeaseToken == second.LeaseToken || first.TargetID == second.TargetID {
+		t.Fatalf("claim isolation violated: first=%+v second=%+v", first, second)
+	}
+}
+
 func TestP02DiscoveryResultRejectsStaleLeaseWithoutPersistingEvidence(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const targetID = "00000000-0000-0000-2802-000000000001"
