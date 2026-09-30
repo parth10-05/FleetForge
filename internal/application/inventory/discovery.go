@@ -13,6 +13,7 @@ const DiscoveryWorkType = "DISCOVER"
 type DiscoveryWork struct {
 	ID, TargetID, LeaseToken string
 	ExpectedRevision         int64
+	Attempt                  int
 }
 
 // DiscoveryTarget is the minimal trusted registration view a read-only
@@ -48,11 +49,15 @@ type DiscoveryResultWriter interface {
 	RetryDiscoveryWork(context.Context, DiscoveryWork, time.Time, time.Time) error
 }
 
+// DiscoveryRetrySchedule is evaluated only after a fenced work item has been
+// claimed, so retry timing can depend on the durable attempt number.
+type DiscoveryRetrySchedule func(DiscoveryWork, time.Time) time.Time
+
 // RunDiscoveryOnce commits ownership before calling the discovery executor.
 // It never exposes another work type or holds a database transaction during
 // credential/transport activity.
-func RunDiscoveryOnce(ctx context.Context, claimer DiscoveryWorkClaimer, executor DiscoveryExecutor, writer DiscoveryResultWriter, request DiscoveryClaimRequest, retryAt time.Time) (bool, error) {
-	if claimer == nil || executor == nil || writer == nil || request.Owner == "" || request.LeaseToken == "" || request.Now.IsZero() || !request.LeaseExpiresAt.After(request.Now) || retryAt.IsZero() || retryAt.Before(request.Now) {
+func RunDiscoveryOnce(ctx context.Context, claimer DiscoveryWorkClaimer, executor DiscoveryExecutor, writer DiscoveryResultWriter, request DiscoveryClaimRequest, retrySchedule DiscoveryRetrySchedule) (bool, error) {
+	if claimer == nil || executor == nil || writer == nil || retrySchedule == nil || request.Owner == "" || request.LeaseToken == "" || request.Now.IsZero() || !request.LeaseExpiresAt.After(request.Now) {
 		return false, fmt.Errorf("invalid discovery worker dependencies")
 	}
 	work, err := claimer.ClaimDiscoveryWork(ctx, request)
@@ -62,11 +67,15 @@ func RunDiscoveryOnce(ctx context.Context, claimer DiscoveryWorkClaimer, executo
 	if work == nil {
 		return false, nil
 	}
-	if work.ID == "" || work.TargetID == "" || work.LeaseToken != request.LeaseToken || work.ExpectedRevision < 0 {
+	if work.ID == "" || work.TargetID == "" || work.LeaseToken != request.LeaseToken || work.ExpectedRevision < 0 || work.Attempt < 1 {
 		return true, fmt.Errorf("invalid claimed discovery work")
 	}
 	result, err := executor.Discover(ctx, *work)
 	if err != nil {
+		retryAt := retrySchedule(*work, request.Now)
+		if retryAt.IsZero() || retryAt.Before(request.Now) {
+			return true, fmt.Errorf("invalid discovery retry schedule")
+		}
 		if validDiscoveryResult(result) {
 			return true, writer.RecordDiscoveryRetry(ctx, *work, result, request.Now, retryAt)
 		}

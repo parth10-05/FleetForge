@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -72,8 +73,22 @@ func runOnce(ctx context.Context, claimer app.DiscoveryWorkClaimer, executor app
 	if err != nil {
 		return err
 	}
-	_, err = app.RunDiscoveryOnce(ctx, claimer, executor, writer, app.DiscoveryClaimRequest{Owner: owner, LeaseToken: token, Now: now, LeaseExpiresAt: now.Add(30 * time.Second)}, now.Add(time.Second))
+	request := app.DiscoveryClaimRequest{Owner: owner, LeaseToken: token, Now: now, LeaseExpiresAt: now.Add(30 * time.Second)}
+	_, err = app.RunDiscoveryOnce(ctx, claimer, executor, writer, request, retryAt)
 	return err
+}
+
+// retryAt is intentionally deterministic: attempt one retries after one second;
+// later attempts retry after two seconds plus no more than 250ms of work-ID
+// jitter. The third claimed attempt is completed by persistence instead of
+// rescheduled, but still receives a valid value for atomic result recording.
+func retryAt(work app.DiscoveryWork, now time.Time) time.Time {
+	delay := time.Second
+	if work.Attempt > 1 {
+		digest := sha256.Sum256([]byte(work.ID))
+		delay = 2*time.Second + time.Duration(digest[0])*time.Millisecond
+	}
+	return now.Add(delay)
 }
 
 func leaseToken() (string, error) {

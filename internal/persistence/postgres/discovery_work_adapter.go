@@ -66,16 +66,14 @@ ORDER BY not_before, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, request.Now
 	if err != nil {
 		return nil, fmt.Errorf("lock discovery work: %w", err)
 	}
-	tag, err := tx.Exec(ctx, `UPDATE due_work
+	err = tx.QueryRow(ctx, `UPDATE due_work
 SET delivery_state='CLAIMED', discovery_attempts=discovery_attempts+1,
     lease_token=$2::uuid, lease_owner=$3,
     lease_expires_at=$4, updated_at=$5
-WHERE id=$1::uuid AND delivery_state='PENDING'`, work.ID, request.LeaseToken, request.Owner, request.LeaseExpiresAt.UTC(), request.Now.UTC())
+WHERE id=$1::uuid AND delivery_state='PENDING'
+RETURNING discovery_attempts`, work.ID, request.LeaseToken, request.Owner, request.LeaseExpiresAt.UTC(), request.Now.UTC()).Scan(&work.Attempt)
 	if err != nil {
 		return nil, fmt.Errorf("claim discovery work: %w", err)
-	}
-	if tag.RowsAffected() != 1 {
-		return nil, ErrLeaseConflict
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit discovery claim: %w", err)

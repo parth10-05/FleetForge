@@ -24,7 +24,7 @@ func TestP02DiscoveryWorkerAtomicallyCompletesClaimAndPersistsEvidence(t *testin
 		t.Fatalf("schedule discovery=%v err=%v", ok, err)
 	}
 	adapter := persistence.DiscoveryWorkAdapter{Pool: pool}
-	processed, err := app.RunDiscoveryOnce(ctx, adapter, fixedDiscoveryExecutor{result: app.DiscoveryResult{ObservationID: "00000000-0000-0000-2801-000000000004", ObservedAt: now.Add(time.Second), Normalized: []byte(`{"reachable":true}`), Success: true}}, adapter, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: "00000000-0000-0000-2801-000000000005", Now: now, LeaseExpiresAt: now.Add(30 * time.Second)}, now.Add(time.Second))
+	processed, err := app.RunDiscoveryOnce(ctx, adapter, fixedDiscoveryExecutor{result: app.DiscoveryResult{ObservationID: "00000000-0000-0000-2801-000000000004", ObservedAt: now.Add(time.Second), Normalized: []byte(`{"reachable":true}`), Success: true}}, adapter, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: "00000000-0000-0000-2801-000000000005", Now: now, LeaseExpiresAt: now.Add(30 * time.Second)}, retryOneSecond)
 	if err != nil || !processed {
 		t.Fatalf("run discovery processed=%v err=%v", processed, err)
 	}
@@ -53,6 +53,9 @@ func TestP02DiscoveryResultRejectsStaleLeaseWithoutPersistingEvidence(t *testing
 	if err != nil || claimed == nil {
 		t.Fatalf("claim=%+v err=%v", claimed, err)
 	}
+	if claimed.Attempt != 1 {
+		t.Fatalf("first claim attempt=%d", claimed.Attempt)
+	}
 	claimed.LeaseToken = "00000000-0000-0000-2802-000000000005"
 	err = adapter.RecordDiscoveryResult(ctx, *claimed, app.DiscoveryResult{ObservationID: "00000000-0000-0000-2802-000000000006", ObservedAt: now.Add(time.Second), Normalized: []byte(`{"reachable":true}`), Success: true})
 	if !errors.Is(err, persistence.ErrLeaseConflict) {
@@ -79,7 +82,7 @@ func TestP02DiscoveryRetryAtomicallyPersistsFailureAndReleasesLease(t *testing.T
 		t.Fatalf("schedule discovery=%v err=%v", ok, err)
 	}
 	adapter := persistence.DiscoveryWorkAdapter{Pool: pool}
-	processed, err := app.RunDiscoveryOnce(ctx, adapter, retryingDiscoveryExecutor{result: app.DiscoveryResult{ObservationID: "00000000-0000-0000-2803-000000000004", ObservedAt: now, Normalized: []byte(`{"error_kind":"timeout"}`)}}, adapter, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: "00000000-0000-0000-2803-000000000005", Now: now, LeaseExpiresAt: now.Add(30 * time.Second)}, now.Add(time.Second))
+	processed, err := app.RunDiscoveryOnce(ctx, adapter, retryingDiscoveryExecutor{result: app.DiscoveryResult{ObservationID: "00000000-0000-0000-2803-000000000004", ObservedAt: now, Normalized: []byte(`{"error_kind":"timeout"}`)}}, adapter, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: "00000000-0000-0000-2803-000000000005", Now: now, LeaseExpiresAt: now.Add(30 * time.Second)}, retryOneSecond)
 	if err != nil || !processed {
 		t.Fatalf("run discovery retry processed=%v err=%v", processed, err)
 	}
@@ -110,6 +113,9 @@ func TestP02DiscoveryStopsAfterThreeRetryableAttempts(t *testing.T) {
 		claimed, err := adapter.ClaimDiscoveryWork(ctx, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: token, Now: now, LeaseExpiresAt: now.Add(30 * time.Second)})
 		if err != nil || claimed == nil {
 			t.Fatalf("attempt %d claim=%+v err=%v", attempt, claimed, err)
+		}
+		if claimed.Attempt != attempt {
+			t.Fatalf("attempt=%d claimed attempt=%d", attempt, claimed.Attempt)
 		}
 		result := app.DiscoveryResult{ObservationID: "00000000-0000-0000-2804-00000000001" + string(rune('0'+attempt)), ObservedAt: now, Normalized: []byte(`{"error_kind":"timeout"}`)}
 		if err := adapter.RecordDiscoveryRetry(ctx, *claimed, result, now, now.Add(time.Second)); err != nil {
@@ -162,4 +168,8 @@ type retryingDiscoveryExecutor struct{ result app.DiscoveryResult }
 
 func (e retryingDiscoveryExecutor) Discover(context.Context, app.DiscoveryWork) (app.DiscoveryResult, error) {
 	return e.result, errors.New("timeout")
+}
+
+func retryOneSecond(_ app.DiscoveryWork, now time.Time) time.Time {
+	return now.Add(time.Second)
 }
