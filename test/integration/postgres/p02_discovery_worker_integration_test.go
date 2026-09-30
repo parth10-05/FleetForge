@@ -1,0 +1,74 @@
+//go:build postgresintegration
+
+package postgres
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	app "github.com/parth10-05/fleetforge/internal/application/inventory"
+	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
+)
+
+func TestP02DiscoveryWorkerAtomicallyCompletesClaimAndPersistsEvidence(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	const targetID = "00000000-0000-0000-2801-000000000001"
+	const workID = "00000000-0000-0000-2801-000000000002"
+	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,'worker-target','endpoint','site','rack','ACTIVE')", targetID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+	if ok, err := persistence.ScheduleDiscovery(ctx, pool, persistence.DiscoveryScheduleRequest{WorkID: workID, CommandID: "00000000-0000-0000-2801-000000000003", TargetID: targetID, TargetRevision: 0, NotBefore: now}); err != nil || !ok {
+		t.Fatalf("schedule discovery=%v err=%v", ok, err)
+	}
+	adapter := persistence.DiscoveryWorkAdapter{Pool: pool}
+	processed, err := app.RunDiscoveryOnce(ctx, adapter, fixedDiscoveryExecutor{result: app.DiscoveryResult{ObservationID: "00000000-0000-0000-2801-000000000004", ObservedAt: now.Add(time.Second), Normalized: []byte(`{"reachable":true}`), Success: true}}, adapter, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: "00000000-0000-0000-2801-000000000005", Now: now, LeaseExpiresAt: now.Add(30 * time.Second)}, now.Add(time.Second))
+	if err != nil || !processed {
+		t.Fatalf("run discovery processed=%v err=%v", processed, err)
+	}
+	var state, latest, good string
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1", workID).Scan(&state); err != nil || state != "COMPLETED" {
+		t.Fatalf("work state=%q err=%v", state, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT latest_attempt_id,last_good_id FROM target_discovery_heads WHERE target_id=$1", targetID).Scan(&latest, &good); err != nil || latest != "00000000-0000-0000-2801-000000000004" || good != latest {
+		t.Fatalf("heads latest=%q good=%q err=%v", latest, good, err)
+	}
+}
+
+func TestP02DiscoveryResultRejectsStaleLeaseWithoutPersistingEvidence(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	const targetID = "00000000-0000-0000-2802-000000000001"
+	const workID = "00000000-0000-0000-2802-000000000002"
+	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,'stale-worker-target','endpoint','site','rack','ACTIVE')", targetID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 30, 0, 1, 0, 0, time.UTC)
+	if ok, err := persistence.ScheduleDiscovery(ctx, pool, persistence.DiscoveryScheduleRequest{WorkID: workID, CommandID: "00000000-0000-0000-2802-000000000003", TargetID: targetID, TargetRevision: 0, NotBefore: now}); err != nil || !ok {
+		t.Fatalf("schedule discovery=%v err=%v", ok, err)
+	}
+	adapter := persistence.DiscoveryWorkAdapter{Pool: pool}
+	claimed, err := adapter.ClaimDiscoveryWork(ctx, app.DiscoveryClaimRequest{Owner: "worker", LeaseToken: "00000000-0000-0000-2802-000000000004", Now: now, LeaseExpiresAt: now.Add(30 * time.Second)})
+	if err != nil || claimed == nil {
+		t.Fatalf("claim=%+v err=%v", claimed, err)
+	}
+	claimed.LeaseToken = "00000000-0000-0000-2802-000000000005"
+	err = adapter.RecordDiscoveryResult(ctx, *claimed, app.DiscoveryResult{ObservationID: "00000000-0000-0000-2802-000000000006", ObservedAt: now.Add(time.Second), Normalized: []byte(`{"reachable":true}`), Success: true})
+	if !errors.Is(err, persistence.ErrLeaseConflict) {
+		t.Fatalf("stale result error=%v", err)
+	}
+	var observations, heads int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM device_observations WHERE target_id=$1", targetID).Scan(&observations); err != nil || observations != 0 {
+		t.Fatalf("observations=%d err=%v", observations, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM target_discovery_heads WHERE target_id=$1", targetID).Scan(&heads); err != nil || heads != 0 {
+		t.Fatalf("heads=%d err=%v", heads, err)
+	}
+}
+
+type fixedDiscoveryExecutor struct{ result app.DiscoveryResult }
+
+func (e fixedDiscoveryExecutor) Discover(context.Context, app.DiscoveryWork) (app.DiscoveryResult, error) {
+	return e.result, nil
+}

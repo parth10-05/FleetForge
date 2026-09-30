@@ -6,7 +6,9 @@ import (
 	"time"
 )
 
-const DiscoveryWorkType = "DISCOVER_TARGET"
+// DiscoveryWorkType mirrors the persisted P02 vocabulary. Keeping the value
+// here prevents a worker from silently claiming a broader due-work class.
+const DiscoveryWorkType = "DISCOVER"
 
 type DiscoveryWork struct {
 	ID, TargetID, LeaseToken string
