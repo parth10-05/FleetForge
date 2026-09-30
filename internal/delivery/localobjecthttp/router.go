@@ -29,7 +29,10 @@ func New(store *localartifactstore.DiskStore, secret []byte, now func() time.Tim
 }
 func (h *Handler) WithCompletion(completion interface {
 	CompleteUpload(context.Context, string, artifact.ObjectIdentity) error
-}) *Handler { h.completion = completion; return h }
+}) *Handler {
+	h.completion = completion
+	return h
+}
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /v1/objects/upload", h.upload)
