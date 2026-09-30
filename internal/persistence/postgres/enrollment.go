@@ -194,13 +194,16 @@ func validateReadinessCandidate(ctx context.Context, tx pgx.Tx, req ReadinessEnr
 		if id != targets[i].TargetID || family != declaredFamily || policy != "synthetic-family-exact-v1" || reason != "compatible" {
 			return fmt.Errorf("%w: candidate membership or compatibility changed", ErrEnrollmentBlocked)
 		}
-		var currentRevision int64
+		var currentRevision, discoveryRevision int64
 		var state, currentSite, currentRack, currentFamily string
 		var trusted, fresh bool
 		var latest, good string
-		err := tx.QueryRow(ctx, `SELECT t.revision,t.administrative_state,t.trust_metadata_complete,t.site_key,t.rack_key,l.value,h.latest_attempt_id::text,h.last_good_id::text,o.observed_at >= now()-interval '120 seconds' AND o.observed_at <= now()+interval '1 second' FROM targets t JOIN target_labels l ON l.target_id=t.id AND l.key='family' JOIN target_discovery_heads h ON h.target_id=t.id JOIN device_observations o ON o.id=h.last_good_id WHERE t.id=$1::uuid FOR SHARE OF t,h,o`, id).Scan(&currentRevision, &state, &trusted, &currentSite, &currentRack, &currentFamily, &latest, &good, &fresh)
-		if err != nil || currentRevision != revision || state != "ACTIVE" || !trusted || currentSite != site || currentRack != rack || currentFamily != family || latest != good || !fresh {
-			return fmt.Errorf("%w: target %s evidence is stale", ErrEnrollmentBlocked, id)
+		err := tx.QueryRow(ctx, `SELECT t.revision,h.head_revision,t.administrative_state,t.trust_metadata_complete,t.site_key,t.rack_key,l.value,h.latest_attempt_id::text,h.last_good_id::text,o.observed_at >= now()-interval '120 seconds' AND o.observed_at <= now()+interval '1 second' FROM targets t JOIN target_labels l ON l.target_id=t.id AND l.key='family' JOIN target_discovery_heads h ON h.target_id=t.id JOIN device_observations o ON o.id=h.last_good_id WHERE t.id=$1::uuid FOR SHARE OF t,h,o`, id).Scan(&currentRevision, &discoveryRevision, &state, &trusted, &currentSite, &currentRack, &currentFamily, &latest, &good, &fresh)
+		if err != nil {
+			return fmt.Errorf("%w: target %s current discovery evidence unavailable: %v", ErrEnrollmentBlocked, id, err)
+		}
+		if currentRevision != revision || discoveryRevision != revision || state != "ACTIVE" || !trusted || currentSite != site || currentRack != rack || currentFamily != family || latest != good || !fresh {
+			return fmt.Errorf("%w: target %s evidence differs from candidate (candidate_revision=%d target_revision=%d discovery_revision=%d state=%s trusted=%t site=%s rack=%s family=%s latest_equals_good=%t fresh=%t)", ErrEnrollmentBlocked, id, revision, currentRevision, discoveryRevision, state, trusted, currentSite, currentRack, currentFamily, latest == good, fresh)
 		}
 	}
 	if err := rows.Err(); err != nil {
