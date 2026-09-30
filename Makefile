@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := verify
 
-.PHONY: format lint test test-race build domain-test domain-property-test postgres-integration-test sqlc-generate web-typecheck web-lint web-test web-build container-build secret-scan verify
+.PHONY: format lint test test-race build domain-test domain-property-test postgres-integration-test p02-fuzz-test sqlc-generate web-typecheck web-lint web-test web-build container-build secret-scan verify
 
 format:
 	go fmt ./...
@@ -23,11 +23,16 @@ domain-property-test:
 postgres-integration-test:
 	go test -tags=postgresintegration -count=1 ./test/integration/postgres/...
 
+p02-fuzz-test:
+	go test ./internal/domain/inventory -run '^$$' -fuzz '^FuzzSelectorCanonicalRoundTrip$$' -fuzztime=10s
+	go test ./internal/redfish -run '^$$' -fuzz '^FuzzTargetAddressKeepsAcceptedResourcesUnderServiceRoot$$' -fuzztime=10s
+	go test ./internal/redfish -run '^$$' -fuzz '^FuzzDecodeDocumentRejectsUnsafeInputWithoutPanic$$' -fuzztime=10s
+
 sqlc-generate:
 	CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
 
 build:
-	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator
+	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/v1-p02-check
 
 web-typecheck:
 	pnpm --dir web typecheck

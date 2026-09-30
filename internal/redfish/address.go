@@ -19,7 +19,7 @@ type TargetAddress struct {
 
 func ParseTargetAddress(rawOrigin, targetKey string) (TargetAddress, error) {
 	origin, err := url.Parse(rawOrigin)
-	if err != nil || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Path != "" && origin.Path != "/" || !safeKey(targetKey) {
+	if err != nil || origin.User != nil || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Path != "" && origin.Path != "/" || !safeKey(targetKey) {
 		return TargetAddress{}, ErrForbiddenAddress
 	}
 	origin.Path, origin.RawPath = "", ""

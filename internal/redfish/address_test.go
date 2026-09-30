@@ -24,6 +24,12 @@ func TestTargetAddressRejectsOriginEscapeBeforeIO(t *testing.T) {
 	}
 }
 
+func TestTargetAddressRejectsOriginsWithAnEmptyQueryMarker(t *testing.T) {
+	if _, err := ParseTargetAddress("https://sim.example?", "rack-a"); !errors.Is(err, ErrForbiddenAddress) {
+		t.Fatalf("empty-query origin error = %v", err)
+	}
+}
+
 func TestDialPolicyRejectsPrivateMetadataAndLoopback(t *testing.T) {
 	allowed := []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}
 	if err := ValidateDialIP("198.51.100.8", allowed); err != nil {
