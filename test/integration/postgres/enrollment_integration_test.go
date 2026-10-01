@@ -186,26 +186,26 @@ func TestReadinessEnrollmentTerminalTargetUpdateDoesNotReleaseEnrollment(t *test
 func TestReadinessEnrollmentRejectsInvalidatedTrustInputsAtomically(t *testing.T) {
 	for _, test := range []struct {
 		name   string
-		mutate func(*pgxpool.Pool, context.Context, ownershipFixture)
+		mutate func(*pgxpool.Pool, context.Context, *ownershipFixture) error
 	}{
 		{
 			name: "retired artifact",
-			mutate: func(pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture) {
-				if err := persistence.RetireVerifiedArtifact(ctx, pool, fixture.artifactID); err != nil {
-					t.Fatalf("retire verified artifact: %v", err)
-				}
+			mutate: func(pool *pgxpool.Pool, ctx context.Context, fixture *ownershipFixture) error {
+				return persistence.RetireVerifiedArtifact(ctx, pool, fixture.artifactID)
 			},
 		},
 		{
-			name: "blocked candidate",
-			mutate: func(pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture) {
-				mustExecute(t, pool, ctx, "UPDATE preflight_candidates SET state='BLOCKED' WHERE id='"+fixture.candidateID+"'")
+			name: "unknown candidate",
+			mutate: func(_ *pgxpool.Pool, _ context.Context, fixture *ownershipFixture) error {
+				fixture.candidateID = "00000000-0000-0000-9006-000000000099"
+				return nil
 			},
 		},
 		{
 			name: "drifted target revision",
-			mutate: func(pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture) {
-				mustExecute(t, pool, ctx, "UPDATE targets SET revision=revision+1 WHERE id='"+fixture.targetID+"'")
+			mutate: func(pool *pgxpool.Pool, ctx context.Context, fixture *ownershipFixture) error {
+				_, err := pool.Exec(ctx, "UPDATE targets SET revision=revision+1 WHERE id=$1", fixture.targetID)
+				return err
 			},
 		},
 	} {
@@ -213,7 +213,9 @@ func TestReadinessEnrollmentRejectsInvalidatedTrustInputsAtomically(t *testing.T
 			_, pool, ctx := migratedHarness(t)
 			fixture := seedOwnershipFixture(t, pool, ctx)
 			prepareReadinessCampaign(t, pool, ctx, fixture)
-			test.mutate(pool, ctx, fixture)
+			if err := test.mutate(pool, ctx, &fixture); err != nil {
+				t.Fatalf("invalidate trust input: %v", err)
+			}
 
 			err := persistence.AcquireReadinessEnrollment(ctx, pool, enrollmentRequest(fixture, "00000000-0000-0000-9006-000000000001", "00000000-0000-0000-9006-000000000002"))
 			if !errors.Is(err, persistence.ErrEnrollmentBlocked) {
