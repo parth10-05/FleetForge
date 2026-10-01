@@ -8,13 +8,18 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	appartifacts "github.com/parth10-05/fleetforge/internal/application/artifacts"
 	appinventory "github.com/parth10-05/fleetforge/internal/application/inventory"
 	"github.com/parth10-05/fleetforge/internal/delivery/inventoryadapter"
 	"github.com/parth10-05/fleetforge/internal/delivery/redfishsim"
+	"github.com/parth10-05/fleetforge/internal/domain/artifact"
+	"github.com/parth10-05/fleetforge/internal/domain/value"
 	"github.com/parth10-05/fleetforge/internal/persistence/postgres"
+	"github.com/parth10-05/fleetforge/internal/platform/localartifactstore"
 	"github.com/parth10-05/fleetforge/internal/platform/syntheticcredentials"
 	"github.com/parth10-05/fleetforge/internal/platform/syntheticdiscovery"
 	"github.com/parth10-05/fleetforge/internal/redfish"
@@ -108,6 +113,46 @@ func TestP02SixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM due_work WHERE work_type='DISCOVER' AND delivery_state='COMPLETED'").Scan(&completed); err != nil || completed != 6 {
 		t.Fatalf("completed discovery work=%d err=%v", completed, err)
+	}
+
+	// The artifact path uses the actual temporary object store, immutable
+	// binding transaction, verification claim, and streaming worker. No target
+	// operation is admitted or submitted by this P02-only component test.
+	const artifactID = "00000000-0000-0000-3006-000000000001"
+	digest, err := value.ParseSHA256Digest("sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	object, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/component.bin", "component-version-1", 3, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := localartifactstore.OpenDisk(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(object, strings.NewReader("abc")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,state) VALUES ($1,'v1',$2,$3,'UPLOADING')", artifactID, digest.String(), object.Key()); err != nil {
+		t.Fatal(err)
+	}
+	if err := postgres.BindUploadedArtifactObject(ctx, pool, postgres.ArtifactBindingRequest{ArtifactID: artifactID, Object: object}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := postgres.StartAndScheduleArtifactVerification(ctx, pool, postgres.ArtifactVerificationStartRequest{ArtifactID: artifactID, WorkID: "00000000-0000-0000-3006-000000000002", CommandID: "00000000-0000-0000-3006-000000000003", NotBefore: now}); err != nil || !ok {
+		t.Fatalf("schedule verification: ok=%t err=%v", ok, err)
+	}
+	verification := postgres.ArtifactVerificationAdapter{Pool: pool}
+	verificationService := appartifacts.NewWithCompletion(nil, nil, store, nil, func() time.Time { return now }).WithVerification(verification, verification)
+	verificationWork := postgres.ArtifactVerificationWorkAdapter{Pool: pool}
+	worker := appartifacts.NewWorker(verificationService, verificationWork, verificationWork, func() time.Time { return now })
+	if err := worker.RunOnce(ctx, appartifacts.VerificationWorkClaimRequest{Owner: "component-verifier", LeaseToken: "00000000-0000-0000-3006-000000000004", Now: now, LeaseExpiresAt: now.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	var artifactState string
+	if err := pool.QueryRow(ctx, "SELECT state FROM firmware_artifacts WHERE id=$1::uuid", artifactID).Scan(&artifactState); err != nil || artifactState != "VERIFIED" {
+		t.Fatalf("artifact state=%q err=%v", artifactState, err)
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
