@@ -3,8 +3,10 @@
 package postgres
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"os"
@@ -17,6 +19,7 @@ import (
 	appinventory "github.com/parth10-05/fleetforge/internal/application/inventory"
 	apppreflight "github.com/parth10-05/fleetforge/internal/application/preflight"
 	"github.com/parth10-05/fleetforge/internal/delivery/inventoryadapter"
+	"github.com/parth10-05/fleetforge/internal/delivery/localobjecthttp"
 	"github.com/parth10-05/fleetforge/internal/delivery/redfishsim"
 	"github.com/parth10-05/fleetforge/internal/domain/artifact"
 	"github.com/parth10-05/fleetforge/internal/domain/value"
@@ -126,13 +129,33 @@ func TestP02SixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Put(object, strings.NewReader("abc")); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,state) VALUES ($1,'v1',$2,$3,'UPLOADING')", artifactID, digest.String(), object.Key()); err != nil {
 		t.Fatal(err)
 	}
-	if err := postgres.BindUploadedArtifactObject(ctx, pool, postgres.ArtifactBindingRequest{ArtifactID: artifactID, Object: object}); err != nil {
+	uploadSecret := []byte("01234567890123456789012345678901")
+	uploadClaims := localartifactstore.UploadGrantClaims{Version: "fleetforge.upload-grant/v1", GrantID: "component-upload-grant", ArtifactID: artifactID, Method: "PUT", Provider: object.Provider(), Container: object.Container(), Key: object.Key(), VersionID: object.VersionID(), Size: object.Size(), Digest: object.Digest().String(), MediaType: artifact.SyntheticFirmwareMediaType, ExpiresAt: now.Add(time.Minute)}
+	uploadGrant, err := localartifactstore.IssueSignedGrant(uploadSecret, uploadClaims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion := appartifacts.NewWithCompletion(nil, nil, store, postgres.ArtifactBindingAdapter{Pool: pool}, func() time.Time { return now })
+	uploadServer := httptest.NewServer(localobjecthttp.New(store, uploadSecret, func() time.Time { return now }).WithCompletion(completion).Routes())
+	defer uploadServer.Close()
+	uploadRequest, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadServer.URL+"/v1/objects/upload", bytes.NewReader([]byte("abc")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadRequest.Header.Set(localobjecthttp.GrantHeader, uploadGrant.Payload+"."+uploadGrant.Signature)
+	uploadRequest.Header.Set("Content-Type", artifact.SyntheticFirmwareMediaType)
+	uploadResponse, err := uploadServer.Client().Do(uploadRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uploadResponse.StatusCode != http.StatusCreated {
+		uploadResponse.Body.Close()
+		t.Fatalf("direct upload status=%d", uploadResponse.StatusCode)
+	}
+	if err := uploadResponse.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := postgres.StartAndScheduleArtifactVerification(ctx, pool, postgres.ArtifactVerificationStartRequest{ArtifactID: artifactID, WorkID: "00000000-0000-0000-3006-000000000002", CommandID: "00000000-0000-0000-3006-000000000003", NotBefore: now}); err != nil || !ok {
