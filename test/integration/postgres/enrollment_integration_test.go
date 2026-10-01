@@ -104,6 +104,51 @@ func TestReadinessEnrollmentBlockedByUnresolvedReservation(t *testing.T) {
 	}
 }
 
+// TestReadinessEnrollmentRollsBackEarlierClaimsWhenALaterMemberIsBlocked
+// proves that a multi-member readiness handoff remains all-or-nothing. The
+// first target is eligible, but the second already has an active enrollment;
+// neither target may be enrolled and no campaign/audit/outbox state may be
+// committed.
+func TestReadinessEnrollmentRollsBackEarlierClaimsWhenALaterMemberIsBlocked(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	second := seedSecondTargetForReadiness(t, pool, ctx, fixture)
+	prepareReadinessCampaign(t, pool, ctx, fixture)
+	blocker := prepareReadinessCandidateTarget(t, pool, ctx, fixture, second)
+
+	// The candidate and campaign own both targets, but an earlier campaign has
+	// retained the later target. The first target must not be left enrolled when
+	// the later target blocks the ordered transaction.
+	insertEnrollment(t, pool, ctx, "00000000-0000-0000-9007-000000000001", blocker)
+	req := enrollmentRequest(fixture, "00000000-0000-0000-9007-000000000002", "00000000-0000-0000-9007-000000000003")
+	req.Targets = append(req.Targets, persistence.TargetEnrollmentEntry{
+		EnrollmentID:     "00000000-0000-0000-9007-000000000004",
+		TargetID:         second.targetID,
+		CampaignTargetID: second.campaignTargetID,
+	})
+	if err := persistence.AcquireReadinessEnrollment(ctx, pool, req); !errors.Is(err, persistence.ErrEnrollmentBlocked) {
+		t.Fatalf("AcquireReadinessEnrollment error = %v, want ErrEnrollmentBlocked", err)
+	}
+
+	var state string
+	var revision, enrollments, audits, outbox int
+	if err := pool.QueryRow(ctx, "SELECT state,revision FROM campaigns WHERE id=$1", fixture.campaignID).Scan(&state, &revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM target_enrollments WHERE campaign_id=$1", fixture.campaignID).Scan(&enrollments); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_events WHERE aggregate_id=$1::uuid", fixture.campaignID).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events WHERE aggregate_id=$1::uuid", fixture.campaignID).Scan(&outbox); err != nil {
+		t.Fatal(err)
+	}
+	if state != "VALIDATING" || revision != 0 || enrollments != 0 || audits != 0 || outbox != 0 {
+		t.Fatalf("blocked multi-member readiness wrote durable state: campaign=%s/%d enrollments=%d audits=%d outbox=%d", state, revision, enrollments, audits, outbox)
+	}
+}
+
 // TestReadinessEnrollmentCompetingCampaignsOnlyOneWins proves that when two
 // campaigns compete to enroll the same target, exactly one succeeds and the
 // other receives ErrEnrollmentBlocked or ErrRevisionConflict.
@@ -286,4 +331,33 @@ func prepareReadinessCampaign(t *testing.T, pool *pgxpool.Pool, ctx context.Cont
 	mustExecute(t, pool, ctx, "INSERT INTO artifact_object_versions (artifact_id,provider,container,object_key,version_id,object_size,sha256_digest,verification_policy_version,declared_target_family) VALUES ('"+fixture.artifactID+"','local-versioned-v1','fixture','firmware-v1','version-1',1,'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','synthetic-sha256-v1','synthetic-family') ON CONFLICT (artifact_id) DO NOTHING")
 	mustExecute(t, pool, ctx, "INSERT INTO preflight_candidates (id,artifact_id,artifact_version_id,selector_version,selector_json,snapshot_hash,state,report) VALUES ('"+fixture.candidateID+"','"+fixture.artifactID+"','version-1','selector-v1','{}','sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','PASSED','{}')")
 	mustExecute(t, pool, ctx, "INSERT INTO preflight_candidate_targets (candidate_id,target_id,frozen_target_revision,site_key,rack_key,target_family,compatibility_policy_version,compatibility_reason) SELECT '"+fixture.candidateID+"','"+fixture.targetID+"',revision,'site-a','rack-a','synthetic-family','synthetic-family-exact-v1','compatible' FROM targets WHERE id='"+fixture.targetID+"'")
+}
+
+func seedSecondTargetForReadiness(t *testing.T, pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture) ownershipFixture {
+	t.Helper()
+	second := fixture
+	second.targetID = "00000000-0000-0000-0000-000000000230"
+	second.campaignTargetID = "00000000-0000-0000-0000-000000000231"
+	second.targetUpdateID = "00000000-0000-0000-0000-000000000232"
+	mustExecute(t, pool, ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state,target_key,contract_version,credential_provider,credential_reference,transport_policy_version,registration_hash,trust_metadata_complete) VALUES ('"+second.targetID+"','target-second','ref','site-a','rack-b','ACTIVE','target-second-key','synthetic-redfish-v1','synthetic-test','synthetic-test:target-second','transport-v1','sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',true)")
+	mustExecute(t, pool, ctx, "INSERT INTO campaign_targets (id,campaign_id,target_id,artifact_id,frozen_target_revision,frozen_policy_hash) VALUES ('"+second.campaignTargetID+"','"+fixture.campaignID+"','"+second.targetID+"','"+fixture.artifactID+"',0,'policy-hash')")
+	mustExecute(t, pool, ctx, "INSERT INTO target_updates (id,campaign_target_id,state,expected_firmware_version) VALUES ('"+second.targetUpdateID+"','"+second.campaignTargetID+"','PENDING','v1')")
+	return second
+}
+
+func prepareReadinessCandidateTarget(t *testing.T, pool *pgxpool.Pool, ctx context.Context, fixture, second ownershipFixture) ownershipFixture {
+	t.Helper()
+	mustExecute(t, pool, ctx, "INSERT INTO target_labels (target_id,key,value) VALUES ('"+second.targetID+"','family','synthetic-family')")
+	mustExecute(t, pool, ctx, "INSERT INTO device_observations (id,target_id,kind,observed_at,normalized_data) VALUES ('00000000-0000-0000-0000-000000000233','"+second.targetID+"','DISCOVERY',now(),'{}')")
+	mustExecute(t, pool, ctx, "INSERT INTO target_discovery_heads (target_id,head_revision,latest_attempt_id,last_good_id) SELECT id,revision,'00000000-0000-0000-0000-000000000233','00000000-0000-0000-0000-000000000233' FROM targets WHERE id='"+second.targetID+"'")
+	mustExecute(t, pool, ctx, "INSERT INTO preflight_candidate_targets (candidate_id,target_id,frozen_target_revision,site_key,rack_key,target_family,compatibility_policy_version,compatibility_reason) SELECT '"+fixture.candidateID+"','"+second.targetID+"',revision,'site-a','rack-b','synthetic-family','synthetic-family-exact-v1','compatible' FROM targets WHERE id='"+second.targetID+"'")
+
+	// Create a distinct historical campaign solely to retain the active claim
+	// that blocks this target. It deliberately does not share the candidate.
+	mustExecute(t, pool, ctx, "INSERT INTO campaigns (id,artifact_id,state,policy_version_id) VALUES ('00000000-0000-0000-0000-000000000234','"+fixture.artifactID+"','DRAFT','00000000-0000-0000-0000-000000000207')")
+	mustExecute(t, pool, ctx, "INSERT INTO campaign_targets (id,campaign_id,target_id,artifact_id,frozen_target_revision,frozen_policy_hash) VALUES ('00000000-0000-0000-0000-000000000235','00000000-0000-0000-0000-000000000234','"+second.targetID+"','"+fixture.artifactID+"',0,'policy-hash')")
+	blocker := second
+	blocker.campaignID = "00000000-0000-0000-0000-000000000234"
+	blocker.campaignTargetID = "00000000-0000-0000-0000-000000000235"
+	return blocker
 }
