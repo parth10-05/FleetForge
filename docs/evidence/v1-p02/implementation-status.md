@@ -15,11 +15,11 @@ claim.
 | T05 durable discovery | Q29, active-work index, `DiscoveryWorkAdapter`, `syntheticdiscovery.Executor`, migration 00016, `cmd/discovery-worker`, `TestP02DiscoveryClaimsOldestDueWorkAndSkipsExistingLease` | Implemented locally | Claims are filtered to `DISCOVER`, transport runs outside DB locks, retry evidence/reschedule is atomic, retry timing is attempt-aware (1s then 2s plus deterministic <=250ms jitter), attempts are capped at three, lease repair completes exhausted claims, and a dedicated worker has mandatory CIDR/credential configuration. Fairness barriers and reachable PostgreSQL execution remain open. |
 | T06 bounded selectors | `internal/domain/inventory/selector.go`, Q31, `target_selection.go`, `FuzzSelectorCanonicalRoundTrip`, `TestP02TargetSelectionFailsClosedAtTenThousandCandidates` | Implemented locally | The 10-second local canonicalization fuzz gate passed. Tagged source coverage builds a 10,000-target selection and requires fail-closed cap overflow; execute it and retain the query-plan artifact against a reachable PostgreSQL gate. |
 | T07 frozen preflight | `internal/domain/preflight`, application evaluator, `PreflightAdapter`, PostgreSQL candidate writer, Q32 drift report, `TestP02PreflightCandidatePersistsFrozenMembershipImmutably` | Implemented locally | The tagged Neon application-path test proves selection, verified-artifact loading, fresh discovery evidence, atomic freeze, and retained negative drift/retirement checks. Runnable process composition remains open. |
-| T08 readiness recheck | strengthened `AcquireReadinessEnrollment` active/quarantine checks | Partial | P03-owned campaign construction and candidate/artifact/freshness recheck wiring remain open. |
+| T08 readiness recheck | `AcquireReadinessEnrollment` serializable trust boundary; candidate/artifact/object-version/fresh-evidence checks; `TestReadinessEnrollmentRejectsInvalidatedTrustInputsAtomically`; `TestReadinessEnrollmentRollsBackEarlierClaimsWhenALaterMemberIsBlocked` | Implemented locally | The readiness handoff is atomic and rechecks frozen candidate membership, exact verified artifact tuple, current target revision/trust metadata, matching discovery head, freshness, compatibility, existing enrollment, and reservations. P03 still owns policy/member construction and may not bypass this boundary. |
 | T09 artifact identity/lifecycle | `internal/domain/artifact`, migrations 00008/00010, immutable guards | Implemented locally | Real PostgreSQL migration/guard execution remains required. |
 | T10 direct upload | Q34; artifact upload application/PG adapters; signed artifact-bound grants; durable `localartifactstore`; `localobjecthttp`; `cmd/local-object-store` completion composition | Implemented locally | A process-level listener-to-Neon component run and final retained evidence remain open. |
 | T11 verification work | bounded verifier, atomic `UPLOADED -> VERIFYING` plus due work, exact tuple fence; `ArtifactVerificationWorkAdapter`; artifact verification worker; `TestP02ArtifactVerificationWorkerStreamsBoundVersionAndCompletesLease`; `TestVerifyContentStreamsMaximumArtifactWithoutLargeReadBuffer` | Implemented locally | The verifier's 16 MiB stream test retains no source blob and observes no read request larger than 64 KiB. Tagged source coverage proves claim -> immutable local stream -> `VERIFIED` -> fenced `COMPLETED`; process-supervision/crash-retry and reachable PostgreSQL execution remain open. |
-| T12 stable eligibility | immutable verification result, retirement and preflight-state gates | Partial | Readiness transaction must consume these rechecks in the P03 boundary. |
+| T12 stable eligibility | immutable verification/retirement gates plus the T08 atomic recheck transaction | Implemented locally | Retirement, missing candidate, and target-revision drift are rejected before enrollment, campaign transition, audit, or outbox writes. Broader component and crash-replay evidence remains open. |
 | T13 compatibility | exact synthetic family policy and frozen per-target decision | Implemented locally | Final component proof against all required target profiles remains open. |
 | T14 cleanup/orphans | bounded DB expiration; durable cleanup intents with lease fencing; `DiskStore.ReportOrphans`; exact grant receipt resolution; `RunCleanupOnce`; `TestP02CleanupWorkerDeletesOnlyClaimedGrantReceipt`; stale-lease recovery assertion in `TestP02CleanupExpiresOnlyOldUnboundUploadingArtifacts` | Implemented locally | Tagged source coverage proves exact claimed-version deletion, fenced completion, and stale-token rejection after lease recovery. Reachable PostgreSQL/disk execution remains open. |
 
@@ -28,6 +28,7 @@ claim.
 - `go test -count=1 ./...` passed at the current branch head.
 - `go vet ./...` passed at the current branch head.
 - `git diff --check` passed at the current branch head.
+- GitHub Actions run [`36910051689`](https://github.com/parth10-05/FleetForge/actions/runs/36910051689) passed at `37e9f2691c3d067b03fc447d0c46cc65122bc377`: SQLC drift, formatting, vet, unit/property, complete tagged PostgreSQL, normal and tagged Linux race, all three fuzz gates, command builds, web, changed-files, and secret scanning.
 - The tagged PostgreSQL package compiles with
   `go test -tags postgresintegration -run '^$' ./test/integration/postgres`.
 - Focused discovery application, persistence, and synthetic-executor tests
@@ -39,9 +40,6 @@ claim.
 
 ## Unexecuted or deferred gates
 
-- The complete tagged PostgreSQL suite has not yet been retained at the final
-  integration SHA. Focused P02 artifact lifecycle and direct-upload tests have
-  passed against generated isolated Neon schemas.
 - The direct object-store listener is locally implemented, but no real
   PostgreSQL-backed control-plane-to-listener flow or P03 operator-facing
   campaign readiness flow has been declared complete.
