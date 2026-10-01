@@ -17,24 +17,22 @@ WITH requested(key, value) AS (
       FROM unnest($1::varchar[]) WITH ORDINALITY AS keys(key, ordinal)
       JOIN unnest($2::varchar[]) WITH ORDINALITY AS values(value, ordinal)
         ON values.ordinal = keys.ordinal
+), matching_targets AS (
+    SELECT actual.target_id
+      FROM requested requirement
+      JOIN target_labels actual
+        ON actual.key = requirement.key
+       AND actual.value = requirement.value
+     GROUP BY actual.target_id
+    HAVING count(*) = (SELECT count(*) FROM requested)
 )
 SELECT t.id, t.revision, t.site_key, t.rack_key, family.value AS family
-  FROM targets t
+  FROM matching_targets matching
+  JOIN targets t ON t.id = matching.target_id
   JOIN target_labels family
     ON family.target_id = t.id AND family.key = 'family'
  WHERE t.administrative_state = 'ACTIVE'
    AND t.trust_metadata_complete
-   AND NOT EXISTS (
-       SELECT 1
-         FROM requested requirement
-        WHERE NOT EXISTS (
-            SELECT 1
-              FROM target_labels actual
-             WHERE actual.target_id = t.id
-               AND actual.key = requirement.key
-               AND actual.value = requirement.value
-        )
-   )
  ORDER BY t.id ASC
  LIMIT $3
 `

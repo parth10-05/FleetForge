@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -65,6 +66,76 @@ SELECT target.id,label.key,label.value
 		t.Fatalf("selection must reject cap overflow: selected=%v err=%v", selected, err)
 	}
 }
+
+func TestP02TargetSelectionPlanUsesExactLabelIndexForSelectiveLookup(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	if _, err := pool.Exec(ctx, `INSERT INTO targets
+    (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state,target_key,contract_version,credential_provider,credential_reference,transport_policy_version,registration_hash,trust_metadata_complete)
+SELECT ('00000000-0000-0000-2603-' || lpad(series::text,12,'0'))::uuid,
+       'selection-plan-' || series::text,
+       'https://simulator.example','site-' || series::text,'rack-plan','ACTIVE',
+       'plan-' || series::text,'synthetic-redfish-v1','synthetic-test',
+       'synthetic-test:plan-' || series::text,'synthetic-allowlisted-v1',
+       'sha256:' || repeat('a',64),true
+  FROM generate_series(1,10000) AS series`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO target_labels(target_id,key,value)
+SELECT target.id,label.key,label.value
+  FROM targets AS target
+ CROSS JOIN LATERAL (VALUES
+    ('site'::varchar, CASE WHEN target.external_identity ~ 'selection-plan-(100|[1-9]?[0-9])$' THEN 'west'::varchar ELSE 'east'::varchar END),
+    ('family'::varchar, 'synthetic'::varchar)
+ ) AS label(key,value)
+ WHERE target.external_identity LIKE 'selection-plan-%'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "ANALYZE targets; ANALYZE target_labels"); err != nil {
+		t.Fatal(err)
+	}
+	planRows, err := pool.Query(ctx, exactLabelSelectorExplain, []string{"site", "family"}, []string{"west", "synthetic"}, 101)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer planRows.Close()
+	plan := make([]string, 0)
+	for planRows.Next() {
+		var line string
+		if err := planRows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, line)
+	}
+	if err := planRows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(plan, "\n"), "target_labels_exact_lookup_index") {
+		t.Fatalf("selective exact-label plan omitted lookup index:\n%s", strings.Join(plan, "\n"))
+	}
+}
+
+const exactLabelSelectorExplain = `EXPLAIN (COSTS OFF)
+WITH requested(key, value) AS (
+    SELECT keys.key, values.value
+      FROM unnest($1::varchar[]) WITH ORDINALITY AS keys(key, ordinal)
+      JOIN unnest($2::varchar[]) WITH ORDINALITY AS values(value, ordinal)
+        ON values.ordinal = keys.ordinal
+), matching_targets AS (
+    SELECT actual.target_id
+      FROM requested requirement
+      JOIN target_labels actual
+        ON actual.key = requirement.key
+       AND actual.value = requirement.value
+     GROUP BY actual.target_id
+    HAVING count(*) = (SELECT count(*) FROM requested)
+)
+SELECT t.id
+  FROM matching_targets matching
+  JOIN targets t ON t.id = matching.target_id
+ WHERE t.administrative_state = 'ACTIVE'
+   AND t.trust_metadata_complete
+ ORDER BY t.id ASC
+ LIMIT $3`
 
 func registerSelectionTarget(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id, externalID, rack, site string) {
 	t.Helper()

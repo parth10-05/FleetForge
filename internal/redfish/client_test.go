@@ -169,3 +169,36 @@ func TestProductionDialBindsResolutionToAllowedCIDR(t *testing.T) {
 		t.Fatalf("unapproved resolution error=%v", err)
 	}
 }
+
+func TestAuthenticatedClientRefusesForbiddenResolutionBeforeDial(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan struct{}, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			connection.Close()
+			accepted <- struct{}{}
+		}
+	}()
+	address, err := ParseTargetAddress("http://simulator.example:"+strconv.Itoa(listener.Addr().(*net.TCPAddr).Port), "rack-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient(ClientConfig{ResolveIP: func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+	}})
+	_, err = client.GetDocumentAuthenticated(context.Background(), address, "Systems/1", testAuthenticator{})
+	var failure DiscoveryError
+	if !errors.As(err, &failure) || failure.Kind != ErrorMalformed || !errors.Is(err, ErrForbiddenAddress) {
+		t.Fatalf("forbidden authenticated request error=%v", err)
+	}
+	select {
+	case <-accepted:
+		t.Fatal("forbidden authenticated request reached a listener")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
