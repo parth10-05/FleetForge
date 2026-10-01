@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	app "github.com/parth10-05/fleetforge/internal/application/inventory"
+	"github.com/parth10-05/fleetforge/internal/domain/inventory"
 )
 
 // DiscoveryWorkAdapter owns only P02's read-only discovery work. In
@@ -31,7 +32,7 @@ func (adapter DiscoveryWorkAdapter) LoadDiscoveryTarget(ctx context.Context, wor
 	err := adapter.Pool.QueryRow(ctx, `SELECT endpoint_reference,target_key,credential_reference
 FROM targets WHERE id=$1::uuid AND revision=$2 AND administrative_state='ACTIVE'
   AND trust_metadata_complete AND contract_version='synthetic-redfish-v1'
-  AND credential_provider='synthetic-test' AND transport_policy_version='synthetic-redfish-v1'`, work.TargetID, work.ExpectedRevision).Scan(&target.Origin, &target.TargetKey, &target.CredentialReference)
+	  AND credential_provider='synthetic-test' AND transport_policy_version=$3`, work.TargetID, work.ExpectedRevision, inventory.SyntheticTransportPolicyV1).Scan(&target.Origin, &target.TargetKey, &target.CredentialReference)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return app.DiscoveryTarget{}, fmt.Errorf("discovery target is unavailable")

@@ -3,6 +3,7 @@
 package postgres
 
 import (
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"net/netip"
@@ -14,6 +15,7 @@ import (
 
 	appartifacts "github.com/parth10-05/fleetforge/internal/application/artifacts"
 	appinventory "github.com/parth10-05/fleetforge/internal/application/inventory"
+	apppreflight "github.com/parth10-05/fleetforge/internal/application/preflight"
 	"github.com/parth10-05/fleetforge/internal/delivery/inventoryadapter"
 	"github.com/parth10-05/fleetforge/internal/delivery/redfishsim"
 	"github.com/parth10-05/fleetforge/internal/domain/artifact"
@@ -75,18 +77,11 @@ func TestP02SixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	registration := appinventory.New(inventoryadapter.PostgresRegistrationWriter{Pool: pool})
-	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	for index, target := range s.Targets {
 		targetID := fmt.Sprintf("00000000-0000-0000-3001-%012d", index+1)
-		if _, err := registration.RegisterTarget(ctx, appinventory.RegisterTargetRequest{TargetID: targetID, ExternalID: "component-" + keys[index], Origin: server.URL, TargetKey: keys[index], CredentialReference: "synthetic-test:" + keys[index], TransportPolicy: "synthetic-allowlisted-v1", Labels: map[string]string{"site": target.Site, "rack": target.Rack, "family": "synthetic"}}); err != nil {
+		if _, err := registration.RegisterTarget(ctx, appinventory.RegisterTargetRequest{TargetID: targetID, ExternalID: "component-" + keys[index], Origin: server.URL, TargetKey: keys[index], CredentialReference: "synthetic-test:" + keys[index], TransportPolicy: "synthetic-allowlisted-v1", Labels: map[string]string{"site": target.Site, "rack": target.Rack, "family": "synthetic", "group": "component-six"}}); err != nil {
 			t.Fatalf("register target %d: %v", index+1, err)
-		}
-		// The discovery worker's persisted contract is versioned separately from
-		// registration's allow-list policy. Its current reader requires the
-		// discovery contract literal, so retain that explicit configuration
-		// boundary in the component fixture.
-		if _, err := pool.Exec(ctx, "UPDATE targets SET transport_policy_version='synthetic-redfish-v1' WHERE id=$1::uuid", targetID); err != nil {
-			t.Fatalf("configure discovery contract for target %d: %v", index+1, err)
 		}
 		workID := fmt.Sprintf("00000000-0000-0000-3002-%012d", index+1)
 		commandID := fmt.Sprintf("00000000-0000-0000-3003-%012d", index+1)
@@ -153,6 +148,34 @@ func TestP02SixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 	var artifactState string
 	if err := pool.QueryRow(ctx, "SELECT state FROM firmware_artifacts WHERE id=$1::uuid", artifactID).Scan(&artifactState); err != nil || artifactState != "VERIFIED" {
 		t.Fatalf("artifact state=%q err=%v", artifactState, err)
+	}
+
+	// The real preflight service freezes all six discovered targets against the
+	// exact verified artifact object. A later live-family change must block a
+	// fresh candidate and be reported as drift without mutating this snapshot.
+	parsedArtifact, err := value.ParseArtifactID(artifactID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflightAdapter := postgres.PreflightAdapter{Pool: pool}
+	preflightService := apppreflight.New(preflightAdapter, preflightAdapter, preflightAdapter)
+	selector := []byte(`{"version":"fleetforge.selector/v1","all":[{"key":"group","value":"component-six"}]}`)
+	result, err := preflightService.Evaluate(ctx, apppreflight.Request{CandidateID: "00000000-0000-0000-3007-000000000001", ArtifactID: parsedArtifact, Selector: selector, Maximum: 6})
+	if err != nil || len(result.Snapshot.Targets()) != 6 {
+		t.Fatalf("six-target preflight: targets=%d err=%v", len(result.Snapshot.Targets()), err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE target_labels SET value='unsupported' WHERE target_id=$1::uuid AND key='family'", "00000000-0000-0000-3001-000000000001"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preflightService.Evaluate(ctx, apppreflight.Request{CandidateID: "00000000-0000-0000-3007-000000000002", ArtifactID: parsedArtifact, Selector: selector, Maximum: 6}); !errors.Is(err, apppreflight.ErrBlocked) {
+		t.Fatalf("incompatible live family error=%v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE targets SET revision=revision+1 WHERE id=$1::uuid", "00000000-0000-0000-3001-000000000001"); err != nil {
+		t.Fatal(err)
+	}
+	drift, err := postgres.ReportPreflightCandidateDrift(ctx, pool, "00000000-0000-0000-3007-000000000001")
+	if err != nil || len(drift) != 1 || drift[0].TargetID != "00000000-0000-0000-3001-000000000001" || len(drift[0].Reasons) != 2 || drift[0].Reasons[0] != "revision_changed" || drift[0].Reasons[1] != "family_changed" {
+		t.Fatalf("frozen-candidate drift=%+v err=%v", drift, err)
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
