@@ -177,6 +177,44 @@ func TestP02SixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 	if err != nil || len(drift) != 1 || drift[0].TargetID != "00000000-0000-0000-3001-000000000001" || len(drift[0].Reasons) != 2 || drift[0].Reasons[0] != "revision_changed" || drift[0].Reasons[1] != "family_changed" {
 		t.Fatalf("frozen-candidate drift=%+v err=%v", drift, err)
 	}
+
+	// Cleanup receives only a durable grant and resolves its exact object tuple
+	// from the local store after the expiration decision commits. It removes one
+	// abandoned upload while retaining the verified object frozen by preflight.
+	const abandonedID = "00000000-0000-0000-3008-000000000001"
+	const abandonedGrantID = "component-abandoned-grant"
+	cleanupSecret := []byte("01234567890123456789012345678901")
+	abandonedClaims := localartifactstore.UploadGrantClaims{Version: "fleetforge.upload-grant/v1", GrantID: abandonedGrantID, ArtifactID: abandonedID, Method: "PUT", Provider: artifact.ObjectProviderLocalV1, Container: "artifacts", Key: "artifacts/v1/abandoned.bin", VersionID: "component-abandoned-version-1", Size: 3, Digest: digest.String(), MediaType: artifact.SyntheticFirmwareMediaType, ExpiresAt: now.Add(time.Minute)}
+	abandonedGrant, err := localartifactstore.IssueSignedGrant(cleanupSecret, abandonedClaims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandonedObject, err := store.PutSignedGrant(cleanupSecret, abandonedGrant, now, strings.NewReader("abc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,upload_grant_id,state,created_at) VALUES ($1,'v1',$2,'pending',$3,'UPLOADING',$4)", abandonedID, digest.String(), abandonedGrantID, now.Add(-25*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := postgres.ExpireAbandonedArtifactUploads(ctx, pool, now.Add(-24*time.Hour), 1)
+	if err != nil || len(expired) != 1 || expired[0].ArtifactID != abandonedID || expired[0].GrantID != abandonedGrantID {
+		t.Fatalf("expire abandoned upload=%+v err=%v", expired, err)
+	}
+	cleanupAdapter := postgres.ArtifactCleanupIntentAdapter{Pool: pool}
+	processed, err := appartifacts.RunCleanupOnce(ctx, cleanupAdapter, cleanupAdapter, store, store, "component-cleanup", "00000000-0000-0000-3008-000000000002", now, now.Add(time.Minute))
+	if err != nil || !processed {
+		t.Fatalf("cleanup abandoned upload: processed=%t err=%v", processed, err)
+	}
+	if _, err := store.Open(abandonedObject); err == nil {
+		t.Fatal("cleanup retained abandoned exact object")
+	}
+	verifiedReader, err := store.Open(object)
+	if err != nil {
+		t.Fatalf("cleanup removed verified object: %v", err)
+	}
+	if err := verifiedReader.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
