@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -56,6 +57,7 @@ func OpenMigrationDB(ctx context.Context, settings config.PostgreSQL) (*sql.DB, 
 	if err != nil {
 		return nil, fmt.Errorf("parse migration database configuration: %w", err)
 	}
+	configureMigrationSchema(connectionConfig, migrationSchemaName(settings.MigrationDSN))
 	database := stdlib.OpenDB(*connectionConfig)
 	database.SetMaxOpenConns(1)
 	database.SetMaxIdleConns(1)
@@ -67,16 +69,23 @@ func OpenMigrationDB(ctx context.Context, settings config.PostgreSQL) (*sql.DB, 
 		_ = database.Close()
 		return nil, fmt.Errorf("%w: direct migration connection", ErrDatabaseUnavailable)
 	}
-	if searchPath := migrationSearchPath(settings.MigrationDSN); searchPath != "" {
-		// database/sql does not propagate pgx's search_path startup parameter to
-		// the stdlib connector. Apply it explicitly on this one-connection pool
-		// before goose creates or reads its version table.
-		if _, err := database.ExecContext(ctx, "SELECT set_config('search_path', $1, false)", searchPath); err != nil {
-			_ = database.Close()
-			return nil, fmt.Errorf("%w: configure migration schema", ErrDatabaseUnavailable)
-		}
-	}
 	return database, nil
+}
+
+// configureMigrationSchema makes a simple search path a connection startup
+// option. database/sql may reset a checked-in pgx session before Goose obtains
+// it, so a preceding SET or set_config call cannot isolate migrations reliably.
+func configureMigrationSchema(connectionConfig *pgx.ConnConfig, schemaName string) {
+	if schemaName == "" {
+		return
+	}
+	connectionConfig.RuntimeParams["search_path"] = schemaName
+	searchPathOption := "-csearch_path=" + schemaName
+	if options := strings.TrimSpace(connectionConfig.RuntimeParams["options"]); options != "" {
+		connectionConfig.RuntimeParams["options"] = options + " " + searchPathOption
+	} else {
+		connectionConfig.RuntimeParams["options"] = searchPathOption
+	}
 }
 
 func migrationSearchPath(dsn string) string {
@@ -113,7 +122,14 @@ func RunMigrations(ctx context.Context, settings config.PostgreSQL, migrations f
 	}
 	defer database.Close()
 	return WithMigrationLock(ctx, database, func(ctx context.Context) error {
-		provider, err := goose.NewProvider(goose.DialectPostgres, database, migrations)
+		providerOptions := []goose.ProviderOption{}
+		if schemaName := migrationSchemaName(settings.MigrationDSN); schemaName != "" {
+			// Goose checks its version table by current_schema(), not search_path.
+			// Qualify the table explicitly so each isolated integration schema owns
+			// its migration history instead of inheriting public's version record.
+			providerOptions = append(providerOptions, goose.WithTableName(schemaName+".goose_db_version"))
+		}
+		provider, err := goose.NewProvider(goose.DialectPostgres, database, migrations, providerOptions...)
 		if err != nil {
 			return fmt.Errorf("configure migration provider: %w", err)
 		}
@@ -125,6 +141,26 @@ func RunMigrations(ctx context.Context, settings config.PostgreSQL, migrations f
 		}
 		return nil
 	})
+}
+
+// migrationSchemaName returns a simple schema identifier suitable for Goose's
+// raw table-name option. Complex search paths remain supported for connection
+// setup, but intentionally use Goose's default migration-history table.
+func migrationSchemaName(dsn string) string {
+	schemaName := migrationSearchPath(dsn)
+	if schemaName == "" {
+		return ""
+	}
+	for index, character := range schemaName {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			character == '_' ||
+			(index > 0 && character >= '0' && character <= '9') {
+			continue
+		}
+		return ""
+	}
+	return schemaName
 }
 
 // VersionReader obtains the migration version that an application requires.

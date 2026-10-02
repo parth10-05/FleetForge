@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 )
 
@@ -21,6 +22,20 @@ func TestOpenApplicationPoolSeparatesBoundedPooledSettings(t *testing.T) {
 	}
 	if got := pool.Config().ConnConfig.RuntimeParams["statement_timeout"]; got != "5000" {
 		t.Fatalf("statement_timeout = %q, want 5000", got)
+	}
+}
+
+func TestConfigureMigrationSchemaUsesAStartupOptionAndPreservesExistingOptions(t *testing.T) {
+	configuration, err := pgx.ParseConfig("postgres://migrate:secret@127.0.0.1:5432/fleetforge?options=endpoint%3Dfleetforge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configureMigrationSchema(configuration, "ff_it_123")
+	if got := configuration.RuntimeParams["search_path"]; got != "ff_it_123" {
+		t.Fatalf("search path=%q, want isolated schema", got)
+	}
+	if got := configuration.RuntimeParams["options"]; got != "endpoint=fleetforge -csearch_path=ff_it_123" {
+		t.Fatalf("startup options=%q", got)
 	}
 }
 
@@ -46,6 +61,26 @@ func TestReadinessProbeClassifiesUnavailableAndIncompatible(t *testing.T) {
 			err := test.probe.Check(context.Background())
 			if err == nil || test.probe.ReadinessReason(err) != test.want {
 				t.Fatalf("Check() error = %v, reason = %q, want %q", err, test.probe.ReadinessReason(err), test.want)
+			}
+		})
+	}
+}
+
+func TestMigrationSchemaNameAcceptsOnlySimpleSchemaIdentifiers(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want string
+	}{
+		{name: "simple", dsn: "postgres://migrate:secret@127.0.0.1:5432/fleetforge?search_path=ff_it_123", want: "ff_it_123"},
+		{name: "missing", dsn: "postgres://migrate:secret@127.0.0.1:5432/fleetforge", want: ""},
+		{name: "multiple schemas", dsn: "postgres://migrate:secret@127.0.0.1:5432/fleetforge?search_path=tenant%2Cpublic", want: ""},
+		{name: "quoted", dsn: "postgres://migrate:secret@127.0.0.1:5432/fleetforge?search_path=%22tenant%22", want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := migrationSchemaName(test.dsn); got != test.want {
+				t.Fatalf("migrationSchemaName() = %q, want %q", got, test.want)
 			}
 		})
 	}

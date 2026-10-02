@@ -53,12 +53,12 @@ func TestReadinessProbeSeparatesUnavailableFromSchemaMismatch(t *testing.T) {
 			err := pool.QueryRow(ctx, "SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied").Scan(&version)
 			return version, err
 		},
-		ExpectedVersion: 7,
+		ExpectedVersion: 16,
 	}
 	if err := probe.Check(ctx); err != nil {
 		t.Fatalf("compatible schema readiness: %v", err)
 	}
-	probe.ExpectedVersion = 8
+	probe.ExpectedVersion = 17
 	err := probe.Check(ctx)
 	if !errors.Is(err, persistence.ErrDatabaseSchemaIncompatible) || probe.ReadinessReason(err) != "database_schema_incompatible" {
 		t.Fatalf("schema mismatch = %v, want incompatible classification", err)

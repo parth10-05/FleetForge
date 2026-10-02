@@ -2,13 +2,19 @@
 package config
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/parth10-05/fleetforge/internal/platform/syntheticcredentials"
 )
 
 const (
@@ -20,6 +26,9 @@ const (
 	simulatorPasswordKey              = "FLEETFORGE_SIMULATOR_PASSWORD"
 	simulatorAdminAddressKey          = "FLEETFORGE_SIMULATOR_ADMIN_ADDR"
 	simulatorAdminSecretKey           = "FLEETFORGE_SIMULATOR_ADMIN_SECRET"
+	objectStoreAddressKey             = "FLEETFORGE_OBJECT_STORE_ADDR"
+	objectStoreRootKey                = "FLEETFORGE_OBJECT_STORE_ROOT"
+	objectStoreHMACSecretKey          = "FLEETFORGE_OBJECT_STORE_HMAC_SECRET"
 	postgresApplicationDSNKey         = "FLEETFORGE_POSTGRES_APP_DSN"
 	postgresMigrationDSNKey           = "FLEETFORGE_POSTGRES_MIGRATION_DSN"
 	postgresApplicationDSNFallbackKey = "DATABASE_URL"
@@ -51,9 +60,26 @@ type API struct {
 	Address string
 }
 type Worker struct{ Common }
+type ArtifactWorker struct {
+	Common
+	Root  string
+	Owner string
+}
+type DiscoveryWorker struct {
+	Common
+	Owner        string
+	AllowedCIDRs []netip.Prefix
+	Credentials  map[string]syntheticcredentials.Credential
+}
 type Simulator struct {
 	Common
 	Address, RunRoot, ScenarioPath, Username, Password, AdminAddress, AdminSecret string
+}
+type ObjectStore struct {
+	Common
+	Address string
+	Root    string
+	HMACKey []byte
 }
 
 // PostgreSQL holds bounded, role-specific database settings. DSNs are opaque
@@ -95,6 +121,47 @@ func LoadWorker() (Worker, error) {
 	return Worker{Common: common}, nil
 }
 
+// LoadArtifactWorker gives the verification worker access to the exact local
+// object root but deliberately not to the upload capability signing key.
+func LoadArtifactWorker() (ArtifactWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return ArtifactWorker{}, err
+	}
+	root, err := requiredAbsolutePath(os.LookupEnv, objectStoreRootKey)
+	if err != nil {
+		return ArtifactWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_ARTIFACT_WORKER_OWNER", "artifact-verifier")
+	if len(owner) > 128 || strings.TrimSpace(owner) == "" {
+		return ArtifactWorker{}, &Error{Key: "FLEETFORGE_ARTIFACT_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	return ArtifactWorker{Common: common, Root: root, Owner: owner}, nil
+}
+
+// LoadDiscoveryWorker accepts only explicit synthetic credentials and network
+// allowlists. It never falls back to simulator admin credentials or provider
+// secret references.
+func LoadDiscoveryWorker() (DiscoveryWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return DiscoveryWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_DISCOVERY_WORKER_OWNER", "inventory-discoverer")
+	if len(owner) > 128 || strings.TrimSpace(owner) == "" {
+		return DiscoveryWorker{}, &Error{Key: "FLEETFORGE_DISCOVERY_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	allowedCIDRs, err := requiredCIDRs(os.LookupEnv, "FLEETFORGE_DISCOVERY_ALLOWED_CIDRS")
+	if err != nil {
+		return DiscoveryWorker{}, err
+	}
+	credentials, err := requiredSyntheticCredentials(os.LookupEnv, "FLEETFORGE_DISCOVERY_CREDENTIALS_JSON")
+	if err != nil {
+		return DiscoveryWorker{}, err
+	}
+	return DiscoveryWorker{Common: common, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
+}
+
 func LoadSimulator() (Simulator, error) {
 	common, err := loadCommon(os.LookupEnv)
 	if err != nil {
@@ -126,6 +193,29 @@ func LoadSimulator() (Simulator, error) {
 		return Simulator{}, &Error{Key: simulatorAdminSecretKey, Reason: "is required"}
 	}
 	return Simulator{Common: common, Address: address, RunRoot: runRoot, ScenarioPath: scenarioPath, Username: username, Password: password, AdminAddress: adminAddress, AdminSecret: adminSecret}, nil
+}
+
+// LoadObjectStore configures the independent local data-plane listener. Its
+// HMAC key is decoded only for process use and must never be logged.
+func LoadObjectStore() (ObjectStore, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	address, err := requiredAddress(os.LookupEnv, objectStoreAddressKey)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	root, err := requiredAbsolutePath(os.LookupEnv, objectStoreRootKey)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	encoded := optional(os.LookupEnv, objectStoreHMACSecretKey, "")
+	key, err := base64.RawStdEncoding.DecodeString(encoded)
+	if encoded == "" || err != nil || len(key) < 32 {
+		return ObjectStore{}, &Error{Key: objectStoreHMACSecretKey, Reason: "must be base64 and decode to at least 32 bytes"}
+	}
+	return ObjectStore{Common: common, Address: address, Root: root, HMACKey: key}, nil
 }
 
 // LoadPostgreSQL is opt-in: Phase 01 process startup does not call it, so
@@ -233,6 +323,16 @@ func requiredPath(lookup lookupEnv, key string) (string, error) {
 	}
 	return value, nil
 }
+func requiredAbsolutePath(lookup lookupEnv, key string) (string, error) {
+	value, err := requiredPath(lookup, key)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(value) {
+		return "", &Error{Key: key, Reason: "must be an absolute path"}
+	}
+	return filepath.Clean(value), nil
+}
 func requiredPostgresDSN(lookup lookupEnv, key string) (string, error) {
 	value, ok := lookup(key)
 	if !ok || strings.TrimSpace(value) == "" {
@@ -308,4 +408,58 @@ func optional(lookup lookupEnv, key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func requiredCIDRs(lookup lookupEnv, key string) ([]netip.Prefix, error) {
+	raw, ok := lookup(key)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil, &Error{Key: key, Reason: "is required"}
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) == 0 || len(parts) > 16 {
+		return nil, &Error{Key: key, Reason: "must contain 1 to 16 CIDR prefixes"}
+	}
+	prefixes := make([]netip.Prefix, 0, len(parts))
+	seen := make(map[netip.Prefix]struct{}, len(parts))
+	for _, part := range parts {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(part))
+		if err != nil || !prefix.IsValid() {
+			return nil, &Error{Key: key, Reason: "must contain valid CIDR prefixes"}
+		}
+		prefix = prefix.Masked()
+		if _, exists := seen[prefix]; exists {
+			return nil, &Error{Key: key, Reason: "must not repeat CIDR prefixes"}
+		}
+		seen[prefix] = struct{}{}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes, nil
+}
+
+type syntheticCredentialInput struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func requiredSyntheticCredentials(lookup lookupEnv, key string) (map[string]syntheticcredentials.Credential, error) {
+	raw, ok := lookup(key)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil, &Error{Key: key, Reason: "is required"}
+	}
+	var input map[string]syntheticCredentialInput
+	if err := json.Unmarshal([]byte(raw), &input); err != nil || len(input) == 0 || len(input) > 64 {
+		return nil, &Error{Key: key, Reason: "must be a bounded synthetic credential object"}
+	}
+	credentials := make(map[string]syntheticcredentials.Credential, len(input))
+	for name, pair := range input {
+		credential, err := syntheticcredentials.NewCredential(pair.Username, pair.Password)
+		if err != nil {
+			return nil, &Error{Key: key, Reason: "contains an invalid synthetic credential"}
+		}
+		credentials[name] = credential
+	}
+	if _, err := syntheticcredentials.New(credentials); err != nil {
+		return nil, &Error{Key: key, Reason: "contains an invalid synthetic credential name"}
+	}
+	return credentials, nil
 }

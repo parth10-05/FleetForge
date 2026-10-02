@@ -124,21 +124,22 @@ func RepairExpiredDueWork(ctx context.Context, pool *pgxpool.Pool, now time.Time
 		return nil, fmt.Errorf("begin due-work repair: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	rows, err := tx.Query(ctx, `SELECT id, work_type FROM due_work WHERE delivery_state='CLAIMED' AND lease_expires_at <= $1 ORDER BY lease_expires_at, created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED`, now, limit)
+	rows, err := tx.Query(ctx, `SELECT id, work_type, discovery_attempts FROM due_work WHERE delivery_state='CLAIMED' AND lease_expires_at <= $1 ORDER BY lease_expires_at, created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED`, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("lock expired due work: %w", err)
 	}
 	type expiredDueWork struct {
-		id       string
-		workType string
+		id                string
+		workType          string
+		discoveryAttempts int
 	}
 	expired := []expiredDueWork{}
 	for rows.Next() {
-		var id, workType string
-		if err := rows.Scan(&id, &workType); err != nil {
+		var item expiredDueWork
+		if err := rows.Scan(&item.id, &item.workType, &item.discoveryAttempts); err != nil {
 			return nil, fmt.Errorf("scan expired due work: %w", err)
 		}
-		expired = append(expired, expiredDueWork{id: id, workType: workType})
+		expired = append(expired, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read expired due work: %w", err)
@@ -153,6 +154,11 @@ func RepairExpiredDueWork(ctx context.Context, pool *pgxpool.Pool, now time.Time
 		state := "PENDING"
 		if work.workType == "SUBMIT" {
 			state = "RECONCILIATION_REQUIRED"
+		} else if work.workType == "DISCOVER" && work.discoveryAttempts >= maxDiscoveryAttempts {
+			// A crash after the final permitted discovery attempt must not leave
+			// an unclaimable PENDING row. Its already-recorded latest evidence
+			// remains authoritative for preflight.
+			state = "COMPLETED"
 		}
 		if _, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state=$2, lease_token=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=$3 WHERE id=$1::uuid AND delivery_state='CLAIMED'`, work.id, state, now); err != nil {
 			return nil, classifyDueWorkError(err, "repair expired due work")

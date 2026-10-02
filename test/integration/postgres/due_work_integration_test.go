@@ -135,7 +135,7 @@ func TestConcurrentDueWorkClaimersDoNotCoOwnLease(t *testing.T) {
 	close(errs)
 	count := 0
 	for err := range errs {
-		if err != nil {
+		if err != nil && !errors.Is(err, persistence.ErrLeaseConflict) {
 			t.Fatalf("concurrent claim: %v", err)
 		}
 	}

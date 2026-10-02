@@ -3,3 +3,10 @@ packages:
 
 allowBuilds:
   esbuild: true
+
+# Keep transitive glob parsing on patched brace-expansion releases until its
+# direct parents publish new ranges. Both overrides remain within the parents'
+# declared major-version compatibility ranges.
+overrides:
+  "brace-expansion@<1.1.20": 1.1.20
+  "brace-expansion@>=4.0.0 <5.0.11": 5.0.11

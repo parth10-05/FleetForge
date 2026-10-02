@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
@@ -24,6 +25,61 @@ func TestLoadValidRoleConfigurations(t *testing.T) {
 	}
 	if _, err := LoadSimulator(); err != nil {
 		t.Fatalf("LoadSimulator() error = %v", err)
+	}
+}
+
+func TestLoadObjectStoreUsesDedicatedBoundedConfiguration(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")
+	t.Setenv(objectStoreRootKey, t.TempDir())
+	t.Setenv(objectStoreHMACSecretKey, base64.RawStdEncoding.EncodeToString([]byte("01234567890123456789012345678901")))
+	loaded, err := LoadObjectStore()
+	if err != nil {
+		t.Fatalf("LoadObjectStore() error = %v", err)
+	}
+	if loaded.Address != "127.0.0.1:8090" || len(loaded.HMACKey) != 32 {
+		t.Fatalf("LoadObjectStore() = %#v, want validated listener settings", loaded)
+	}
+}
+
+func TestLoadArtifactWorkerDoesNotRequireUploadSigningKey(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv(objectStoreRootKey, t.TempDir())
+	t.Setenv(objectStoreHMACSecretKey, "")
+	loaded, err := LoadArtifactWorker()
+	if err != nil || loaded.Root == "" || loaded.Owner == "" {
+		t.Fatalf("LoadArtifactWorker()=%#v err=%v", loaded, err)
+	}
+}
+
+func TestLoadDiscoveryWorkerParsesBoundedCredentialsAndCIDRs(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv("FLEETFORGE_DISCOVERY_ALLOWED_CIDRS", "127.0.0.0/8,2001:db8::/32")
+	t.Setenv("FLEETFORGE_DISCOVERY_CREDENTIALS_JSON", `{"rack-a":{"username":"sim-user","password":"test-secret"}}`)
+	loaded, err := LoadDiscoveryWorker()
+	if err != nil || loaded.Owner == "" || len(loaded.AllowedCIDRs) != 2 || len(loaded.Credentials) != 1 {
+		t.Fatalf("LoadDiscoveryWorker()=%#v err=%v", loaded, err)
+	}
+}
+
+func TestLoadDiscoveryWorkerRedactsCredentialInput(t *testing.T) {
+	const secret = "credential-that-must-not-appear"
+	t.Setenv("FLEETFORGE_DISCOVERY_ALLOWED_CIDRS", "not-a-cidr")
+	t.Setenv("FLEETFORGE_DISCOVERY_CREDENTIALS_JSON", `{"rack-a":{"username":"sim-user","password":"`+secret+`"}}`)
+	_, err := LoadDiscoveryWorker()
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("LoadDiscoveryWorker() error=%v", err)
+	}
+}
+
+func TestLoadObjectStoreRedactsInvalidSecret(t *testing.T) {
+	const secret = "credential-that-must-not-appear"
+	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")
+	t.Setenv(objectStoreRootKey, t.TempDir())
+	t.Setenv(objectStoreHMACSecretKey, secret)
+	_, err := LoadObjectStore()
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("LoadObjectStore() error = %v, want redacted failure", err)
 	}
 }
 

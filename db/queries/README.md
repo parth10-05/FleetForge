@@ -33,6 +33,9 @@ and must not leak into `internal/domain`.
 | P03-Q24 | `q24_repair_expired_outbox.sql` | Select expired outbox claims for bounded repair | `outbox_events_expired_claim_index` |
 | P03-Q25 | `q25_oldest_due_work.sql` | Inspect oldest pending due work | `due_work_oldest_pending_index` |
 | P03-Q26 | `q26_oldest_outbox.sql` | Inspect oldest pending outbox work | `outbox_events_oldest_pending_index` |
+| P02-Q27 | `q27_register_trusted_target.sql` | Insert a complete trusted registration once | `targets_external_identity_unique` |
+| P02-Q28 | `q28_lock_target_registration.sql` | Lock/read an existing registration after identity conflict | `targets_external_identity_unique` |
+| P02-Q29 | `q29_schedule_target_discovery.sql` | Schedule one active discovery intent per target revision | `due_work_target_discovery_active_unique` |
 
 ## Lock order reminder (ADR-021)
 
