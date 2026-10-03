@@ -68,6 +68,9 @@ func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
 	if input.LogicalCut.Sub(input.StartedAt) > time.Duration(input.Policy.MaximumDurationSeconds)*time.Second {
 		return EvaluationDecision{State: EvaluationPaused, Reason: reason.CodeCampaignCanaryDurationExpired}, nil
 	}
+	if !maintenanceAllows(input.Policy.Maintenance, input.LogicalCut) {
+		return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignWaveBlocked}, nil
+	}
 	seen := make(map[string]struct{}, len(input.Outcomes))
 	failed, evaluated := uint64(0), uint64(0)
 	for _, outcome := range input.Outcomes {
@@ -114,6 +117,30 @@ func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
 		return EvaluationDecision{State: EvaluationFailed, Reason: reason.CodeCampaignBudgetThresholdReached, Failed: failed, Evaluated: evaluated}, nil
 	}
 	return EvaluationDecision{State: EvaluationPassed, Reason: reason.CodeCampaignCanaryPassed, Failed: failed, Evaluated: evaluated}, nil
+}
+
+func maintenanceAllows(window MaintenanceWindow, cut time.Time) bool {
+	location, err := time.LoadLocation(window.Timezone)
+	if err != nil {
+		return false
+	}
+	local := cut.In(location)
+	minute := local.Hour()*60 + local.Minute()
+	selected := func(day time.Weekday) bool {
+		for _, configured := range window.Weekdays {
+			if configured == int(day) {
+				return true
+			}
+		}
+		return false
+	}
+	if window.StartMinute < window.EndMinute {
+		return selected(local.Weekday()) && minute >= int(window.StartMinute) && minute <= int(window.EndMinute)
+	}
+	if minute >= int(window.StartMinute) {
+		return selected(local.Weekday())
+	}
+	return minute <= int(window.EndMinute) && selected(local.AddDate(0, 0, -1).Weekday())
 }
 
 func healthyAtCut(input EvaluationInput, targets map[string]struct{}) bool {

@@ -45,5 +45,6 @@ func validEvaluationInput() EvaluationInput {
 	started := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
 	policy := validPolicy(Size{Unit: SizeUnitAbsolute, Value: 1})
 	policy.FailureBudget = Fraction{Numerator: 1, Denominator: 2}
+	policy.Maintenance = MaintenanceWindow{Timezone: "UTC", Weekdays: []int{6}, StartMinute: 0, EndMinute: 120}
 	return EvaluationInput{Policy: policy, StartedAt: started, LogicalCut: started.Add(time.Minute), Outcomes: []TargetOutcome{{TargetID: "a", UpdateState: "SUCCEEDED", ActiveEnrollment: true}, {TargetID: "b", UpdateState: "SUCCEEDED", ActiveEnrollment: true}}, Health: []HealthSample{{TargetID: "a", Check: "reachable", ScheduledAt: started, ObservedAt: started, Passed: true}, {TargetID: "a", Check: "inventory", ScheduledAt: started, ObservedAt: started, Passed: true}, {TargetID: "b", Check: "reachable", ScheduledAt: started, ObservedAt: started, Passed: true}, {TargetID: "b", Check: "inventory", ScheduledAt: started, ObservedAt: started, Passed: true}}}
 }

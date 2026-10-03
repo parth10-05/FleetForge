@@ -84,6 +84,17 @@ type Campaign struct {
 	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CampaignHealthEvidence struct {
+	ID               pgtype.UUID        `json:"id"`
+	CampaignTargetID pgtype.UUID        `json:"campaign_target_id"`
+	CheckName        string             `json:"check_name"`
+	ScheduledAt      pgtype.Timestamptz `json:"scheduled_at"`
+	ObservedAt       pgtype.Timestamptz `json:"observed_at"`
+	Passed           bool               `json:"passed"`
+	ObservationID    pgtype.UUID        `json:"observation_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type CampaignPlanSnapshot struct {
 	CampaignID                pgtype.UUID        `json:"campaign_id"`
 	CandidateID               pgtype.UUID        `json:"candidate_id"`
