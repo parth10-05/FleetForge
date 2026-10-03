@@ -35,7 +35,7 @@ type LockTargetRegistrationRow struct {
 	TrustMetadataComplete  bool        `json:"trust_metadata_complete"`
 }
 
-// P02-Q28: lock-target-registration.sql
+// lock-target-registration.sql
 // Access pattern: serialize comparison of an existing target registration.
 // The repository uses this only after Q27 reported an external-ID conflict.
 func (q *Queries) LockTargetRegistration(ctx context.Context, externalIdentity string) (LockTargetRegistrationRow, error) {

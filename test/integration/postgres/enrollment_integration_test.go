@@ -321,7 +321,7 @@ func prepareReadinessCampaign(t *testing.T, pool *pgxpool.Pool, ctx context.Cont
 	if _, err := pool.Exec(ctx, "UPDATE campaigns SET state='VALIDATING' WHERE id=$1::uuid", fixture.campaignID); err != nil {
 		t.Fatalf("prepare campaign for readiness: %v", err)
 	}
-	// P02 supplies the immutable trust input for the P03 readiness handoff.
+	// Preflight supplies the immutable trust input for the readiness handoff.
 	// The records deliberately mirror the candidate-time checks: exact object
 	// version, verified artifact, trusted target identity, and fresh discovery.
 	mustExecute(t, pool, ctx, "UPDATE targets SET target_key='target-race-key', contract_version='synthetic-redfish-v1', credential_provider='synthetic-test', credential_reference='synthetic-test:target-race', transport_policy_version='transport-v1', registration_hash='sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', trust_metadata_complete=true WHERE id='"+fixture.targetID+"'")

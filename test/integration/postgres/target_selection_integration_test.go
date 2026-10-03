@@ -13,7 +13,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02TargetSelectionIsParameterizedOrderedAndBounded(t *testing.T) {
+func TestTargetSelectionIsParameterizedOrderedAndBounded(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	registerSelectionTarget(t, ctx, pool, "00000000-0000-0000-2601-000000000002", "selection-b", "rack-b", "west")
 	registerSelectionTarget(t, ctx, pool, "00000000-0000-0000-2601-000000000001", "selection-a", "rack-a", "west")
@@ -34,7 +34,7 @@ func TestP02TargetSelectionIsParameterizedOrderedAndBounded(t *testing.T) {
 	}
 }
 
-func TestP02TargetSelectionFailsClosedAtTenThousandCandidates(t *testing.T) {
+func TestTargetSelectionFailsClosedAtTenThousandCandidates(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	if _, err := pool.Exec(ctx, `INSERT INTO targets
     (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state,target_key,contract_version,credential_provider,credential_reference,transport_policy_version,registration_hash,trust_metadata_complete)
@@ -67,7 +67,7 @@ SELECT target.id,label.key,label.value
 	}
 }
 
-func TestP02TargetSelectionRetainsExactLabelLookupIndex(t *testing.T) {
+func TestTargetSelectionRetainsExactLabelLookupIndex(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	var definition string
 	if err := pool.QueryRow(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND indexname='target_labels_exact_lookup_index'`).Scan(&definition); err != nil {

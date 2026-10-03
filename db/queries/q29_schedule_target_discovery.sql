@@ -1,4 +1,4 @@
--- P02-Q29: schedule-target-discovery.sql
+-- schedule-target-discovery.sql
 -- Access pattern: schedule one active read-only discovery job per target
 -- configuration revision. Conflict means an active equivalent job already
 -- exists and is a successful idempotent outcome.

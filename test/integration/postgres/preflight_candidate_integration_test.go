@@ -16,7 +16,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02PreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
+func TestPreflightCandidatePersistsFrozenMembershipImmutably(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const artifactID = "00000000-0000-0000-2701-000000000001"
 	const targetID = "00000000-0000-0000-2701-000000000002"

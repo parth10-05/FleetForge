@@ -1,4 +1,4 @@
-// Command discovery-worker runs only the P02 read-only DISCOVER work class.
+// Command discovery-worker runs only the read-only DISCOVER work class.
 // It has no artifact-store or firmware-submission dependencies.
 package main
 

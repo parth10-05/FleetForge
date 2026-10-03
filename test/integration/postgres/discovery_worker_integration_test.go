@@ -12,7 +12,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02DiscoveryWorkerAtomicallyCompletesClaimAndPersistsEvidence(t *testing.T) {
+func TestDiscoveryWorkerAtomicallyCompletesClaimAndPersistsEvidence(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const targetID = "00000000-0000-0000-2801-000000000001"
 	const workID = "00000000-0000-0000-2801-000000000002"
@@ -37,7 +37,7 @@ func TestP02DiscoveryWorkerAtomicallyCompletesClaimAndPersistsEvidence(t *testin
 	}
 }
 
-func TestP02DiscoveryClaimsOldestDueWorkAndSkipsExistingLease(t *testing.T) {
+func TestDiscoveryClaimsOldestDueWorkAndSkipsExistingLease(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const firstTargetID = "00000000-0000-0000-2806-000000000001"
 	const secondTargetID = "00000000-0000-0000-2806-000000000002"
@@ -74,7 +74,7 @@ func TestP02DiscoveryClaimsOldestDueWorkAndSkipsExistingLease(t *testing.T) {
 	}
 }
 
-func TestP02DiscoveryResultRejectsStaleLeaseWithoutPersistingEvidence(t *testing.T) {
+func TestDiscoveryResultRejectsStaleLeaseWithoutPersistingEvidence(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const targetID = "00000000-0000-0000-2802-000000000001"
 	const workID = "00000000-0000-0000-2802-000000000002"
@@ -107,7 +107,7 @@ func TestP02DiscoveryResultRejectsStaleLeaseWithoutPersistingEvidence(t *testing
 	}
 }
 
-func TestP02DiscoveryRetryAtomicallyPersistsFailureAndReleasesLease(t *testing.T) {
+func TestDiscoveryRetryAtomicallyPersistsFailureAndReleasesLease(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const targetID = "00000000-0000-0000-2803-000000000001"
 	const workID = "00000000-0000-0000-2803-000000000002"
@@ -133,7 +133,7 @@ func TestP02DiscoveryRetryAtomicallyPersistsFailureAndReleasesLease(t *testing.T
 	}
 }
 
-func TestP02DiscoveryStopsAfterThreeRetryableAttempts(t *testing.T) {
+func TestDiscoveryStopsAfterThreeRetryableAttempts(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const targetID = "00000000-0000-0000-2804-000000000001"
 	const workID = "00000000-0000-0000-2804-000000000002"
@@ -171,7 +171,7 @@ func TestP02DiscoveryStopsAfterThreeRetryableAttempts(t *testing.T) {
 	}
 }
 
-func TestP02DiscoveryLeaseRepairCompletesExhaustedAttemptBudget(t *testing.T) {
+func TestDiscoveryLeaseRepairCompletesExhaustedAttemptBudget(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const targetID = "00000000-0000-0000-2805-000000000001"
 	const workID = "00000000-0000-0000-2805-000000000002"

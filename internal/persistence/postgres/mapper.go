@@ -14,7 +14,7 @@ import (
 )
 
 // ErrCorruptPersistedValue is returned when a row loaded from the database
-// contains a value that is not in the accepted Phase 02 vocabulary. Callers
+// contains a value that is not in the accepted persistence vocabulary. Callers
 // must treat this as a non-retryable integrity failure.
 var ErrCorruptPersistedValue = errors.New("corrupt persisted value")
 
@@ -37,7 +37,7 @@ type CampaignRow struct {
 }
 
 // CampaignRowState parses the raw state string from a CampaignRow using the
-// Phase 02 campaign.ParseState parser. Unknown values fail closed.
+// campaign.ParseState parser. Unknown values fail closed.
 func CampaignRowState(raw string) (campaign.State, error) {
 	state, err := campaign.ParseState(raw)
 	if err != nil {
@@ -79,7 +79,7 @@ type TargetUpdateRow struct {
 	UpdatedAt               time.Time
 }
 
-// TargetUpdateRowState parses the raw state using the Phase 02 parser.
+// TargetUpdateRowState parses the raw state using the strict parser.
 func TargetUpdateRowState(raw string) (targetupdate.State, error) {
 	state, err := targetupdate.ParseState(raw)
 	if err != nil {
@@ -118,7 +118,7 @@ type AuditEventRow struct {
 	AfterHash         *string
 }
 
-// AuditEventRowReasonCode parses the reason_code column using the Phase 02 parser.
+// AuditEventRowReasonCode parses the reason_code column using the strict parser.
 func AuditEventRowReasonCode(raw string) (reason.Code, error) {
 	code, err := reason.ParseCode(raw)
 	if err != nil {

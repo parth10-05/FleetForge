@@ -15,20 +15,20 @@ import (
 	"github.com/parth10-05/fleetforge/internal/domain/wave"
 )
 
-// Each subtest is the executable mapping for one P02-PT row. Directed prefixes
+// Each subtest is the executable mapping for one property row. Directed prefixes
 // prove the stated edge is reached before Rapid explores additional cases.
-func TestPhase02DirectedPropertyCoverage(t *testing.T) {
-	t.Run("P02-PT-01 campaign states and revisions", propertyCampaignStates)
-	t.Run("P02-PT-02 duplicate commands", propertyDuplicates)
-	t.Run("P02-PT-03 ordered wave release", propertyWaveOrdering)
-	t.Run("P02-PT-04 stale and duplicate evidence", propertyStaleEvidence)
-	t.Run("P02-PT-05 retry budget boundary", propertyRetryBudget)
-	t.Run("P02-PT-06 pause abort epoch fence", propertyPauseAbortEpoch)
-	t.Run("P02-PT-07 exact failure budget", propertyFailureBudget)
-	t.Run("P02-PT-08 deterministic replay", propertyReplay)
-	t.Run("P02-PT-09 recorded retry step", propertyRetrySteps)
-	t.Run("P02-PT-10 persisted pause resume", propertyPauseResume)
-	t.Run("P02-PT-11 attention exits", propertyAttentionExits)
+func TestDirectedPropertyCoverage(t *testing.T) {
+	t.Run("campaign states and revisions", propertyCampaignStates)
+	t.Run("duplicate commands", propertyDuplicates)
+	t.Run("ordered wave release", propertyWaveOrdering)
+	t.Run("stale and duplicate evidence", propertyStaleEvidence)
+	t.Run("retry budget boundary", propertyRetryBudget)
+	t.Run("pause abort epoch fence", propertyPauseAbortEpoch)
+	t.Run("exact failure budget", propertyFailureBudget)
+	t.Run("deterministic replay", propertyReplay)
+	t.Run("recorded retry step", propertyRetrySteps)
+	t.Run("persisted pause resume", propertyPauseResume)
+	t.Run("attention exits", propertyAttentionExits)
 }
 
 func propertyCampaignStates(t *testing.T) {

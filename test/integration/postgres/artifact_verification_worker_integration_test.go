@@ -15,7 +15,7 @@ import (
 	"github.com/parth10-05/fleetforge/internal/platform/localartifactstore"
 )
 
-func TestP02ArtifactVerificationWorkerStreamsBoundVersionAndCompletesLease(t *testing.T) {
+func TestArtifactVerificationWorkerStreamsBoundVersionAndCompletesLease(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	now := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
 	const artifactID = "00000000-0000-0000-2621-000000000001"

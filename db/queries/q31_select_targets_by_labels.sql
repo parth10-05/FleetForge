@@ -1,4 +1,4 @@
--- P02-Q31: select-targets-by-labels.sql
+-- select-targets-by-labels.sql
 -- Access pattern: evaluate the bounded exact-label selector using only typed
 -- array parameters. The query has no caller-controlled SQL fragments and its
 -- UUID ordering is the canonical membership order before snapshot freezing.

@@ -1,4 +1,4 @@
-// local-object-store serves the P02 local-versioned direct-upload data plane.
+// local-object-store serves the local-versioned direct-upload data plane.
 // It is intentionally separate from the control API: artifact bytes never
 // transit the control-plane listener.
 package main

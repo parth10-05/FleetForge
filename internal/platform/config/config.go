@@ -218,7 +218,7 @@ func LoadObjectStore() (ObjectStore, error) {
 	return ObjectStore{Common: common, Address: address, Root: root, HMACKey: key}, nil
 }
 
-// LoadPostgreSQL is opt-in: Phase 01 process startup does not call it, so
+// LoadPostgreSQL is opt-in: foundation process startup does not call it, so
 // bootstrap-only roles remain database-free until they adopt persistence.
 func LoadPostgreSQL() (PostgreSQL, error) {
 	applicationDSN, err := preferredPostgresDSN(os.LookupEnv, postgresApplicationDSNKey, postgresApplicationDSNFallbackKey)

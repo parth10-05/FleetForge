@@ -12,7 +12,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02ArtifactUploadInitiationReservesGeneratedKeyIdempotently(t *testing.T) {
+func TestArtifactUploadInitiationReservesGeneratedKeyIdempotently(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	digest, err := value.ParseSHA256Digest("sha256:" + strings.Repeat("a", 64))
 	if err != nil {

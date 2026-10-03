@@ -15,7 +15,7 @@ import (
 	"github.com/parth10-05/fleetforge/internal/platform/localartifactstore"
 )
 
-func TestP02ArtifactUploadCapabilityReservesDatabaseKeyBeforeSigning(t *testing.T) {
+func TestArtifactUploadCapabilityReservesDatabaseKeyBeforeSigning(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	digest, err := value.ParseSHA256Digest("sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 	if err != nil {

@@ -15,7 +15,7 @@ const SyntheticTransportPolicyV1 = "synthetic-allowlisted-v1"
 
 var ErrInvalidRegistration = errors.New("invalid target registration")
 
-// Registration is the complete semantic input for a P02 simulator target.
+// Registration is the complete semantic input for a simulator target.
 // It stores an opaque credential reference, never a credential value.
 type Registration struct {
 	externalID          string

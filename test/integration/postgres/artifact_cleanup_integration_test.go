@@ -14,7 +14,7 @@ import (
 	"github.com/parth10-05/fleetforge/internal/platform/localartifactstore"
 )
 
-func TestP02CleanupExpiresOnlyOldUnboundUploadingArtifacts(t *testing.T) {
+func TestCleanupExpiresOnlyOldUnboundUploadingArtifacts(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 	const expiredID = "00000000-0000-0000-2801-000000000001"
@@ -66,7 +66,7 @@ func TestP02CleanupExpiresOnlyOldUnboundUploadingArtifacts(t *testing.T) {
 	}
 }
 
-func TestP02CleanupWorkerDeletesOnlyClaimedGrantReceipt(t *testing.T) {
+func TestCleanupWorkerDeletesOnlyClaimedGrantReceipt(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	const artifactID = "00000000-0000-0000-2802-000000000001"

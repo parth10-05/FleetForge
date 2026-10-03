@@ -11,7 +11,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02DiscoverySuccessAppendsEvidenceAndAdvancesLastGoodHead(t *testing.T) {
+func TestDiscoverySuccessAppendsEvidenceAndAdvancesLastGoodHead(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const targetID = "00000000-0000-0000-2301-000000000001"
 	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,'observed-target','endpoint','site','rack','ACTIVE')", targetID); err != nil {

@@ -9,7 +9,7 @@ import (
 )
 
 // ArtifactUploadAdapter implements the application declaration port using the
-// serializable P02 persistence transaction.
+// serializable artifact persistence transaction.
 type ArtifactUploadAdapter struct{ Pool *pgxpool.Pool }
 
 func (adapter ArtifactUploadAdapter) InitiateUpload(ctx context.Context, declaration app.UploadDeclaration, grantID string) (string, error) {

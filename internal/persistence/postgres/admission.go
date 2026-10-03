@@ -29,7 +29,7 @@ type ScopeCapacity struct {
 	Limit int64
 }
 
-// AdmissionRequest contains caller-validated Phase 02 decision data and all
+// AdmissionRequest contains caller-validated decision data and all
 // durable envelopes required to make an admission replayable and auditable.
 type AdmissionRequest struct {
 	CampaignID, CampaignTargetID, TargetID, ArtifactID, TargetUpdateID string

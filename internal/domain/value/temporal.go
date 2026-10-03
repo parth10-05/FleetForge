@@ -71,7 +71,7 @@ func (timezone TimezoneName) Resolve(resolve TimezoneResolver) (*time.Location, 
 }
 
 // MaintenanceWindow is a weekly local-time window. Boundary inclusion and
-// eligibility decisions are intentionally owned by the Phase 02 policy slice.
+// eligibility decisions are intentionally owned by the preflight policy slice.
 type MaintenanceWindow struct {
 	timezone    TimezoneName
 	weekdays    [7]bool

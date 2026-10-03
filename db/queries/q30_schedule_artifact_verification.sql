@@ -1,4 +1,4 @@
--- P02-Q30: schedule-artifact-verification.sql
+-- schedule-artifact-verification.sql
 -- Access pattern: schedule one active immutable-version verification intent.
 -- Conflict is an idempotent replay while a worker still owns or awaits work.
 -- name: ScheduleArtifactVerification :one

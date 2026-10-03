@@ -1,4 +1,4 @@
-// Package artifacts coordinates P02 artifact declaration and direct-upload
+// Package artifacts coordinates artifact declaration and direct-upload
 // capability issuance. It never accepts firmware bytes or storage credentials.
 package artifacts
 

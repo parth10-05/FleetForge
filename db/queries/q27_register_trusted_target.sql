@@ -1,4 +1,4 @@
--- P02-Q27: register-trusted-target.sql
+-- register-trusted-target.sql
 -- Access pattern: insert a fully validated simulator registration exactly once.
 -- A caller that receives no row must lock/read the existing external identity
 -- and compare registration_hash; it must never silently mutate an endpoint.

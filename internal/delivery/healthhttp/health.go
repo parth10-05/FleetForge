@@ -1,4 +1,4 @@
-// Package healthhttp implements the Phase 01 operational HTTP contract.
+// Package healthhttp implements the operational HTTP contract.
 package healthhttp
 
 import (
@@ -26,7 +26,7 @@ type ReasonedProbe interface {
 	ReadinessReason(error) string
 }
 
-// FileProbe requires an optional local prerequisite file. It keeps Phase 01
+// FileProbe requires an optional local prerequisite file. It keeps the foundation
 // readiness testable without requiring a cloud or database dependency.
 type FileProbe struct{ Path string }
 

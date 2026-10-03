@@ -52,7 +52,7 @@ func (kind ErrorKind) Retryable() bool {
 }
 
 // Client is a read-only Redfish document client. Its narrow API deliberately
-// prevents P02 from reaching an update/action endpoint.
+// prevents discovery from reaching an update/action endpoint.
 type Client struct {
 	httpClient *http.Client
 	maxBytes   int
