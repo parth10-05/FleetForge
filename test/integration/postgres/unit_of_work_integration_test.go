@@ -194,7 +194,7 @@ func campaignMutation(fixture ownershipFixture, revision int64, newState, eventI
 		DecisionInputID:       eventID,
 		DecisionSequence:      0,
 		DecisionLogicalTime:   time.Now().UTC(),
-		ReducerVersion:        "phase-02",
+		ReducerVersion:        "domain-v1",
 		DecisionPolicyVersion: "policy-v1",
 		NormalizedFacts:       json.RawMessage(`{"snapshot":"validated"}`),
 		DecisionResult:        "TRANSITION_APPLIED",

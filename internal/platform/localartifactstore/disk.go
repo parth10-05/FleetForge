@@ -16,7 +16,7 @@ import (
 	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
 
-// DiskStore is the local P02 data-plane persistence primitive. It publishes an
+// DiskStore is the local data-plane persistence primitive. It publishes an
 // object only after the complete bounded stream verifies against its immutable
 // identity; callers never supply a filesystem path.
 type DiskStore struct {

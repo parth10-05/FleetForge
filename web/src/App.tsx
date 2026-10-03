@@ -28,7 +28,7 @@ export function App() {
       <header>
         <p className="eyebrow">FleetForge</p>
         <h1>Firmware rollout control plane</h1>
-        <p>Phase 01 foundation — no campaign controls are available yet.</p>
+        <p>Operational foundation — no campaign controls are available yet.</p>
       </header>
       <section aria-label="API connectivity" className="status-card">
         <h2>API connectivity</h2>

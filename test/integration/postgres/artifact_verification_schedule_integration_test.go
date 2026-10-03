@@ -10,7 +10,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02ArtifactVerificationSchedulingDeduplicatesActiveRevision(t *testing.T) {
+func TestArtifactVerificationSchedulingDeduplicatesActiveRevision(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const artifactID = "00000000-0000-0000-2501-000000000001"
 	if _, err := pool.Exec(ctx, "INSERT INTO firmware_artifacts (id,firmware_version,sha256_digest,object_reference,state,revision) VALUES ($1,'v1','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','pending','UPLOADED',2)", artifactID); err != nil {

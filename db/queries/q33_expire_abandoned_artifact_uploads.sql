@@ -1,4 +1,4 @@
--- P02-Q33: expire-abandoned-artifact-uploads.sql
+-- expire-abandoned-artifact-uploads.sql
 -- Access pattern: bounded cleanup candidates. A row with a bound immutable
 -- object version is never eligible, regardless of age.
 -- name: ExpireAbandonedArtifactUploads :many

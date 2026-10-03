@@ -10,7 +10,7 @@ import (
 )
 
 func TestValidateReplayRecordsRejectsCorruptionAndSequenceGaps(t *testing.T) {
-	valid := ReplayRecord{ID: "one", AggregateType: "TARGET_UPDATE", AggregateID: "aggregate", AggregateRevision: 1, DecisionSequence: 0, LogicalTime: time.Now(), ReducerVersion: "phase-02", PolicyVersion: "policy-v1", NormalizedFacts: json.RawMessage(`{"eligible":true}`), Result: "SUBMITTING", Reason: reason.CodeTargetSubmissionNotAuthorized}
+	valid := ReplayRecord{ID: "one", AggregateType: "TARGET_UPDATE", AggregateID: "aggregate", AggregateRevision: 1, DecisionSequence: 0, LogicalTime: time.Now(), ReducerVersion: "domain-v1", PolicyVersion: "policy-v1", NormalizedFacts: json.RawMessage(`{"eligible":true}`), Result: "SUBMITTING", Reason: reason.CodeTargetSubmissionNotAuthorized}
 	if err := ValidateReplayRecords([]ReplayRecord{valid}); err != nil {
 		t.Fatalf("valid replay=%v", err)
 	}

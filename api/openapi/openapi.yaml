@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: FleetForge Control API
   version: 0.0.0-foundation
-  description: Phase 01 operational contract only. No rollout operation is exposed.
+  description: Operational foundation contract only. No rollout operation is exposed.
 paths:
   /health/live:
     get:

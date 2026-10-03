@@ -37,8 +37,8 @@ func TestExecutorProducesNormalizedReadOnlyDiscoveryEvidence(t *testing.T) {
 	}
 }
 
-func TestExecutorDiscoversAgainstP01SyntheticRuntime(t *testing.T) {
-	s := scenario.Scenario{SchemaVersion: scenario.SchemaVersionV1, ScenarioID: "p02-executor-runtime", Seed: "11", Topology: scenario.Topology{Sites: []string{"iad"}}, Targets: []scenario.Target{{Index: 1, Site: "iad", Rack: "a-01", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}, {Index: 2, Site: "iad", Rack: "a-02", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}}, Timing: scenario.Timing{UploadMS: 1}, Limits: scenario.Limits{CallbackWorkers: 1, Subscriptions: 1, BodyBytes: 1024, JournalEntries: 1, OpenConnections: 1, EventsPerSecond: 1}}
+func TestExecutorDiscoversAgainstAuthenticatedSyntheticRuntime(t *testing.T) {
+	s := scenario.Scenario{SchemaVersion: scenario.SchemaVersionV1, ScenarioID: "discovery-executor-runtime", Seed: "11", Topology: scenario.Topology{Sites: []string{"iad"}}, Targets: []scenario.Target{{Index: 1, Site: "iad", Rack: "a-01", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}, {Index: 2, Site: "iad", Rack: "a-02", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}}, Timing: scenario.Timing{UploadMS: 1}, Limits: scenario.Limits{CallbackWorkers: 1, Subscriptions: 1, BodyBytes: 1024, JournalEntries: 1, OpenConnections: 1, EventsPerSecond: 1}}
 	engine, err := core.Start(s, 8)
 	if err != nil {
 		t.Fatal(err)

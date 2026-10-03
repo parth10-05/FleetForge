@@ -13,7 +13,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02ArtifactBindingAndVerificationPersistOneImmutableResult(t *testing.T) {
+func TestArtifactBindingAndVerificationPersistOneImmutableResult(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const artifactID = "00000000-0000-0000-2401-000000000001"
 	digest, err := value.ParseSHA256Digest("sha256:" + strings.Repeat("a", 64))

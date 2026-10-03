@@ -13,7 +13,7 @@ import (
 	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
 
-const SnapshotVersionV1 = "v1-p02-snapshot-v1"
+const SnapshotVersionV1 = "preflight-snapshot-v1"
 
 var ErrInvalidSnapshot = errors.New("invalid frozen preflight snapshot")
 

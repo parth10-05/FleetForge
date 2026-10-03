@@ -64,7 +64,7 @@ type AggregateMutation struct {
 	OutboxPayload       json.RawMessage
 
 	// Decision input fields are the durable replay record for the validated
-	// Phase 02 reducer decision that produced this mutation.
+	// Reducer decision that produced this mutation.
 	DecisionInputID       string
 	DecisionSequence      int64
 	DecisionLogicalTime   time.Time

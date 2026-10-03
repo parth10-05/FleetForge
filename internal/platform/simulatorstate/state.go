@@ -1,4 +1,4 @@
-// Package simulatorstate owns Phase 01 simulator state/journal bootstrap.
+// Package simulatorstate owns simulator state/journal bootstrap.
 package simulatorstate
 
 import (

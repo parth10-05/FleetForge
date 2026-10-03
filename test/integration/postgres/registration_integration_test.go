@@ -11,7 +11,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02RegistrationIsIdempotentAndRejectsEndpointMutation(t *testing.T) {
+func TestRegistrationIsIdempotentAndRejectsEndpointMutation(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	service := app.New(persistence.RegistrationAdapter{Pool: pool})
 	request := app.RegisterTargetRequest{TargetID: "00000000-0000-0000-2101-000000000001", ExternalID: "rack-a-bmc-01", Origin: "https://simulator.example", TargetKey: "rack-a-bmc-01", CredentialReference: "synthetic-test:rack-a", TransportPolicy: inventory.SyntheticTransportPolicyV1, Labels: map[string]string{"site": "iad", "rack": "a-01", "family": "synthetic"}}
@@ -24,7 +24,7 @@ func TestP02RegistrationIsIdempotentAndRejectsEndpointMutation(t *testing.T) {
 	if err != nil || replay.Created || replay.TargetID != first.TargetID {
 		t.Fatalf("replay=%+v first=%+v err=%v", replay, first, err)
 	}
-	changed := mustP02Registration(t, "https://other.example")
+	changed := mustRegistration(t, "https://other.example")
 	_, err = persistence.RegisterTarget(ctx, pool, "00000000-0000-0000-2101-000000000003", changed)
 	if !errors.Is(err, persistence.ErrRegistrationConflict) {
 		t.Fatalf("changed endpoint error=%v", err)
@@ -55,7 +55,7 @@ func TestP02RegistrationIsIdempotentAndRejectsEndpointMutation(t *testing.T) {
 	}
 }
 
-func mustP02Registration(t *testing.T, endpoint string) inventory.Registration {
+func mustRegistration(t *testing.T, endpoint string) inventory.Registration {
 	t.Helper()
 	registration, err := inventory.NewRegistration("rack-a-bmc-01", endpoint, "rack-a-bmc-01", inventory.SyntheticContractV1, "synthetic-test:rack-a", inventory.SyntheticTransportPolicyV1, map[string]string{"site": "iad", "rack": "a-01", "family": "synthetic"})
 	if err != nil {

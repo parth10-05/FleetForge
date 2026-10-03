@@ -1,4 +1,4 @@
-// Package redfish implements the bounded, read-only P02 discovery boundary.
+// Package redfish implements the bounded, read-only discovery boundary.
 package redfish
 
 import (

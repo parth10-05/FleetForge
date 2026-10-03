@@ -146,7 +146,7 @@ func admissionRequest(f ownershipFixture, suffix string) persistence.AdmissionRe
 		ReservationIDs: [3]string{base + "04", base + "05", base + "06"}, ActorID: "system", CorrelationID: base + "01", CausationID: base + "01", Action: "SUBMISSION_ADMITTED", ReasonCode: "target.submission.authorized", AuditEventSequence: 0,
 		OutboxEventID: base + "07", OutboxEventType: "target.submission_admitted", OutboxSchemaVersion: 1, OutboxPayload: json.RawMessage(`{"admitted":true}`),
 		DueWorkID: base + "08", DueWorkWorkType: "SUBMIT", DueWorkSchemaVersion: 1, DueWorkNotBefore: time.Now().UTC(),
-		DecisionInputID: base + "09", DecisionSequence: 0, DecisionLogicalTime: time.Now().UTC(), ReducerVersion: "phase-02", DecisionPolicyVersion: "policy-v1", NormalizedFacts: json.RawMessage(`{"eligible":true}`), DecisionResult: "SUBMITTING",
+		DecisionInputID: base + "09", DecisionSequence: 0, DecisionLogicalTime: time.Now().UTC(), ReducerVersion: "domain-v1", DecisionPolicyVersion: "policy-v1", NormalizedFacts: json.RawMessage(`{"eligible":true}`), DecisionResult: "SUBMITTING",
 	}
 }
 

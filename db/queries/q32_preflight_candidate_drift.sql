@@ -1,4 +1,4 @@
--- P02-Q32: preflight-candidate-drift.sql
+-- preflight-candidate-drift.sql
 -- Access pattern: compare immutable candidate target facts to current
 -- inventory. It is diagnostic-only and never changes frozen membership.
 -- name: PreflightCandidateDrift :many

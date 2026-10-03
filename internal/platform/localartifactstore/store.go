@@ -1,4 +1,4 @@
-// Package localartifactstore is the versioned in-process adapter used by P02
+// Package localartifactstore is the versioned in-process adapter used by artifact workflows.
 // contract tests. It is not a database and never exposes a bucket-wide API.
 package localartifactstore
 

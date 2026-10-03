@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// DiscoveryWorkType mirrors the persisted P02 vocabulary. Keeping the value
+// DiscoveryWorkType mirrors the persisted discovery vocabulary. Keeping the value
 // here prevents a worker from silently claiming a broader due-work class.
 const DiscoveryWorkType = "DISCOVER"
 

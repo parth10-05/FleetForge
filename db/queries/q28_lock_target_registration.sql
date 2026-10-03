@@ -1,4 +1,4 @@
--- P02-Q28: lock-target-registration.sql
+-- lock-target-registration.sql
 -- Access pattern: serialize comparison of an existing target registration.
 -- The repository uses this only after Q27 reported an external-ID conflict.
 -- name: LockTargetRegistration :one

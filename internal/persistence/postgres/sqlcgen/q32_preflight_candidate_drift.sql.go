@@ -42,7 +42,7 @@ type PreflightCandidateDriftRow struct {
 	CurrentFamily              pgtype.Text `json:"current_family"`
 }
 
-// P02-Q32: preflight-candidate-drift.sql
+// preflight-candidate-drift.sql
 // Access pattern: compare immutable candidate target facts to current
 // inventory. It is diagnostic-only and never changes frozen membership.
 func (q *Queries) PreflightCandidateDrift(ctx context.Context, candidateID pgtype.UUID) ([]PreflightCandidateDriftRow, error) {

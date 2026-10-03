@@ -1,4 +1,4 @@
-// Package preflightadapter adapts PostgreSQL facts to the P02 application ports.
+// Package preflightadapter adapts PostgreSQL facts to the preflight application ports.
 package preflightadapter
 
 import (

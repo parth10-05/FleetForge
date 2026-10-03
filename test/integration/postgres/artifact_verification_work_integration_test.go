@@ -12,7 +12,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02ArtifactVerificationWorkClaimAndLeaseFence(t *testing.T) {
+func TestArtifactVerificationWorkClaimAndLeaseFence(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	now := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
 	const artifactID = "00000000-0000-0000-2611-000000000001"

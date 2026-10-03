@@ -48,7 +48,7 @@ type Querier interface {
 	// Access pattern: fenced result commit. Zero rows means stale ownership,
 	// aggregate revision, or command epoch and must fail closed.
 	CompleteDueWork(ctx context.Context, arg CompleteDueWorkParams) (int64, error)
-	// P02-Q33: expire-abandoned-artifact-uploads.sql
+	// expire-abandoned-artifact-uploads.sql
 	// Access pattern: bounded cleanup candidates. A row with a bound immutable
 	// object version is never eligible, regardless of age.
 	ExpireAbandonedArtifactUploads(ctx context.Context, arg ExpireAbandonedArtifactUploadsParams) ([]ExpireAbandonedArtifactUploadsRow, error)
@@ -60,7 +60,7 @@ type Querier interface {
 	// Access pattern: find a target's campaign memberships before enrollment and readiness decisions.
 	// Index: campaign_targets_target_index ON campaign_targets (target_id, campaign_id)
 	FindTargetCampaignMembership(ctx context.Context, targetID pgtype.UUID) ([]CampaignTarget, error)
-	// P02-Q34: initiate-artifact-upload.sql
+	// initiate-artifact-upload.sql
 	// Access pattern: reserve one immutable artifact declaration before a scoped
 	// direct-upload grant is issued. The display name is deliberately not stored
 	// as an object key.
@@ -101,7 +101,7 @@ type Querier interface {
 	// Access pattern: admission transaction locks one durable scope counter in the
 	// fixed GLOBAL -> SITE -> RACK order defined by ADR-021.
 	LockScopeCapacity(ctx context.Context, arg LockScopeCapacityParams) (ScopeCapacity, error)
-	// P02-Q28: lock-target-registration.sql
+	// lock-target-registration.sql
 	// Access pattern: serialize comparison of an existing target registration.
 	// The repository uses this only after Q27 reported an external-ID conflict.
 	LockTargetRegistration(ctx context.Context, externalIdentity string) (LockTargetRegistrationRow, error)
@@ -113,11 +113,11 @@ type Querier interface {
 	// Access pattern: inspect oldest publishable outbox rows for planning and
 	// query-plan evidence without scanning published history.
 	OldestOutbox(ctx context.Context, dollar_1 int32) ([]OldestOutboxRow, error)
-	// P02-Q32: preflight-candidate-drift.sql
+	// preflight-candidate-drift.sql
 	// Access pattern: compare immutable candidate target facts to current
 	// inventory. It is diagnostic-only and never changes frozen membership.
 	PreflightCandidateDrift(ctx context.Context, candidateID pgtype.UUID) ([]PreflightCandidateDriftRow, error)
-	// P02-Q27: register-trusted-target.sql
+	// register-trusted-target.sql
 	// Access pattern: insert a fully validated simulator registration exactly once.
 	// A caller that receives no row must lock/read the existing external identity
 	// and compare registration_hash; it must never silently mutate an endpoint.
@@ -142,16 +142,16 @@ type Querier interface {
 	// Access pattern: atomic target-update save with expected-revision guard.
 	// Zero rows affected → revision conflict (caller maps to conflict error).
 	SaveTargetUpdateWithRevision(ctx context.Context, arg SaveTargetUpdateWithRevisionParams) (int64, error)
-	// P02-Q30: schedule-artifact-verification.sql
+	// schedule-artifact-verification.sql
 	// Access pattern: schedule one active immutable-version verification intent.
 	// Conflict is an idempotent replay while a worker still owns or awaits work.
 	ScheduleArtifactVerification(ctx context.Context, arg ScheduleArtifactVerificationParams) (pgtype.UUID, error)
-	// P02-Q29: schedule-target-discovery.sql
+	// schedule-target-discovery.sql
 	// Access pattern: schedule one active read-only discovery job per target
 	// configuration revision. Conflict means an active equivalent job already
 	// exists and is a successful idempotent outcome.
 	ScheduleTargetDiscovery(ctx context.Context, arg ScheduleTargetDiscoveryParams) (pgtype.UUID, error)
-	// P02-Q31: select-targets-by-labels.sql
+	// select-targets-by-labels.sql
 	// Access pattern: evaluate the bounded exact-label selector using only typed
 	// array parameters. The query has no caller-controlled SQL fragments and its
 	// UUID ordering is the canonical membership order before snapshot freezing.

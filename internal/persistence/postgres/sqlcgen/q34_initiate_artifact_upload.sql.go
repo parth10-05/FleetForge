@@ -26,7 +26,7 @@ type InitiateArtifactUploadParams struct {
 	UploadGrantID   pgtype.Text `json:"upload_grant_id"`
 }
 
-// P02-Q34: initiate-artifact-upload.sql
+// initiate-artifact-upload.sql
 // Access pattern: reserve one immutable artifact declaration before a scoped
 // direct-upload grant is issued. The display name is deliberately not stored
 // as an object key.

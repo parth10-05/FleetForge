@@ -12,7 +12,7 @@ import (
 	"github.com/parth10-05/fleetforge/internal/domain/inventory"
 )
 
-// DiscoveryWorkAdapter owns only P02's read-only discovery work. In
+// DiscoveryWorkAdapter owns only read-only discovery work. In
 // particular, it cannot claim firmware submission or any future work class.
 // The final result transaction deliberately updates the observation, head, and
 // leased work row together, so a crash cannot leave a committed observation

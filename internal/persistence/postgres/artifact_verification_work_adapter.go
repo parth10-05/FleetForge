@@ -10,7 +10,7 @@ import (
 	app "github.com/parth10-05/fleetforge/internal/application/artifacts"
 )
 
-// ArtifactVerificationWorkAdapter owns only the P02 verification work class;
+// ArtifactVerificationWorkAdapter owns only the artifact verification work class;
 // it cannot accidentally claim discovery or future firmware-effect work.
 type ArtifactVerificationWorkAdapter struct{ Pool *pgxpool.Pool }
 

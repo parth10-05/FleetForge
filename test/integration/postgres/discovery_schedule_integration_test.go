@@ -10,7 +10,7 @@ import (
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
-func TestP02DiscoverySchedulingDeduplicatesActiveTargetRevision(t *testing.T) {
+func TestDiscoverySchedulingDeduplicatesActiveTargetRevision(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	const targetID = "00000000-0000-0000-2201-000000000001"
 	if _, err := pool.Exec(ctx, "INSERT INTO targets (id,external_identity,endpoint_reference,site_key,rack_key,administrative_state) VALUES ($1,'discovery-target','endpoint','site','rack','ACTIVE')", targetID); err != nil {

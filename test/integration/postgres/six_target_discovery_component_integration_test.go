@@ -33,11 +33,11 @@ import (
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 )
 
-// TestP02SixTargetDiscoveryComponentIsReadOnly composes the P02 registration
-// and discovery adapters with P01's authenticated six-target simulator. It
+// TestSixTargetDiscoveryComponentIsReadOnly composes registration
+// and discovery adapters with the authenticated six-target simulator. It
 // deliberately never reaches UpdateService: the retained independent journal
 // must stay empty of firmware requests and accepted operations.
-func TestP02SixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
+func TestSixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	raw, err := os.ReadFile(filepath.Join("..", "..", "fixtures", "simulator", "v1", "healthy.json"))
 	if err != nil {
@@ -53,7 +53,7 @@ func TestP02SixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 	}
 	defer engine.Close()
 	journalPath := filepath.Join(t.TempDir(), "journal.jsonl")
-	writer, err := journal.OpenWriter(journalPath, "p02-six-target-discovery")
+	writer, err := journal.OpenWriter(journalPath, "six-target-discovery")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestP02SixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 
 	// The artifact path uses the actual temporary object store, immutable
 	// binding transaction, verification claim, and streaming worker. No target
-	// operation is admitted or submitted by this P02-only component test.
+	// operation is admitted or submitted by this read-only component test.
 	const artifactID = "00000000-0000-0000-3006-000000000001"
 	digest, err := value.ParseSHA256Digest("sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 	if err != nil {
@@ -247,7 +247,7 @@ func TestP02SixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 	}
 	for _, entry := range entries {
 		if entry.Kind == journal.RequestReceived || entry.Kind == journal.UpdateAccepted {
-			t.Fatalf("P02 read-only component wrote firmware journal entry: %#v", entry)
+			t.Fatalf("read-only component wrote firmware journal entry: %#v", entry)
 		}
 	}
 }

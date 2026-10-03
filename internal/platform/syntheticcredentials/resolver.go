@@ -1,6 +1,6 @@
 // Package syntheticcredentials resolves only local simulator test references.
 // It is intentionally not an AWS Secrets Manager substitute; production
-// credential provisioning and resolution remain outside P02's local adapter.
+// credential provisioning and resolution remain outside the local adapter.
 package syntheticcredentials
 
 import (

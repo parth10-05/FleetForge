@@ -32,7 +32,7 @@ type ScheduleArtifactVerificationParams struct {
 	ExpectedRevision int64              `json:"expected_revision"`
 }
 
-// P02-Q30: schedule-artifact-verification.sql
+// schedule-artifact-verification.sql
 // Access pattern: schedule one active immutable-version verification intent.
 // Conflict is an idempotent replay while a worker still owns or awaits work.
 func (q *Queries) ScheduleArtifactVerification(ctx context.Context, arg ScheduleArtifactVerificationParams) (pgtype.UUID, error) {

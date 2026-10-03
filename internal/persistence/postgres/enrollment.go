@@ -44,7 +44,7 @@ type TargetEnrollmentEntry struct {
 // ReadinessEnrollmentRequest describes everything needed for the readiness transaction.
 type ReadinessEnrollmentRequest struct {
 	CampaignID string
-	// CandidateID is the immutable PASSED P02 candidate whose exact members and
+	// CandidateID is the immutable PASSED candidate whose exact members and
 	// artifact tuple authorize this readiness handoff.
 	CandidateID      string
 	PolicyVersionID  string
@@ -166,7 +166,7 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 	return nil
 }
 
-// validateReadinessCandidate keeps the P02 trust boundary inside the same
+// validateReadinessCandidate keeps the readiness trust boundary inside the same
 // serializable transaction as enrollment. P03 may construct campaign members,
 // but it cannot activate READY from caller-supplied hashes alone.
 func validateReadinessCandidate(ctx context.Context, tx pgx.Tx, req ReadinessEnrollmentRequest, targets []TargetEnrollmentEntry, campaignArtifactID string) error {
