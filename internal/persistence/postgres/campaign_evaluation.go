@@ -15,8 +15,8 @@ import (
 
 // LoadCanaryEvaluationInput reads the immutable policy plus the exact canary
 // cohort facts required by the pure evaluator at a caller-supplied logical
-// cut. It is intentionally read-only; its writer composes these facts with
-// reducer transitions in a separate short serializable transaction.
+// cut. FinalizeCanary uses the transaction-scoped form below so its decision
+// and reducer transition share one serializable transaction.
 func LoadCanaryEvaluationInput(ctx context.Context, pool *pgxpool.Pool, campaignID string, logicalCut time.Time) (campaignplan.EvaluationInput, error) {
 	if _, err := uuidParameter(campaignID); err != nil || logicalCut.IsZero() {
 		return campaignplan.EvaluationInput{}, fmt.Errorf("invalid canary evaluation identity or logical cut")
@@ -26,6 +26,21 @@ func LoadCanaryEvaluationInput(ctx context.Context, pool *pgxpool.Pool, campaign
 		return campaignplan.EvaluationInput{}, fmt.Errorf("begin canary evaluation read: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	input, err := loadCanaryEvaluationInputTx(ctx, tx, campaignID, logicalCut)
+	if err != nil {
+		return campaignplan.EvaluationInput{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return campaignplan.EvaluationInput{}, fmt.Errorf("commit canary evaluation read: %w", err)
+	}
+	return input, nil
+}
+
+// loadCanaryEvaluationInputTx reads the frozen evidence within a caller-owned
+// transaction. It intentionally shares the finalizer's serializable snapshot:
+// a decision can therefore never authorize a different set of facts than the
+// state transition it records.
+func loadCanaryEvaluationInputTx(ctx context.Context, tx pgx.Tx, campaignID string, logicalCut time.Time) (campaignplan.EvaluationInput, error) {
 	var policyJSON []byte
 	var startedAt time.Time
 	if err := tx.QueryRow(ctx, `SELECT p.policy_json,c.updated_at FROM campaigns c JOIN campaign_plan_snapshots p ON p.campaign_id=c.id WHERE c.id=$1::uuid AND c.state IN ('RUNNING_CANARY','EVALUATING_CANARY')`, campaignID).Scan(&policyJSON, &startedAt); err != nil {
@@ -77,8 +92,5 @@ WHERE ct.campaign_id=$1::uuid AND ct.cohort='CANARY' ORDER BY ct.id`, campaignID
 		return campaignplan.EvaluationInput{}, fmt.Errorf("read scheduled canary health: %w", err)
 	}
 	health.Close()
-	if err := tx.Commit(ctx); err != nil {
-		return campaignplan.EvaluationInput{}, fmt.Errorf("commit canary evaluation read: %w", err)
-	}
 	return input, nil
 }

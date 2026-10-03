@@ -13,14 +13,13 @@ import (
 	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
 
-// FinalizeCanaryRequest carries a previously persisted evaluation outcome. The
-// caller may request release only for a PASSED evaluation; all other terminal
-// outcomes resolve to PAUSED and create no later-wave intent.
+// FinalizeCanaryRequest identifies the immutable finalization inputs. The
+// finalizer derives the evaluation from persisted facts in its transaction;
+// callers cannot supply a release decision.
 type FinalizeCanaryRequest struct {
 	CampaignID, TerminalCommandID, ResolutionCommandID string
 	ExpectedRevision, ExpectedEpoch                    int64
-	Evaluation                                         campaignplan.EvaluationDecision
-	Now                                                time.Time
+	LogicalCut, Now                                    time.Time
 	ActorID, CorrelationID, CausationID                string
 	AuditAction, OutboxEventID, DecisionInputID        string
 	ReducerVersion                                     string
@@ -31,7 +30,7 @@ type FinalizeCanaryRequest struct {
 // campaign through the reducer. It is intentionally narrow: P04 owns creation
 // and execution of later target-update work.
 func FinalizeCanary(ctx context.Context, pool *pgxpool.Pool, r FinalizeCanaryRequest) error {
-	if r.ExpectedRevision < 0 || r.ExpectedEpoch < 0 || r.Now.IsZero() || r.ActorID == "" || r.AuditAction == "" || r.ReducerVersion == "" || r.Evaluation.State == campaignplan.EvaluationPending || r.Evaluation.State == "" {
+	if r.ExpectedRevision < 0 || r.ExpectedEpoch < 0 || r.LogicalCut.IsZero() || r.Now.IsZero() || r.LogicalCut.After(r.Now) || r.ActorID == "" || r.AuditAction == "" || r.ReducerVersion == "" {
 		return fmt.Errorf("invalid canary finalization")
 	}
 	for _, raw := range []string{r.CampaignID, r.TerminalCommandID, r.ResolutionCommandID, r.CorrelationID, r.CausationID, r.OutboxEventID, r.DecisionInputID} {
@@ -50,7 +49,25 @@ func FinalizeCanary(ctx context.Context, pool *pgxpool.Pool, r FinalizeCanaryReq
 		return fmt.Errorf("lock campaign finalization: %w", err)
 	}
 	if state != "RUNNING_CANARY" || revision != r.ExpectedRevision || epoch != r.ExpectedEpoch {
+		alreadyRecorded, recordedErr := finalizationAlreadyRecorded(ctx, tx, r.CampaignID, r.OutboxEventID)
+		if recordedErr != nil {
+			return recordedErr
+		}
+		if alreadyRecorded {
+			return nil
+		}
 		return ErrCampaignStartConflict
+	}
+	evaluation, err := loadCanaryEvaluationInputTx(ctx, tx, r.CampaignID, r.LogicalCut)
+	if err != nil {
+		return fmt.Errorf("load canary finalization evidence: %w", err)
+	}
+	decision, err := campaignplan.EvaluateCanary(evaluation)
+	if err != nil {
+		return fmt.Errorf("evaluate canary finalization evidence: %w", err)
+	}
+	if decision.State == campaignplan.EvaluationPending {
+		return fmt.Errorf("canary evaluation is pending: %s", decision.Reason)
 	}
 	first, err := value.ParseCommandID(r.TerminalCommandID)
 	if err != nil {
@@ -62,7 +79,7 @@ func FinalizeCanary(ctx context.Context, pool *pgxpool.Pool, r FinalizeCanaryReq
 	}
 	rev, _ := value.NewRevision(revision)
 	ep, _ := value.NewCommandEpoch(epoch)
-	release := r.Evaluation.State == campaignplan.EvaluationPassed
+	release := decision.State == campaignplan.EvaluationPassed
 	transitions, ok := campaign.ReduceTerminalCanary(campaign.Aggregate{State: campaign.State(state), Revision: rev, CommandEpoch: ep}, first, second, release)
 	if !ok {
 		return ErrCampaignStartConflict
@@ -78,11 +95,11 @@ func FinalizeCanary(ctx context.Context, pool *pgxpool.Pool, r FinalizeCanaryReq
 	if release && laterReleased {
 		return ErrCampaignStartConflict
 	}
-	evaluation := "FAILED"
+	evaluationState := "FAILED"
 	if release {
-		evaluation = "PASSED"
+		evaluationState = "PASSED"
 	}
-	if _, err := tx.Exec(ctx, "UPDATE campaign_waves SET terminal=true,evaluation=$2,updated_at=$3 WHERE id=$1::uuid AND terminal=false", canaryID, evaluation, r.Now); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE campaign_waves SET terminal=true,evaluation=$2,updated_at=$3 WHERE id=$1::uuid AND terminal=false", canaryID, evaluationState, r.Now); err != nil {
 		return fmt.Errorf("resolve canary wave: %w", err)
 	}
 	if release {
@@ -116,8 +133,19 @@ func FinalizeCanary(ctx context.Context, pool *pgxpool.Pool, r FinalizeCanaryReq
 			}
 		}
 	}
+	terminalRevision := int64(transitions.Terminal.Aggregate.Revision.Uint64())
+	terminalFacts, err := json.Marshal(map[string]any{"plan_hash": planHash, "canary_evaluation": decision.State, "evaluation_reason": decision.Reason.String(), "failed": decision.Failed, "evaluated": decision.Evaluated, "logical_cut": r.LogicalCut.UTC()})
+	if err != nil {
+		return fmt.Errorf("encode canary terminal facts: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO decision_inputs (id,aggregate_type,aggregate_id,aggregate_revision,decision_sequence,logical_time,reducer_version,policy_version,normalized_facts,result,reason_code) VALUES ($1::uuid,'CAMPAIGN',$2::uuid,$3,0,$4,$5,$6,$7,$8,$9)", r.TerminalCommandID, r.CampaignID, terminalRevision, r.Now, r.ReducerVersion, policyVersion, terminalFacts, transitions.Terminal.Aggregate.State.String(), transitions.Terminal.Reason.String()); err != nil {
+		return fmt.Errorf("append canary terminal decision: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,command_id,correlation_id,causation_id,action,reason_code) VALUES ('CAMPAIGN',$1::uuid,$2,0,$3,$4::uuid,$5::uuid,$6::uuid,'CANARY_TERMINAL',$7)", r.CampaignID, terminalRevision, r.ActorID, r.TerminalCommandID, r.CorrelationID, r.CausationID, transitions.Terminal.Reason.String()); err != nil {
+		return fmt.Errorf("append canary terminal audit: %w", err)
+	}
 	newRevision := int64(transitions.Resolved.Aggregate.Revision.Uint64())
-	facts, err := json.Marshal(map[string]any{"plan_hash": planHash, "release": release, "canary_evaluation": evaluation, "evaluation_reason": r.Evaluation.Reason.String(), "failed": r.Evaluation.Failed, "evaluated": r.Evaluation.Evaluated})
+	facts, err := json.Marshal(map[string]any{"plan_hash": planHash, "release": release, "canary_evaluation": decision.State, "evaluation_reason": decision.Reason.String(), "failed": decision.Failed, "evaluated": decision.Evaluated, "logical_cut": r.LogicalCut.UTC()})
 	if err != nil {
 		return fmt.Errorf("encode canary finalization facts: %w", err)
 	}
@@ -141,6 +169,14 @@ func FinalizeCanary(ctx context.Context, pool *pgxpool.Pool, r FinalizeCanaryReq
 		return fmt.Errorf("commit canary finalization: %w", err)
 	}
 	return nil
+}
+
+func finalizationAlreadyRecorded(ctx context.Context, tx pgx.Tx, campaignID, outboxEventID string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM outbox_events WHERE event_id=$1::uuid AND aggregate_type='CAMPAIGN' AND aggregate_id=$2::uuid AND event_type='campaign.canary_evaluated')", outboxEventID, campaignID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check canary finalization idempotency: %w", err)
+	}
+	return exists, nil
 }
 func nullableState(s campaign.State) any {
 	if s == "" {
