@@ -87,6 +87,32 @@ func FinalizeCanary(ctx context.Context, pool *pgxpool.Pool, r FinalizeCanaryReq
 		if _, err := tx.Exec(ctx, "UPDATE campaign_waves SET released=true,updated_at=$2 WHERE id=$1::uuid AND released=false", laterID, r.Now); err != nil {
 			return fmt.Errorf("release later wave: %w", err)
 		}
+		updates, err := lockLaterWaveUpdates(ctx, tx, r.CampaignID)
+		if err != nil {
+			return err
+		}
+		if len(updates) != len(r.LaterIntents) {
+			return fmt.Errorf("%w: later-wave intent count mismatch", ErrCampaignStartConflict)
+		}
+		seen := make(map[string]struct{}, len(r.LaterIntents))
+		for _, intent := range r.LaterIntents {
+			for _, raw := range []string{intent.DueWorkID, intent.CommandID, intent.TargetUpdateID} {
+				if _, err := uuidParameter(raw); err != nil {
+					return fmt.Errorf("invalid later-wave intent identity: %w", err)
+				}
+			}
+			update, ok := updates[intent.TargetUpdateID]
+			if !ok {
+				return fmt.Errorf("%w: non-later target update intent", ErrCampaignStartConflict)
+			}
+			if _, duplicate := seen[intent.TargetUpdateID]; duplicate {
+				return fmt.Errorf("%w: duplicate later-wave intent", ErrCampaignStartConflict)
+			}
+			seen[intent.TargetUpdateID] = struct{}{}
+			if _, err := tx.Exec(ctx, "INSERT INTO due_work (id,command_id,subject_type,subject_id,work_type,schema_version,not_before,expected_revision,expected_command_epoch) VALUES ($1::uuid,$2::uuid,'TARGET_UPDATE',$3::uuid,'LATER_WAVE_START',1,$4,$5,$6)", intent.DueWorkID, intent.CommandID, intent.TargetUpdateID, r.Now, update.revision, update.epoch); err != nil {
+				return fmt.Errorf("schedule later-wave intent: %w", err)
+			}
+		}
 	}
 	newRevision := int64(transitions.Resolved.Aggregate.Revision.Uint64())
 	facts, err := json.Marshal(map[string]any{"plan_hash": planHash, "release": r.Release, "canary_evaluation": evaluation})
@@ -119,4 +145,27 @@ func nullableState(s campaign.State) any {
 		return nil
 	}
 	return s.String()
+}
+
+type laterWaveUpdate struct{ revision, epoch int64 }
+
+func lockLaterWaveUpdates(ctx context.Context, tx pgx.Tx, campaignID string) (map[string]laterWaveUpdate, error) {
+	rows, err := tx.Query(ctx, "SELECT tu.id::text,tu.revision,tu.command_epoch FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid AND ct.cohort='LATER_WAVE' ORDER BY ct.id,tu.id FOR UPDATE OF ct,tu", campaignID)
+	if err != nil {
+		return nil, fmt.Errorf("lock later-wave target updates: %w", err)
+	}
+	defer rows.Close()
+	updates := map[string]laterWaveUpdate{}
+	for rows.Next() {
+		var id string
+		var update laterWaveUpdate
+		if err := rows.Scan(&id, &update.revision, &update.epoch); err != nil {
+			return nil, fmt.Errorf("scan later-wave target update: %w", err)
+		}
+		updates[id] = update
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read later-wave target updates: %w", err)
+	}
+	return updates, nil
 }
