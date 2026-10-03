@@ -41,6 +41,15 @@ func TestEvaluateCanaryFailsClosedForAttentionAndDuration(t *testing.T) {
 	}
 }
 
+func TestEvaluateCanaryBlocksOutsideFrozenMaintenanceWindow(t *testing.T) {
+	input := validEvaluationInput()
+	input.Policy.Maintenance = MaintenanceWindow{Timezone: "UTC", Weekdays: []int{6}, StartMinute: 120, EndMinute: 180}
+	decision, err := EvaluateCanary(input)
+	if err != nil || decision.State != EvaluationPending || decision.Reason != reason.CodeCampaignWaveBlocked {
+		t.Fatalf("maintenance decision = %#v, err=%v", decision, err)
+	}
+}
+
 func validEvaluationInput() EvaluationInput {
 	started := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
 	policy := validPolicy(Size{Unit: SizeUnitAbsolute, Value: 1})
