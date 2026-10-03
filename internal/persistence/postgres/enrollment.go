@@ -5,10 +5,12 @@
 // READY. The lock order follows ADR-021:
 //
 //  1. Lock the campaign row with SELECT … FOR UPDATE.
-//  2. For each target (ordered by ID to prevent deadlock): INSERT enrollment.
-//  3. UPDATE the campaign state to READY with an expected-revision guard.
-//  4. Append an audit event.
-//  5. Insert an outbox event.
+//  2. For each target (ordered by ID): lock membership, then enrollment and
+//     unresolved-reservation rows.
+//  3. Recheck P02 candidate/artifact/freshness evidence.
+//  4. UPDATE the campaign state to READY with an expected-revision guard.
+//  5. Append an audit event.
+//  6. Insert an outbox event.
 //
 // If any target's enrollment is already owned by another active campaign or
 // its operation reservation is unresolved (ACTIVE or QUARANTINED), the entire transaction
@@ -54,6 +56,7 @@ type ReadinessEnrollmentRequest struct {
 	// transition, together with the enrollment claims they authorize.
 	FrozenPolicyHash         string
 	FrozenTargetSnapshotHash string
+	planHash                 string
 
 	// Audit event fields.
 	ActorID       string
@@ -69,6 +72,26 @@ type ReadinessEnrollmentRequest struct {
 	OutboxEventType     string
 	OutboxSchemaVersion int
 	OutboxPayload       json.RawMessage
+}
+
+// CampaignPlanReadinessRequest makes the V1-P03 plan check non-optional for
+// new campaign validation orchestration while preserving the narrower P02
+// trust-boundary API used by its existing tests and callers.
+type CampaignPlanReadinessRequest struct {
+	ReadinessEnrollmentRequest
+	PlanHash string
+}
+
+// AcquireCampaignPlanReadiness composes immutable plan verification with the
+// existing P02 candidate/artifact/freshness recheck and atomic enrollment
+// transaction. P03 callers must use this entrypoint rather than calling the
+// P02-only function directly.
+func AcquireCampaignPlanReadiness(ctx context.Context, pool *pgxpool.Pool, req CampaignPlanReadinessRequest) error {
+	if req.PlanHash == "" {
+		return fmt.Errorf("%w: readiness requires a frozen campaign plan hash", ErrEnrollmentBlocked)
+	}
+	req.ReadinessEnrollmentRequest.planHash = req.PlanHash
+	return AcquireReadinessEnrollment(ctx, pool, req.ReadinessEnrollmentRequest)
 }
 
 // AcquireReadinessEnrollment executes the readiness enrollment transaction in
@@ -106,19 +129,29 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 	if req.CandidateID == "" {
 		return fmt.Errorf("%w: readiness enrollment requires a passed preflight candidate", ErrEnrollmentBlocked)
 	}
-	if err := validateReadinessCandidate(ctx, tx, req, targets, campaignArtifactID); err != nil {
-		return err
-	}
-
-	// Step 2: For each target in sorted ID order, check for blocking
-	// conditions then insert enrollment.
+	// Step 2: Lock each frozen membership, check/enroll each target and acquire
+	// no reservation. This establishes the ADR-021 campaign-target,
+	// enrollment, and reservation families before candidate/artifact facts.
+	// If the later P02 trust recheck fails, the transaction rolls every claim
+	// back; no partial enrollment survives.
 	for _, entry := range targets {
 		if err := checkAndEnroll(ctx, tx, req.CampaignID, entry); err != nil {
 			return err
 		}
 	}
+	// Step 3: The P02 candidate/artifact/freshness recheck is intentionally
+	// after membership/enrollment/reservation families and before due-work,
+	// outbox, audit, and decision evidence.
+	if err := validateReadinessCandidate(ctx, tx, req, targets, campaignArtifactID); err != nil {
+		return err
+	}
+	if req.planHash != "" {
+		if err := validateReadinessPlan(ctx, tx, req, targets); err != nil {
+			return err
+		}
+	}
 
-	// Step 3: Transition campaign to READY with expected-revision guard.
+	// Step 4: Transition campaign to READY with expected-revision guard.
 	tag, err := tx.Exec(ctx,
 		"UPDATE campaigns SET state='READY', revision=revision+1, "+
 			"policy_version_id=$2::uuid, frozen_policy_hash=$3, frozen_target_snapshot_hash=$4, updated_at=now() "+
@@ -135,7 +168,7 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 		return fmt.Errorf("%w: campaign %s at revision %d", ErrRevisionConflict, req.CampaignID, req.ExpectedRevision)
 	}
 
-	// Step 4: Append audit event.
+	// Step 5: Append audit event.
 	if _, err := tx.Exec(ctx,
 		"INSERT INTO audit_events (aggregate_type, aggregate_id, aggregate_revision, event_sequence, "+
 			"actor_id, correlation_id, causation_id, action, reason_code, after_hash) "+
@@ -146,7 +179,7 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 		return fmt.Errorf("append readiness audit event: %w", err)
 	}
 
-	// Step 5: Insert outbox event.
+	// Step 6: Insert outbox event.
 	if _, err := tx.Exec(ctx,
 		"INSERT INTO outbox_events (event_id, aggregate_type, aggregate_id, aggregate_revision, "+
 			"event_type, schema_version, payload) "+
@@ -162,6 +195,32 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 			return fmt.Errorf("%w: serialization during readiness commit", ErrRevisionConflict)
 		}
 		return fmt.Errorf("commit readiness enrollment: %w", err)
+	}
+	return nil
+}
+
+func validateReadinessPlan(ctx context.Context, tx pgx.Tx, req ReadinessEnrollmentRequest, targets []TargetEnrollmentEntry) error {
+	var candidateID, snapshotHash, planHash string
+	var draftRevision int64
+	err := tx.QueryRow(ctx, `SELECT candidate_id::text,target_snapshot_hash,plan_hash,draft_revision FROM campaign_plan_snapshots WHERE campaign_id=$1::uuid FOR UPDATE`, req.CampaignID).Scan(&candidateID, &snapshotHash, &planHash, &draftRevision)
+	if err != nil {
+		return fmt.Errorf("%w: frozen campaign plan unavailable: %v", ErrEnrollmentBlocked, err)
+	}
+	if candidateID != req.CandidateID || snapshotHash != req.FrozenTargetSnapshotHash || planHash != req.planHash || draftRevision+1 != req.ExpectedRevision {
+		return fmt.Errorf("%w: frozen campaign plan does not match readiness request", ErrEnrollmentBlocked)
+	}
+	var memberships, candidateMembers, waves, canary, later int
+	err = tx.QueryRow(ctx, `SELECT
+ (SELECT count(*) FROM campaign_targets WHERE campaign_id=$1::uuid),
+ (SELECT count(*) FROM campaign_targets ct JOIN preflight_candidate_targets p ON p.candidate_id=$2::uuid AND p.target_id=ct.target_id AND p.frozen_target_revision=ct.frozen_target_revision WHERE ct.campaign_id=$1::uuid),
+ (SELECT count(*) FROM campaign_waves WHERE campaign_id=$1::uuid),
+ (SELECT count(*) FROM campaign_waves WHERE campaign_id=$1::uuid AND cohort='CANARY'),
+ (SELECT count(*) FROM campaign_waves WHERE campaign_id=$1::uuid AND cohort='LATER_WAVE')`, req.CampaignID, req.CandidateID).Scan(&memberships, &candidateMembers, &waves, &canary, &later)
+	if err != nil {
+		return fmt.Errorf("%w: inspect frozen campaign plan membership: %v", ErrEnrollmentBlocked, err)
+	}
+	if memberships != len(targets) || candidateMembers != len(targets) || waves != 2 || canary != 1 || later != 1 {
+		return fmt.Errorf("%w: frozen campaign plan membership is incomplete", ErrEnrollmentBlocked)
 	}
 	return nil
 }

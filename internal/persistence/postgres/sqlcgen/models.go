@@ -84,6 +84,35 @@ type Campaign struct {
 	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CampaignHealthEvidence struct {
+	ID               pgtype.UUID        `json:"id"`
+	CampaignTargetID pgtype.UUID        `json:"campaign_target_id"`
+	CheckName        string             `json:"check_name"`
+	ScheduledAt      pgtype.Timestamptz `json:"scheduled_at"`
+	ObservedAt       pgtype.Timestamptz `json:"observed_at"`
+	Passed           bool               `json:"passed"`
+	ObservationID    pgtype.UUID        `json:"observation_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type CampaignPlanSnapshot struct {
+	CampaignID                pgtype.UUID        `json:"campaign_id"`
+	CandidateID               pgtype.UUID        `json:"candidate_id"`
+	DraftRevision             int64              `json:"draft_revision"`
+	PolicyJson                []byte             `json:"policy_json"`
+	EffectivePlanJson         []byte             `json:"effective_plan_json"`
+	Seed                      string             `json:"seed"`
+	PolicyVersion             string             `json:"policy_version"`
+	AlgorithmVersion          string             `json:"algorithm_version"`
+	PlanVersion               string             `json:"plan_version"`
+	ArtifactVersionID         string             `json:"artifact_version_id"`
+	ArtifactDigest            string             `json:"artifact_digest"`
+	VerificationPolicyVersion string             `json:"verification_policy_version"`
+	TargetSnapshotHash        string             `json:"target_snapshot_hash"`
+	PlanHash                  string             `json:"plan_hash"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+}
+
 type CampaignTarget struct {
 	ID                   pgtype.UUID        `json:"id"`
 	CampaignID           pgtype.UUID        `json:"campaign_id"`
@@ -92,6 +121,10 @@ type CampaignTarget struct {
 	FrozenTargetRevision int64              `json:"frozen_target_revision"`
 	FrozenPolicyHash     string             `json:"frozen_policy_hash"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	WaveID               pgtype.UUID        `json:"wave_id"`
+	Cohort               string             `json:"cohort"`
+	CohortOrdinal        int64              `json:"cohort_ordinal"`
+	SelectionReason      string             `json:"selection_reason"`
 }
 
 type CampaignWafe struct {
@@ -103,6 +136,7 @@ type CampaignWafe struct {
 	Terminal   bool               `json:"terminal"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	Cohort     string             `json:"cohort"`
 }
 
 type DecisionInput struct {

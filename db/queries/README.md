@@ -36,11 +36,12 @@ and must not leak into `internal/domain`.
 | P02-Q27 | `q27_register_trusted_target.sql` | Insert a complete trusted registration once | `targets_external_identity_unique` |
 | P02-Q28 | `q28_lock_target_registration.sql` | Lock/read an existing registration after identity conflict | `targets_external_identity_unique` |
 | P02-Q29 | `q29_schedule_target_discovery.sql` | Schedule one active discovery intent per target revision | `due_work_target_discovery_active_unique` |
+| P03-Q35 | `q35_load_campaign_plan_membership.sql` | Load immutable canary/later-wave membership in cohort order | `campaign_targets_campaign_wave_index` |
 
 ## Lock order reminder (ADR-021)
 
 All multi-row writers acquire present row families in this exact ADR-021 order:
-`campaign → campaign-target/target-update → target-enrollment → global/site/rack capacity → submission-admission → operation-reservation → due-work/outbox → audit/decision-input`.
+`campaign → campaign-target/target-update → target-enrollment → global/site/rack capacity → submission-admission → operation-reservation → inventory/artifact/preflight → due-work/outbox → audit/decision-input`.
 
 Within a family writers sort by stable UUID or subject key. A writer skips a row
 family it does not need; it never reorders remaining families. No query file may

@@ -23,18 +23,28 @@ SELECT ct.id,
  WHERE ct.target_id = $1
 `
 
+type FindTargetCampaignMembershipRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	CampaignID           pgtype.UUID        `json:"campaign_id"`
+	TargetID             pgtype.UUID        `json:"target_id"`
+	ArtifactID           pgtype.UUID        `json:"artifact_id"`
+	FrozenTargetRevision int64              `json:"frozen_target_revision"`
+	FrozenPolicyHash     string             `json:"frozen_policy_hash"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
 // P03-Q02: find-target-campaign-membership.sql
 // Access pattern: find a target's campaign memberships before enrollment and readiness decisions.
 // Index: campaign_targets_target_index ON campaign_targets (target_id, campaign_id)
-func (q *Queries) FindTargetCampaignMembership(ctx context.Context, targetID pgtype.UUID) ([]CampaignTarget, error) {
+func (q *Queries) FindTargetCampaignMembership(ctx context.Context, targetID pgtype.UUID) ([]FindTargetCampaignMembershipRow, error) {
 	rows, err := q.db.Query(ctx, findTargetCampaignMembership, targetID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CampaignTarget{}
+	items := []FindTargetCampaignMembershipRow{}
 	for rows.Next() {
-		var i CampaignTarget
+		var i FindTargetCampaignMembershipRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.CampaignID,

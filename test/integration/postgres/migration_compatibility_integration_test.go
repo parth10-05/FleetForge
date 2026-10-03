@@ -19,7 +19,10 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-const lastSupportedMigrationVersion int64 = 5
+const (
+	lastSupportedMigrationVersion int64 = 5
+	latestMigrationVersion        int64 = 18
+)
 
 func TestMigrationCompatibilityEmptyAndLastSupportedReachLatest(t *testing.T) {
 	ctx := context.Background()
@@ -28,7 +31,7 @@ func TestMigrationCompatibilityEmptyAndLastSupportedReachLatest(t *testing.T) {
 		t.Fatalf("migrate empty schema: %v", err)
 	}
 	freshFingerprint := schemaFingerprint(t, freshHarness, ctx)
-	assertMigrationVersion(t, freshHarness, ctx, 16)
+	assertMigrationVersion(t, freshHarness, ctx, latestMigrationVersion)
 
 	upgradeHarness := New(t)
 	settings := integrationSettings(upgradeHarness.ScopedDSN(t))
@@ -37,7 +40,7 @@ func TestMigrationCompatibilityEmptyAndLastSupportedReachLatest(t *testing.T) {
 	if err := persistence.RunMigrations(ctx, settings, migrationFiles()); err != nil {
 		t.Fatalf("upgrade last supported schema: %v", err)
 	}
-	assertMigrationVersion(t, upgradeHarness, ctx, 16)
+	assertMigrationVersion(t, upgradeHarness, ctx, latestMigrationVersion)
 	if upgradedFingerprint := schemaFingerprint(t, upgradeHarness, ctx); upgradedFingerprint != freshFingerprint {
 		t.Fatalf("upgraded schema fingerprint = %s, want %s from empty-to-latest migration", upgradedFingerprint, freshFingerprint)
 	}
@@ -65,7 +68,7 @@ func TestConcurrentMigrationRunnersReachOneStableLatestSchema(t *testing.T) {
 			t.Fatalf("concurrent migration runner: %v", err)
 		}
 	}
-	assertMigrationVersion(t, harness, context.Background(), 16)
+	assertMigrationVersion(t, harness, context.Background(), latestMigrationVersion)
 	if fingerprint := schemaFingerprint(t, harness, context.Background()); fingerprint == "" {
 		t.Fatal("latest schema fingerprint is empty")
 	}
