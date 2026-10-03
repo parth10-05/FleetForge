@@ -1,0 +1,49 @@
+package campaignplan
+
+import (
+	"testing"
+	"time"
+
+	"github.com/parth10-05/fleetforge/internal/domain/reason"
+)
+
+func TestEvaluateCanaryUsesInclusiveFailureBudgetAndFreshScheduledHealth(t *testing.T) {
+	input := validEvaluationInput()
+	decision, err := EvaluateCanary(input)
+	if err != nil || decision.State != EvaluationPassed || decision.Reason != reason.CodeCampaignCanaryPassed {
+		t.Fatalf("passing decision = %#v, err=%v", decision, err)
+	}
+	input.Outcomes[1].UpdateState = "FAILED_TERMINAL"
+	decision, err = EvaluateCanary(input)
+	if err != nil || decision.State != EvaluationFailed || decision.Reason != reason.CodeCampaignBudgetThresholdReached {
+		t.Fatalf("inclusive threshold decision = %#v, err=%v", decision, err)
+	}
+	input = validEvaluationInput()
+	input.Health[0].ScheduledAt = input.LogicalCut.Add(time.Second)
+	decision, err = EvaluateCanary(input)
+	if err != nil || decision.State != EvaluationPending || decision.Reason != reason.CodeCampaignCanaryHealthBlocked {
+		t.Fatalf("unscheduled health decision = %#v, err=%v", decision, err)
+	}
+}
+
+func TestEvaluateCanaryFailsClosedForAttentionAndDuration(t *testing.T) {
+	input := validEvaluationInput()
+	input.Outcomes[0].UpdateState = "NEEDS_ATTENTION"
+	decision, err := EvaluateCanary(input)
+	if err != nil || decision.State != EvaluationPaused || decision.Reason != reason.CodeCampaignCanaryNeedsAttention {
+		t.Fatalf("attention decision = %#v, err=%v", decision, err)
+	}
+	input = validEvaluationInput()
+	input.LogicalCut = input.StartedAt.Add(time.Duration(input.Policy.MaximumDurationSeconds+1) * time.Second)
+	decision, err = EvaluateCanary(input)
+	if err != nil || decision.State != EvaluationPaused || decision.Reason != reason.CodeCampaignCanaryDurationExpired {
+		t.Fatalf("duration decision = %#v, err=%v", decision, err)
+	}
+}
+
+func validEvaluationInput() EvaluationInput {
+	started := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
+	policy := validPolicy(Size{Unit: SizeUnitAbsolute, Value: 1})
+	policy.FailureBudget = Fraction{Numerator: 1, Denominator: 2}
+	return EvaluationInput{Policy: policy, StartedAt: started, LogicalCut: started.Add(time.Minute), Outcomes: []TargetOutcome{{TargetID: "a", UpdateState: "SUCCEEDED", ActiveEnrollment: true}, {TargetID: "b", UpdateState: "SUCCEEDED", ActiveEnrollment: true}}, Health: []HealthSample{{TargetID: "a", Check: "reachable", ScheduledAt: started, ObservedAt: started, Passed: true}, {TargetID: "a", Check: "inventory", ScheduledAt: started, ObservedAt: started, Passed: true}, {TargetID: "b", Check: "reachable", ScheduledAt: started, ObservedAt: started, Passed: true}, {TargetID: "b", Check: "inventory", ScheduledAt: started, ObservedAt: started, Passed: true}}}
+}
