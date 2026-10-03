@@ -23,6 +23,7 @@ var allowedDomainImports = map[string]map[string]struct{}{
 	"preflight":    {"artifact": {}, "inventory": {}, "value": {}},
 	"policy":       {"value": {}},
 	"canary":       {"value": {}},
+	"campaignplan": {"policy": {}, "reason": {}, "value": {}},
 	"campaign":     {"value": {}, "reason": {}, "policy": {}},
 	"wave":         {"value": {}, "reason": {}},
 	"targetupdate": {"value": {}, "reason": {}, "evidence": {}, "policy": {}},
