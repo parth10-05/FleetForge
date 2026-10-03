@@ -20,6 +20,10 @@ const (
 	CodeCampaignPauseResumed              Code = "campaign.pause.resumed"
 	CodeCampaignPauseAbortStarted         Code = "campaign.pause.abort_started"
 	CodeCampaignPauseAbortResolved        Code = "campaign.pause.abort_resolved"
+	CodeCampaignPlanPolicyInvalid         Code = "campaign.plan.policy_invalid"
+	CodeCampaignPlanCanaryDiversity       Code = "campaign.plan.canary_diversity"
+	CodeCampaignPlanCanaryRankFill        Code = "campaign.plan.canary_rank_fill"
+	CodeCampaignPlanLaterWave             Code = "campaign.plan.later_wave"
 	CodeTargetPrecheckIneligible          Code = "target.precheck.ineligible"
 	CodeTargetSubmissionNotAuthorized     Code = "target.submission.not_authorized"
 	CodeTargetAmbiguityInconclusive       Code = "target.ambiguity.inconclusive"
@@ -41,6 +45,10 @@ var allCodes = []Code{
 	CodeCampaignPauseResumed,
 	CodeCampaignPauseAbortStarted,
 	CodeCampaignPauseAbortResolved,
+	CodeCampaignPlanPolicyInvalid,
+	CodeCampaignPlanCanaryDiversity,
+	CodeCampaignPlanCanaryRankFill,
+	CodeCampaignPlanLaterWave,
 	CodeTargetPrecheckIneligible,
 	CodeTargetSubmissionNotAuthorized,
 	CodeTargetAmbiguityInconclusive,
