@@ -45,14 +45,15 @@ type Assignment struct {
 	Rack     string      `json:"rack"`
 }
 type Plan struct {
-	Version         string
-	Algorithm       string
-	Seed            string
-	EffectiveCanary uint64
-	EffectiveLater  uint64
-	Assignments     []Assignment
-	PolicyJSON      []byte
-	Hash            value.SHA256Digest
+	Version                 string
+	Algorithm               string
+	Seed                    string
+	ExpectedFirmwareVersion string
+	EffectiveCanary         uint64
+	EffectiveLater          uint64
+	Assignments             []Assignment
+	PolicyJSON              []byte
+	Hash                    value.SHA256Digest
 }
 
 func Build(input Input) (Plan, error) {
@@ -113,7 +114,7 @@ func Build(input Input) (Plan, error) {
 	if err != nil {
 		return Plan{}, ErrInvalidPlanInput
 	}
-	return Plan{Version: PlanVersionV1, Algorithm: input.Algorithm, Seed: input.Seed, EffectiveCanary: canarySize, EffectiveLater: uint64(len(ranked)) - canarySize, Assignments: assignments, PolicyJSON: policyJSON, Hash: digest}, nil
+	return Plan{Version: PlanVersionV1, Algorithm: input.Algorithm, Seed: input.Seed, ExpectedFirmwareVersion: input.Policy.ExpectedFirmwareVersion, EffectiveCanary: canarySize, EffectiveLater: uint64(len(ranked)) - canarySize, Assignments: assignments, PolicyJSON: policyJSON, Hash: digest}, nil
 }
 
 type rankedCandidate struct {

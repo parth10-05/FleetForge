@@ -59,7 +59,7 @@ type Querier interface {
 	// P03-Q02: find-target-campaign-membership.sql
 	// Access pattern: find a target's campaign memberships before enrollment and readiness decisions.
 	// Index: campaign_targets_target_index ON campaign_targets (target_id, campaign_id)
-	FindTargetCampaignMembership(ctx context.Context, targetID pgtype.UUID) ([]CampaignTarget, error)
+	FindTargetCampaignMembership(ctx context.Context, targetID pgtype.UUID) ([]FindTargetCampaignMembershipRow, error)
 	// initiate-artifact-upload.sql
 	// Access pattern: reserve one immutable artifact declaration before a scoped
 	// direct-upload grant is issued. The display name is deliberately not stored
@@ -84,10 +84,14 @@ type Querier interface {
 	// Access pattern: inspect the latest normalized evidence for a target and observation kind.
 	// Index: device_observations_target_kind_time_index ON device_observations (target_id, kind, observed_at DESC)
 	LatestDeviceObservationsByKind(ctx context.Context, arg LatestDeviceObservationsByKindParams) ([]DeviceObservation, error)
+	// P03-Q35: load-campaign-plan-membership.sql
+	// Access pattern: load a frozen campaign plan's one canary and one later wave
+	// in persisted execution order for readiness, start, evaluation, and replay.
+	LoadCampaignPlanMembership(ctx context.Context, campaignID pgtype.UUID) ([]LoadCampaignPlanMembershipRow, error)
 	// P03-Q01: load-campaign-waves.sql
 	// Access pattern: load all waves for a campaign in release order.
 	// Index: campaign_waves_campaign_ordinal_index ON campaign_waves (campaign_id, ordinal)
-	LoadCampaignWaves(ctx context.Context, campaignID pgtype.UUID) ([]CampaignWafe, error)
+	LoadCampaignWaves(ctx context.Context, campaignID pgtype.UUID) ([]LoadCampaignWavesRow, error)
 	// P03-Q13: load-decision-inputs-for-replay.sql
 	// Access pattern: reconstruct decisions after observations expire (replay support).
 	// Index: decision_inputs_aggregate_revision_sequence_unique UNIQUE

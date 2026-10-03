@@ -25,18 +25,29 @@ SELECT id,
  ORDER BY ordinal ASC
 `
 
+type LoadCampaignWavesRow struct {
+	ID         pgtype.UUID        `json:"id"`
+	CampaignID pgtype.UUID        `json:"campaign_id"`
+	Ordinal    int64              `json:"ordinal"`
+	Evaluation string             `json:"evaluation"`
+	Released   bool               `json:"released"`
+	Terminal   bool               `json:"terminal"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 // P03-Q01: load-campaign-waves.sql
 // Access pattern: load all waves for a campaign in release order.
 // Index: campaign_waves_campaign_ordinal_index ON campaign_waves (campaign_id, ordinal)
-func (q *Queries) LoadCampaignWaves(ctx context.Context, campaignID pgtype.UUID) ([]CampaignWafe, error) {
+func (q *Queries) LoadCampaignWaves(ctx context.Context, campaignID pgtype.UUID) ([]LoadCampaignWavesRow, error) {
 	rows, err := q.db.Query(ctx, loadCampaignWaves, campaignID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CampaignWafe{}
+	items := []LoadCampaignWavesRow{}
 	for rows.Next() {
-		var i CampaignWafe
+		var i LoadCampaignWavesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.CampaignID,
