@@ -227,22 +227,27 @@ type OperationReservation struct {
 }
 
 type OutboxEvent struct {
-	EventID           pgtype.UUID        `json:"event_id"`
-	AggregateType     string             `json:"aggregate_type"`
-	AggregateID       pgtype.UUID        `json:"aggregate_id"`
-	AggregateRevision int64              `json:"aggregate_revision"`
-	EventType         string             `json:"event_type"`
-	SchemaVersion     int32              `json:"schema_version"`
-	Payload           []byte             `json:"payload"`
-	DeliveryState     string             `json:"delivery_state"`
-	DeliveryAttempts  int64              `json:"delivery_attempts"`
-	NextAttemptAt     pgtype.Timestamptz `json:"next_attempt_at"`
-	LastErrorClass    pgtype.Text        `json:"last_error_class"`
-	PublishedAt       pgtype.Timestamptz `json:"published_at"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	ClaimToken        pgtype.UUID        `json:"claim_token"`
-	ClaimOwner        pgtype.Text        `json:"claim_owner"`
-	ClaimExpiresAt    pgtype.Timestamptz `json:"claim_expires_at"`
+	EventID            pgtype.UUID        `json:"event_id"`
+	AggregateType      string             `json:"aggregate_type"`
+	AggregateID        pgtype.UUID        `json:"aggregate_id"`
+	AggregateRevision  int64              `json:"aggregate_revision"`
+	EventType          string             `json:"event_type"`
+	SchemaVersion      int32              `json:"schema_version"`
+	Payload            []byte             `json:"payload"`
+	DeliveryState      string             `json:"delivery_state"`
+	DeliveryAttempts   int64              `json:"delivery_attempts"`
+	NextAttemptAt      pgtype.Timestamptz `json:"next_attempt_at"`
+	LastErrorClass     pgtype.Text        `json:"last_error_class"`
+	PublishedAt        pgtype.Timestamptz `json:"published_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ClaimToken         pgtype.UUID        `json:"claim_token"`
+	ClaimOwner         pgtype.Text        `json:"claim_owner"`
+	ClaimExpiresAt     pgtype.Timestamptz `json:"claim_expires_at"`
+	DeliveryKind       string             `json:"delivery_kind"`
+	DueWorkID          pgtype.UUID        `json:"due_work_id"`
+	CommandID          pgtype.UUID        `json:"command_id"`
+	DeliveryGeneration pgtype.Int8        `json:"delivery_generation"`
+	QueueClass         pgtype.Text        `json:"queue_class"`
 }
 
 type PreflightCandidate struct {

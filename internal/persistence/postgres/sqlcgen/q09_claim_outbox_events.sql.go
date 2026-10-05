@@ -25,8 +25,9 @@ SELECT event_id,
        last_error_class,
        published_at,
        created_at
-  FROM outbox_events
+ FROM outbox_events
  WHERE delivery_state = 'PENDING'
+   AND delivery_kind = 'DOMAIN_EVENT'
    AND next_attempt_at <= $1::timestamptz
  ORDER BY next_attempt_at ASC, created_at ASC
 LIMIT $2::integer

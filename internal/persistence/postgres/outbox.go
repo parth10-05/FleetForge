@@ -48,7 +48,7 @@ func ClaimOutbox(ctx context.Context, pool *pgxpool.Pool, req ClaimOutboxRequest
 		return nil, fmt.Errorf("begin outbox claim: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	rows, err := tx.Query(ctx, `SELECT event_id,aggregate_type,aggregate_id,aggregate_revision,event_type,schema_version,payload,delivery_attempts FROM outbox_events WHERE delivery_state='PENDING' AND next_attempt_at <= $1 ORDER BY next_attempt_at,created_at,event_id LIMIT $2 FOR UPDATE SKIP LOCKED`, req.Now, len(req.Tokens))
+	rows, err := tx.Query(ctx, `SELECT event_id,aggregate_type,aggregate_id,aggregate_revision,event_type,schema_version,payload,delivery_attempts FROM outbox_events WHERE delivery_state='PENDING' AND delivery_kind='DOMAIN_EVENT' AND next_attempt_at <= $1 ORDER BY next_attempt_at,created_at,event_id LIMIT $2 FOR UPDATE SKIP LOCKED`, req.Now, len(req.Tokens))
 	if err != nil {
 		return nil, fmt.Errorf("lock outbox rows: %w", err)
 	}
