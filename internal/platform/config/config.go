@@ -71,6 +71,17 @@ type DiscoveryWorker struct {
 	AllowedCIDRs []netip.Prefix
 	Credentials  map[string]syntheticcredentials.Credential
 }
+
+// OrchestrationWorker is the bounded execution budget for P4 wakeup services.
+// It contains no provider credentials and grants no firmware submission power.
+type OrchestrationWorker struct {
+	Common
+	Owner                                                                  string
+	ReceiveBatch, WorkerConcurrency, ClaimBatch                            int32
+	LocalQueueCapacity, PublisherBatch, RepairBatch                        int32
+	LeaseDuration, HandlerTimeout, PublisherLease, RepairGrace, MaxBackoff time.Duration
+	RetryAttempts                                                          int32
+}
 type Simulator struct {
 	Common
 	Address, RunRoot, ScenarioPath, Username, Password, AdminAddress, AdminSecret string
@@ -160,6 +171,69 @@ func LoadDiscoveryWorker() (DiscoveryWorker, error) {
 		return DiscoveryWorker{}, err
 	}
 	return DiscoveryWorker{Common: common, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
+}
+
+func LoadOrchestrationWorker() (OrchestrationWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_ORCHESTRATION_WORKER_OWNER", "orchestrator")
+	if strings.TrimSpace(owner) == "" || len(owner) > 128 {
+		return OrchestrationWorker{}, &Error{Key: "FLEETFORGE_ORCHESTRATION_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	receive, err := boundedInt32(os.LookupEnv, "FLEETFORGE_WAKEUP_RECEIVE_BATCH", 16, 1, 100)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	concurrency, err := boundedInt32(os.LookupEnv, "FLEETFORGE_WAKEUP_WORKER_CONCURRENCY", 4, 1, receive)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	claim, err := boundedInt32(os.LookupEnv, "FLEETFORGE_WAKEUP_CLAIM_BATCH", 16, 1, 100)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	queue, err := boundedInt32(os.LookupEnv, "FLEETFORGE_WAKEUP_LOCAL_QUEUE_CAPACITY", 256, receive, 10000)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	publisherBatch, err := boundedInt32(os.LookupEnv, "FLEETFORGE_WAKEUP_PUBLISHER_BATCH", 16, 1, 100)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	repairBatch, err := boundedInt32(os.LookupEnv, "FLEETFORGE_WAKEUP_REPAIR_BATCH", 32, 1, 100)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	lease, err := duration(os.LookupEnv, "FLEETFORGE_WAKEUP_LEASE_DURATION", time.Minute, 10*time.Second, 10*time.Minute)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	handler, err := duration(os.LookupEnv, "FLEETFORGE_WAKEUP_HANDLER_TIMEOUT", 5*time.Second, time.Second, lease-time.Second)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	publisherLease, err := duration(os.LookupEnv, "FLEETFORGE_WAKEUP_PUBLISHER_LEASE", time.Minute, 10*time.Second, 10*time.Minute)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	repairGrace, err := duration(os.LookupEnv, "FLEETFORGE_WAKEUP_REPAIR_GRACE", 2*time.Minute, time.Second, time.Hour)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	maxBackoff, err := duration(os.LookupEnv, "FLEETFORGE_WAKEUP_MAX_BACKOFF", time.Minute, time.Second, time.Hour)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	attempts, err := boundedInt32(os.LookupEnv, "FLEETFORGE_WAKEUP_RETRY_ATTEMPTS", 5, 1, 100)
+	if err != nil {
+		return OrchestrationWorker{}, err
+	}
+	if handler >= common.ShutdownTimeout {
+		return OrchestrationWorker{}, &Error{Key: "FLEETFORGE_WAKEUP_HANDLER_TIMEOUT", Reason: "must be less than shutdown timeout"}
+	}
+	return OrchestrationWorker{Common: common, Owner: owner, ReceiveBatch: receive, WorkerConcurrency: concurrency, ClaimBatch: claim, LocalQueueCapacity: queue, PublisherBatch: publisherBatch, RepairBatch: repairBatch, LeaseDuration: lease, HandlerTimeout: handler, PublisherLease: publisherLease, RepairGrace: repairGrace, MaxBackoff: maxBackoff, RetryAttempts: attempts}, nil
 }
 
 func LoadSimulator() (Simulator, error) {
