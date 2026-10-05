@@ -3,13 +3,17 @@ package postgres
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parth10-05/fleetforge/internal/application/orchestration"
 )
+
+var wakeupUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 // WakeupWorkAdapter binds the generic worker contract to short PostgreSQL
 // transactions. Token generation is injected so operational randomness stays
@@ -68,14 +72,53 @@ func (a WakeupWorkAdapter) Complete(ctx context.Context, work orchestration.Clai
 }
 
 func (a WakeupWorkAdapter) Quarantine(ctx context.Context, receipt orchestration.Receipt, reason string) error {
-	if a.Pool == nil || a.Now == nil || (reason != "MALFORMED_ENCODING" && reason != "UNSUPPORTED_WORK_TYPE") {
+	if a.Pool == nil || a.Now == nil || !validWakeupQuarantineReason(reason) {
 		return fmt.Errorf("invalid wakeup quarantine")
 	}
 	key := fmt.Sprintf("%x", sha256.Sum256(append([]byte(reason+":"), receipt.Raw...)))
+	metadata := wakeupReceiptMetadata(receipt.Raw)
 	now := a.Now().UTC()
-	_, err := a.Pool.Exec(ctx, `INSERT INTO wakeup_quarantine (id,deduplication_key,reason_code,first_observed_at,last_observed_at) VALUES (md5($1)::uuid,$2,$3,$4,$4) ON CONFLICT (deduplication_key) DO UPDATE SET last_observed_at=EXCLUDED.last_observed_at,occurrences=wakeup_quarantine.occurrences+1`, "fleetforge.wakeup-quarantine/v1:"+key, key, reason, now)
+	_, err := a.Pool.Exec(ctx, `INSERT INTO wakeup_quarantine (id,deduplication_key,observed_schema_version,observed_queue_class,due_work_id,command_id,reason_code,first_observed_at,last_observed_at) VALUES (md5($1)::uuid,$2,$3,$4,$5::uuid,$6::uuid,$7,$8,$8) ON CONFLICT (deduplication_key) DO UPDATE SET last_observed_at=EXCLUDED.last_observed_at,occurrences=wakeup_quarantine.occurrences+1`, "fleetforge.wakeup-quarantine/v1:"+key, key, metadata.schemaVersion, metadata.queueClass, metadata.dueWorkID, metadata.commandID, reason, now)
 	if err != nil {
 		return fmt.Errorf("record wakeup quarantine: %w", err)
 	}
 	return nil
+}
+
+func validWakeupQuarantineReason(reason string) bool {
+	switch reason {
+	case orchestration.QuarantineOversize, orchestration.QuarantineMalformedEncoding, orchestration.QuarantineUnknownVersion, orchestration.QuarantineInvalidIdentifier, orchestration.QuarantineInvalidQueueClass, orchestration.QuarantineInconsistentFencing, orchestration.QuarantineUnsupportedWorkType, orchestration.QuarantinePermanentPublish:
+		return true
+	}
+	return false
+}
+
+type wakeupMetadata struct{ schemaVersion, queueClass, dueWorkID, commandID string }
+
+// wakeupReceiptMetadata retains only safely parsed, bounded routing fields.
+// It never trusts them for dispatch, linkage, or state mutation.
+func wakeupReceiptMetadata(raw []byte) wakeupMetadata {
+	var fields struct {
+		SchemaVersion string `json:"schema_version"`
+		QueueClass    string `json:"queue_class"`
+		DueWorkID     string `json:"due_work_id"`
+		CommandID     string `json:"command_id"`
+	}
+	if len(raw) > orchestration.MaxEnvelopeBytes || json.Unmarshal(raw, &fields) != nil {
+		return wakeupMetadata{}
+	}
+	metadata := wakeupMetadata{}
+	if len(fields.SchemaVersion) <= 64 {
+		metadata.schemaVersion = fields.SchemaVersion
+	}
+	if len(fields.QueueClass) <= 32 {
+		metadata.queueClass = fields.QueueClass
+	}
+	if wakeupUUIDPattern.MatchString(fields.DueWorkID) {
+		metadata.dueWorkID = fields.DueWorkID
+	}
+	if wakeupUUIDPattern.MatchString(fields.CommandID) {
+		metadata.commandID = fields.CommandID
+	}
+	return metadata
 }

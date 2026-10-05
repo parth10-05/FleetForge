@@ -53,6 +53,46 @@ func TestEnvelopeRejectsInvalidFence(t *testing.T) {
 	}
 }
 
+func TestEnvelopeRejectsInvalidW3CTraceParent(t *testing.T) {
+	for name, traceparent := range map[string]string{
+		"all-zero-trace-id":  "00-00000000000000000000000000000000-0123456789abcdef-01",
+		"all-zero-parent-id": "00-0123456789abcdef0123456789abcdef-0000000000000000-01",
+		"reserved-version":   "ff-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := testEnvelope()
+			e.TraceParent = traceparent
+			if _, err := Encode(e); !errors.Is(err, ErrInvalidEnvelope) {
+				t.Fatalf("Encode() error = %v, want invalid envelope", err)
+			}
+		})
+	}
+}
+
+func TestClassifyEnvelopeFailure(t *testing.T) {
+	valid, err := Encode(testEnvelope())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, test := range map[string]struct {
+		raw  []byte
+		want string
+	}{
+		"oversize":        {raw: []byte(strings.Repeat("x", MaxEnvelopeBytes+1)), want: QuarantineOversize},
+		"invalid-json":    {raw: []byte("{"), want: QuarantineMalformedEncoding},
+		"unknown-version": {raw: []byte(strings.Replace(string(valid), WakeupSchemaV1, "fleetforge.wakeup/v9", 1)), want: QuarantineUnknownVersion},
+		"invalid-class":   {raw: []byte(strings.Replace(string(valid), `"control"`, `"other"`, 1)), want: QuarantineInvalidQueueClass},
+		"invalid-id":      {raw: []byte(strings.Replace(string(valid), "00000000-0000-4000-8000-000000000001", "not-a-uuid", 1)), want: QuarantineInvalidIdentifier},
+		"invalid-fence":   {raw: []byte(strings.Replace(string(valid), `"delivery_generation":0`, `"delivery_generation":-1`, 1)), want: QuarantineInconsistentFencing},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := ClassifyEnvelopeFailure(test.raw); got != test.want {
+				t.Fatalf("ClassifyEnvelopeFailure() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func FuzzDecode(f *testing.F) {
 	f.Add([]byte(`{"schema_version":"fleetforge.wakeup/v1","queue_class":"control"}`))
 	f.Add([]byte(`{"schema_version":"fleetforge.wakeup/v0"}`))

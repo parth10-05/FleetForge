@@ -29,13 +29,18 @@ type storeStub struct {
 	claim                      ClaimDisposition
 	completeErr, quarantineErr error
 	completed, quarantined     int
+	quarantineReason           string
 }
 
 func (s *storeStub) Claim(context.Context, Envelope) (ClaimedWork, ClaimDisposition, error) {
 	return ClaimedWork{DueWorkID: "work", LeaseToken: "lease"}, s.claim, nil
 }
 func (s *storeStub) Complete(context.Context, ClaimedWork) error { s.completed++; return s.completeErr }
-func (s *storeStub) Quarantine(context.Context, Receipt, string) error {
+func (s *storeStub) Quarantine(_ context.Context, _ Receipt, reason string) error {
+	// The reason is part of the durable forensic contract: worker tests retain
+	// it to make sure invalid forms are not collapsed into a generic error.
+	//nolint:unparam // interface signature is intentionally production-shaped.
+	s.quarantineReason = reason
 	s.quarantined++
 	return s.quarantineErr
 }
@@ -91,6 +96,9 @@ func TestWorkerQuarantinesBeforeAcknowledgingInvalidReceipt(t *testing.T) {
 	}
 	if store.quarantined != 1 || acker.count != 1 {
 		t.Fatalf("quarantine=%d ack=%d", store.quarantined, acker.count)
+	}
+	if store.quarantineReason != QuarantineMalformedEncoding {
+		t.Fatalf("quarantine reason=%q", store.quarantineReason)
 	}
 }
 func TestWorkerAcknowledgesAuthoritativelyIgnoredDelivery(t *testing.T) {

@@ -14,6 +14,15 @@ import (
 const (
 	WakeupSchemaV1   = "fleetforge.wakeup/v1"
 	MaxEnvelopeBytes = 4096
+
+	QuarantineOversize            = "OVERSIZE"
+	QuarantineMalformedEncoding   = "MALFORMED_ENCODING"
+	QuarantineUnknownVersion      = "UNKNOWN_VERSION"
+	QuarantineInvalidIdentifier   = "INVALID_IDENTIFIER"
+	QuarantineInvalidQueueClass   = "INVALID_QUEUE_CLASS"
+	QuarantineInconsistentFencing = "INCONSISTENT_FENCING"
+	QuarantineUnsupportedWorkType = "UNSUPPORTED_WORK_TYPE"
+	QuarantinePermanentPublish    = "PERMANENT_PUBLISH_REJECTION"
 )
 
 var (
@@ -58,7 +67,7 @@ func (e Envelope) Validate() error {
 	if e.ExpectedState != "" && !visible(e.ExpectedState, 64) {
 		return ErrInvalidEnvelope
 	}
-	if e.TraceParent != "" && !tracePattern.MatchString(e.TraceParent) {
+	if e.TraceParent != "" && !validTraceParent(e.TraceParent) {
 		return ErrInvalidEnvelope
 	}
 	return nil
@@ -71,6 +80,21 @@ func validClass(c QueueClass) bool {
 	return false
 }
 func validUUID(v string) bool { return uuidPattern.MatchString(v) }
+
+// validTraceParent validates the W3C trace-context fields that matter at this
+// boundary. A regex-only check would accept all-zero trace/span IDs, which W3C
+// reserves as invalid, and the reserved ff version. The envelope remains
+// deliberately opaque beyond this structural validation: tracing is never an
+// authority or workflow identity.
+func validTraceParent(v string) bool {
+	if !tracePattern.MatchString(v) {
+		return false
+	}
+	parts := strings.Split(v, "-")
+	return parts[0] != "ff" &&
+		parts[1] != strings.Repeat("0", len(parts[1])) &&
+		parts[2] != strings.Repeat("0", len(parts[2]))
+}
 func visible(v string, max int) bool {
 	return v != "" && len(v) <= max && !strings.ContainsAny(v, "\\\r\n\t")
 }
@@ -95,6 +119,53 @@ func Decode(raw []byte) (Envelope, error) {
 		return Envelope{}, ErrInvalidEnvelope
 	}
 	return e, nil
+}
+
+// ClassifyEnvelopeFailure returns a stable, bounded quarantine reason for a
+// rejected receipt. It is deliberately diagnostic rather than authoritative:
+// the raw receipt is still rejected by Decode and cannot be dispatched.
+func ClassifyEnvelopeFailure(raw []byte) string {
+	if len(raw) > MaxEnvelopeBytes {
+		return QuarantineOversize
+	}
+	if len(raw) == 0 || hasDuplicateKeys(raw) {
+		return QuarantineMalformedEncoding
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return QuarantineMalformedEncoding
+	}
+	var schemaVersion, queueClass, dueWorkID, commandID, subjectID string
+	var generation, revision int64
+	if decodeString(fields, "schema_version", &schemaVersion) != nil || schemaVersion != WakeupSchemaV1 {
+		return QuarantineUnknownVersion
+	}
+	if decodeString(fields, "queue_class", &queueClass) != nil || !validClass(QueueClass(queueClass)) {
+		return QuarantineInvalidQueueClass
+	}
+	if decodeString(fields, "due_work_id", &dueWorkID) != nil || decodeString(fields, "command_id", &commandID) != nil || decodeString(fields, "subject_id", &subjectID) != nil || !validUUID(dueWorkID) || !validUUID(commandID) || !validUUID(subjectID) {
+		return QuarantineInvalidIdentifier
+	}
+	if decodeInt64(fields, "delivery_generation", &generation) != nil || decodeInt64(fields, "expected_revision", &revision) != nil || generation < 0 || revision < 0 {
+		return QuarantineInconsistentFencing
+	}
+	return QuarantineMalformedEncoding
+}
+
+func decodeString(fields map[string]json.RawMessage, key string, value *string) error {
+	raw, ok := fields[key]
+	if !ok {
+		return ErrInvalidEnvelope
+	}
+	return json.Unmarshal(raw, value)
+}
+
+func decodeInt64(fields map[string]json.RawMessage, key string, value *int64) error {
+	raw, ok := fields[key]
+	if !ok {
+		return ErrInvalidEnvelope
+	}
+	return json.Unmarshal(raw, value)
 }
 func hasDuplicateKeys(raw []byte) bool {
 	d := json.NewDecoder(bytes.NewReader(raw))

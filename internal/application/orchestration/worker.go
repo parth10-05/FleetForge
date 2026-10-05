@@ -100,11 +100,11 @@ func (w *Worker) process(ctx context.Context, receipt Receipt) error {
 	envelope, err := Decode(receipt.Raw)
 	if err != nil {
 		w.record("quarantine", "success", "")
-		return w.quarantineThenAck(ctx, receipt, "MALFORMED_ENCODING")
+		return w.quarantineThenAck(ctx, receipt, ClassifyEnvelopeFailure(receipt.Raw))
 	}
 	if !w.handler.Supports(envelope) {
 		w.record("quarantine", "success", string(envelope.QueueClass))
-		return w.quarantineThenAck(ctx, receipt, "UNSUPPORTED_WORK_TYPE")
+		return w.quarantineThenAck(ctx, receipt, QuarantineUnsupportedWorkType)
 	}
 	claimed, disposition, err := w.store.Claim(ctx, envelope)
 	if err != nil {
