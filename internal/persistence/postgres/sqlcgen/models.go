@@ -366,3 +366,17 @@ type TargetUpdate struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 }
+
+type WakeupQuarantine struct {
+	ID                    pgtype.UUID        `json:"id"`
+	DeduplicationKey      string             `json:"deduplication_key"`
+	ObservedSchemaVersion pgtype.Text        `json:"observed_schema_version"`
+	ObservedQueueClass    pgtype.Text        `json:"observed_queue_class"`
+	DueWorkID             pgtype.UUID        `json:"due_work_id"`
+	CommandID             pgtype.UUID        `json:"command_id"`
+	ReasonCode            string             `json:"reason_code"`
+	FirstObservedAt       pgtype.Timestamptz `json:"first_observed_at"`
+	LastObservedAt        pgtype.Timestamptz `json:"last_observed_at"`
+	Occurrences           int64              `json:"occurrences"`
+	ResolutionState       string             `json:"resolution_state"`
+}
