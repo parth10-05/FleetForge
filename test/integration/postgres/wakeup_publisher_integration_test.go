@@ -235,3 +235,28 @@ func TestWakeupAdapterQuarantineIsDurablyDeduplicated(t *testing.T) {
 		t.Fatalf("occurrences=%d err=%v", count, err)
 	}
 }
+
+func TestRepairMissingWakeupsAdvancesGenerationWithoutChangingCommand(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	now := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	const dueWorkID = "00000000-0000-0000-1409-000000000001"
+	const commandID = "00000000-0000-0000-1409-000000000002"
+	insertDueWork(t, pool, ctx, dueWorkID, commandID, fixture.targetUpdateID, "SAFETY_PROBE", now.Add(-time.Hour))
+	if _, err := pool.Exec(ctx, "UPDATE outbox_events SET delivery_state='PUBLISHED',published_at=$2 WHERE due_work_id=$1::uuid", dueWorkID, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := persistence.RepairMissingWakeups(ctx, pool, persistence.RepairWakeupRequest{Now: now, DeliveryGrace: time.Minute, Limit: 1, MaxGeneration: 3})
+	if err != nil || len(repaired) != 1 || repaired[0] != dueWorkID {
+		t.Fatalf("repair=%v err=%v", repaired, err)
+	}
+	var generation int64
+	var gotCommand string
+	if err := pool.QueryRow(ctx, "SELECT delivery_generation,command_id::text FROM due_work WHERE id=$1::uuid", dueWorkID).Scan(&generation, &gotCommand); err != nil || generation != 1 || gotCommand != commandID {
+		t.Fatalf("generation=%d command=%s err=%v", generation, gotCommand, err)
+	}
+	var intents int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events WHERE due_work_id=$1::uuid AND delivery_generation=1 AND delivery_kind='WORK_WAKEUP'", dueWorkID).Scan(&intents); err != nil || intents != 1 {
+		t.Fatalf("new intents=%d err=%v", intents, err)
+	}
+}

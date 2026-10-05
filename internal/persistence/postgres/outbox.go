@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -42,6 +43,13 @@ type ClaimedWakeup struct {
 	EventID, ClaimToken string
 	Envelope            orchestration.Envelope
 	Attempts            int64
+}
+
+type RepairWakeupRequest struct {
+	Now           time.Time
+	DeliveryGrace time.Duration
+	Limit         int
+	MaxGeneration int64
 }
 
 // EventPublisher is deliberately narrow. Implementations may perform I/O, but
@@ -255,6 +263,78 @@ func PublishClaimedWakeups(ctx context.Context, pool *pgxpool.Pool, publisher or
 		}
 	}
 	return nil
+}
+
+// RepairMissingWakeups recreates only a lost or aged-out wakeup hint. It locks
+// the semantic due-work row, increments its transport generation, and inserts
+// exactly one matching typed outbox intent before committing. A live outbox
+// claim is never stolen and command_id is never changed.
+func RepairMissingWakeups(ctx context.Context, pool *pgxpool.Pool, req RepairWakeupRequest) ([]string, error) {
+	if pool == nil || req.Now.IsZero() || req.DeliveryGrace <= 0 || req.Limit <= 0 || req.Limit > 100 || req.MaxGeneration < 0 {
+		return nil, fmt.Errorf("invalid wakeup repair request")
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return nil, fmt.Errorf("begin wakeup repair: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	rows, err := tx.Query(ctx, `SELECT d.id::text,d.command_id::text,d.subject_type,d.subject_id::text,d.work_type,d.expected_revision,d.delivery_generation
+FROM due_work d LEFT JOIN outbox_events o ON o.delivery_kind='WORK_WAKEUP' AND o.due_work_id=d.id AND o.delivery_generation=d.delivery_generation
+WHERE d.delivery_state='PENDING' AND d.not_before <= $1 AND d.delivery_generation < $2
+  AND (o.event_id IS NULL OR (o.delivery_state='PUBLISHED' AND o.published_at <= $3))
+ORDER BY d.not_before,d.created_at,d.id LIMIT $4 FOR UPDATE OF d SKIP LOCKED`, req.Now, req.MaxGeneration, req.Now.Add(-req.DeliveryGrace), req.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("lock repairable wakeups: %w", err)
+	}
+	type repairable struct {
+		id, commandID, subjectType, subjectID, workType string
+		revision, generation                            int64
+	}
+	items := []repairable{}
+	for rows.Next() {
+		var item repairable
+		if err := rows.Scan(&item.id, &item.commandID, &item.subjectType, &item.subjectID, &item.workType, &item.revision, &item.generation); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan repairable wakeup: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("read repairable wakeups: %w", err)
+	}
+	rows.Close()
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		generation := item.generation + 1
+		if _, err := tx.Exec(ctx, `UPDATE due_work SET delivery_generation=$2,updated_at=$3 WHERE id=$1::uuid AND delivery_state='PENDING' AND delivery_generation=$4`, item.id, generation, req.Now, item.generation); err != nil {
+			return nil, classifyOutboxError(err, "advance wakeup generation")
+		}
+		queueClass := queueClassForWorkType(item.workType)
+		if _, err := tx.Exec(ctx, `INSERT INTO outbox_events (event_id,aggregate_type,aggregate_id,aggregate_revision,event_type,schema_version,payload,next_attempt_at,delivery_kind,due_work_id,command_id,delivery_generation,queue_class) VALUES (md5($1)::uuid,$2,$3::uuid,$4,'work.wakeup.requested',1,'{}'::jsonb,$5,'WORK_WAKEUP',$6::uuid,$7::uuid,$8,$9)`, "fleetforge.work-wakeup/v1:"+item.id+":"+fmt.Sprint(generation), item.subjectType, item.subjectID, item.revision, req.Now, item.id, item.commandID, generation, queueClass); err != nil {
+			return nil, fmt.Errorf("insert repaired wakeup: %w", err)
+		}
+		ids = append(ids, item.id)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, classifyOutboxError(err, "commit wakeup repair")
+	}
+	return ids, nil
+}
+
+func queueClassForWorkType(workType string) string {
+	switch {
+	case strings.Contains(workType, "DISCOVER"):
+		return string(orchestration.QueueDiscovery)
+	case strings.Contains(workType, "ARTIFACT"):
+		return string(orchestration.QueueArtifactVerification)
+	case workType == "SUBMIT" || workType == "UPDATE_STEP":
+		return string(orchestration.QueueUpdateStep)
+	case strings.Contains(workType, "RECONCIL"):
+		return string(orchestration.QueueReconciliation)
+	default:
+		return string(orchestration.QueueControl)
+	}
 }
 
 func PublishClaimedOutbox(ctx context.Context, pool *pgxpool.Pool, publisher EventPublisher, claim ClaimOutboxRequest, maxAttempts int64, retryAt func(time.Time) time.Time) error {
