@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parth10-05/fleetforge/internal/application/orchestration"
 )
 
 var ErrOutboxClaimConflict = errors.New("outbox claim conflict")
@@ -31,6 +33,15 @@ type OutboxResult struct {
 	RetryAt             time.Time
 	ErrorClass          string
 	MaxAttempts         int64
+}
+
+// ClaimedWakeup is a typed transport intent reconstructed exclusively from
+// authoritative relational columns. Its Envelope is never assembled from an
+// untrusted outbox payload.
+type ClaimedWakeup struct {
+	EventID, ClaimToken string
+	Envelope            orchestration.Envelope
+	Attempts            int64
 }
 
 // EventPublisher is deliberately narrow. Implementations may perform I/O, but
@@ -98,21 +109,150 @@ func RetryOrQuarantineOutbox(ctx context.Context, pool *pgxpool.Pool, result Out
 	if result.EventID == "" || result.ClaimToken == "" || result.Now.IsZero() || result.ErrorClass == "" || len(result.ErrorClass) > 128 || result.MaxAttempts <= 0 {
 		return fmt.Errorf("invalid outbox retry result")
 	}
-	state := "PENDING"
 	next := result.RetryAt
 	if result.RetryAt.IsZero() || result.RetryAt.Before(result.Now) {
 		return fmt.Errorf("invalid outbox retry time")
 	}
-	if result.MaxAttempts <= 1 {
-		state = "QUARANTINED"
-		next = result.Now
-	}
-	tag, err := pool.Exec(ctx, `UPDATE outbox_events SET delivery_state=$3,next_attempt_at=$4,last_error_class=$5,claim_token=NULL,claim_owner=NULL,claim_expires_at=NULL WHERE event_id=$1::uuid AND delivery_state='CLAIMED' AND claim_token=$2::uuid AND delivery_attempts >= $6`, result.EventID, result.ClaimToken, state, next, result.ErrorClass, result.MaxAttempts)
+	tag, err := pool.Exec(ctx, `UPDATE outbox_events
+SET delivery_state=CASE WHEN delivery_attempts >= $6 THEN 'QUARANTINED' ELSE 'PENDING' END,
+    next_attempt_at=CASE WHEN delivery_attempts >= $6 THEN $3 ELSE $4 END,
+    last_error_class=$5,claim_token=NULL,claim_owner=NULL,claim_expires_at=NULL
+WHERE event_id=$1::uuid AND delivery_state='CLAIMED' AND claim_token=$2::uuid`, result.EventID, result.ClaimToken, result.Now, next, result.ErrorClass, result.MaxAttempts)
 	if err != nil {
 		return classifyOutboxError(err, "retry outbox event")
 	}
 	if tag.RowsAffected() != 1 {
 		return fmt.Errorf("%w: stale publisher or retry budget", ErrOutboxClaimConflict)
+	}
+	return nil
+}
+
+// ClaimWorkWakeups claims only typed wakeup rows in deterministic order. The
+// transaction commits before the caller is permitted to invoke the queue.
+func ClaimWorkWakeups(ctx context.Context, pool *pgxpool.Pool, req ClaimOutboxRequest) ([]ClaimedWakeup, error) {
+	if req.Owner == "" || req.Now.IsZero() || !req.LeaseExpiresAt.After(req.Now) || len(req.Tokens) == 0 || len(req.Tokens) > 100 {
+		return nil, fmt.Errorf("invalid wakeup claim request")
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return nil, fmt.Errorf("begin wakeup claim: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	rows, err := tx.Query(ctx, `SELECT o.event_id,o.command_id,o.delivery_generation,o.queue_class,o.delivery_attempts,
+	 d.id,d.work_type,d.subject_type,d.subject_id,d.expected_revision,d.expected_command_epoch,d.not_before
+FROM outbox_events o JOIN due_work d ON d.id=o.due_work_id AND d.command_id=o.command_id AND d.delivery_generation=o.delivery_generation
+WHERE o.delivery_state='PENDING' AND o.delivery_kind='WORK_WAKEUP' AND o.next_attempt_at <= $1
+ORDER BY o.next_attempt_at,o.created_at,o.event_id LIMIT $2 FOR UPDATE OF o SKIP LOCKED`, req.Now, len(req.Tokens))
+	if err != nil {
+		return nil, fmt.Errorf("lock wakeup intents: %w", err)
+	}
+	defer rows.Close()
+	items := make([]ClaimedWakeup, 0, len(req.Tokens))
+	for rows.Next() {
+		var item ClaimedWakeup
+		var queueClass string
+		if err := rows.Scan(&item.EventID, &item.Envelope.CommandID, &item.Envelope.DeliveryGeneration, &queueClass, &item.Attempts,
+			&item.Envelope.DueWorkID, &item.Envelope.WorkType, &item.Envelope.SubjectType, &item.Envelope.SubjectID, &item.Envelope.ExpectedRevision, &item.Envelope.ExpectedCommandEpoch, &item.Envelope.NotBefore); err != nil {
+			return nil, fmt.Errorf("scan wakeup intent: %w", err)
+		}
+		item.Envelope.SchemaVersion = orchestration.WakeupSchemaV1
+		item.Envelope.QueueClass = orchestration.QueueClass(queueClass)
+		if err := item.Envelope.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid persisted wakeup %s: %w", item.EventID, err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read wakeup intents: %w", err)
+	}
+	for i := range items {
+		items[i].ClaimToken = req.Tokens[i]
+		tag, err := tx.Exec(ctx, `UPDATE outbox_events SET delivery_state='CLAIMED',claim_token=$2::uuid,claim_owner=$3,claim_expires_at=$4,delivery_attempts=delivery_attempts+1 WHERE event_id=$1::uuid AND delivery_state='PENDING' AND delivery_kind='WORK_WAKEUP'`, items[i].EventID, items[i].ClaimToken, req.Owner, req.LeaseExpiresAt)
+		if err != nil {
+			return nil, classifyOutboxError(err, "claim wakeup intent")
+		}
+		if tag.RowsAffected() != 1 {
+			return nil, fmt.Errorf("%w: lost wakeup intent", ErrOutboxClaimConflict)
+		}
+		items[i].Attempts++
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, classifyOutboxError(err, "commit wakeup claim")
+	}
+	return items, nil
+}
+
+func MarkWorkWakeupPublished(ctx context.Context, pool *pgxpool.Pool, result OutboxResult) error {
+	if result.EventID == "" || result.ClaimToken == "" || result.Now.IsZero() {
+		return fmt.Errorf("invalid wakeup published result")
+	}
+	tag, err := pool.Exec(ctx, `UPDATE outbox_events SET delivery_state='PUBLISHED',published_at=$3,claim_token=NULL,claim_owner=NULL,claim_expires_at=NULL WHERE event_id=$1::uuid AND delivery_state='CLAIMED' AND delivery_kind='WORK_WAKEUP' AND claim_token=$2::uuid`, result.EventID, result.ClaimToken, result.Now)
+	if err != nil {
+		return classifyOutboxError(err, "mark wakeup published")
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("%w: stale wakeup publisher", ErrOutboxClaimConflict)
+	}
+	return nil
+}
+
+// QuarantineWorkWakeup permanently closes a claimed work-wakeup intent and
+// atomically records bounded, deduplicated evidence of the publisher rejection.
+func QuarantineWorkWakeup(ctx context.Context, pool *pgxpool.Pool, result OutboxResult) error {
+	if result.EventID == "" || result.ClaimToken == "" || result.Now.IsZero() {
+		return fmt.Errorf("invalid wakeup quarantine result")
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return fmt.Errorf("begin wakeup quarantine: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var dueWorkID, commandID string
+	if err := tx.QueryRow(ctx, `UPDATE outbox_events SET delivery_state='QUARANTINED',next_attempt_at=$3,last_error_class='PERMANENT_PUBLISH_REJECTION',claim_token=NULL,claim_owner=NULL,claim_expires_at=NULL WHERE event_id=$1::uuid AND delivery_state='CLAIMED' AND delivery_kind='WORK_WAKEUP' AND claim_token=$2::uuid RETURNING due_work_id::text,command_id::text`, result.EventID, result.ClaimToken, result.Now).Scan(&dueWorkID, &commandID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: stale wakeup publisher", ErrOutboxClaimConflict)
+		}
+		return classifyOutboxError(err, "quarantine wakeup")
+	}
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte("PERMANENT_PUBLISH_REJECTION:"+result.EventID)))
+	if _, err := tx.Exec(ctx, `INSERT INTO wakeup_quarantine (id,deduplication_key,due_work_id,command_id,reason_code,first_observed_at,last_observed_at) VALUES (md5($1)::uuid,$2,$3::uuid,$4::uuid,'PERMANENT_PUBLISH_REJECTION',$5,$5) ON CONFLICT (deduplication_key) DO UPDATE SET last_observed_at=EXCLUDED.last_observed_at,occurrences=wakeup_quarantine.occurrences+1`, "fleetforge.wakeup-quarantine/v1:"+key, key, dueWorkID, commandID, result.Now); err != nil {
+		return fmt.Errorf("record wakeup quarantine: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return classifyOutboxError(err, "commit wakeup quarantine")
+	}
+	return nil
+}
+
+// PublishClaimedWakeups performs transport I/O only after each claim has
+// committed. Unknown outcomes retry the same durable row and generation.
+func PublishClaimedWakeups(ctx context.Context, pool *pgxpool.Pool, publisher orchestration.WakeupPublisher, claim ClaimOutboxRequest, maxAttempts int64, retryAt func(time.Time) time.Time) error {
+	if publisher == nil || retryAt == nil || maxAttempts <= 0 {
+		return fmt.Errorf("wakeup publisher, retry schedule, and attempt budget are required")
+	}
+	items, err := ClaimWorkWakeups(ctx, pool, claim)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		result := OutboxResult{EventID: item.EventID, ClaimToken: item.ClaimToken, Now: claim.Now, MaxAttempts: maxAttempts}
+		outcome, publishErr := publisher.Publish(ctx, item.Envelope)
+		if publishErr != nil || outcome == orchestration.PublishRejectedRetryable || outcome == orchestration.PublishOutcomeUnknown {
+			result.ErrorClass, result.RetryAt = "PUBLISH_RETRYABLE", retryAt(claim.Now)
+			if err := RetryOrQuarantineOutbox(ctx, pool, result); err != nil {
+				return err
+			}
+			continue
+		}
+		if outcome == orchestration.PublishRejectedPermanent {
+			if err := QuarantineWorkWakeup(ctx, pool, result); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := MarkWorkWakeupPublished(ctx, pool, result); err != nil {
+			return err
+		}
 	}
 	return nil
 }
