@@ -295,3 +295,28 @@ func TestRepairMissingWakeupsSkipsLiveClaimsAndGenerationCap(t *testing.T) {
 		}
 	}
 }
+
+func TestCapacityAvailableReadsExistingReservationTruthWithoutAdmission(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	for _, scope := range []persistence.ScopeCapacity{{Level: "GLOBAL", Key: "GLOBAL", Limit: 1}, {Level: "SITE", Key: "site-a", Limit: 1}, {Level: "RACK", Key: "rack-a", Limit: 1}} {
+		if _, err := pool.Exec(ctx, "INSERT INTO scope_capacities (scope_level,scope_key,capacity_limit) VALUES ($1,$2,$3)", scope.Level, scope.Key, scope.Limit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	global, site, rack := persistence.ScopeCapacity{Level: "GLOBAL", Key: "GLOBAL", Limit: 1}, persistence.ScopeCapacity{Level: "SITE", Key: "site-a", Limit: 1}, persistence.ScopeCapacity{Level: "RACK", Key: "rack-a", Limit: 1}
+	available, err := persistence.CapacityAvailable(ctx, pool, global, site, rack)
+	if err != nil || !available {
+		t.Fatalf("available=%t err=%v", available, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE scope_capacities SET active_reservation_count=1 WHERE scope_level='RACK' AND scope_key='rack-a'"); err != nil {
+		t.Fatal(err)
+	}
+	available, err = persistence.CapacityAvailable(ctx, pool, global, site, rack)
+	if err != nil || available {
+		t.Fatalf("exhausted available=%t err=%v", available, err)
+	}
+	var admissions, reservations int
+	if err := pool.QueryRow(ctx, "SELECT (SELECT COUNT(*) FROM submission_admissions),(SELECT COUNT(*) FROM operation_reservations)").Scan(&admissions, &reservations); err != nil || admissions != 0 || reservations != 0 {
+		t.Fatalf("admissions=%d reservations=%d err=%v", admissions, reservations, err)
+	}
+}
