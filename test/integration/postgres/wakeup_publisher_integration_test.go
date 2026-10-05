@@ -260,3 +260,38 @@ func TestRepairMissingWakeupsAdvancesGenerationWithoutChangingCommand(t *testing
 		t.Fatalf("new intents=%d err=%v", intents, err)
 	}
 }
+
+func TestRepairMissingWakeupsSkipsLiveClaimsAndGenerationCap(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	now := time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC)
+	const liveID = "00000000-0000-0000-1410-000000000001"
+	const cappedID = "00000000-0000-0000-1410-000000000002"
+	insertDueWork(t, pool, ctx, liveID, "00000000-0000-0000-1410-000000000003", fixture.targetUpdateID, "SAFETY_PROBE", now.Add(-time.Hour))
+	insertDueWork(t, pool, ctx, cappedID, "00000000-0000-0000-1410-000000000004", fixture.targetUpdateID, "SAFETY_PROBE", now.Add(-time.Hour))
+	if _, err := pool.Exec(ctx, "UPDATE outbox_events SET delivery_state='CLAIMED',claim_token='00000000-0000-0000-1410-000000000005',claim_owner='live',claim_expires_at=$2 WHERE due_work_id=$1::uuid", liveID, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE outbox_events SET delivery_state='PUBLISHED',published_at=$2 WHERE due_work_id=$1::uuid", cappedID, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE due_work SET delivery_generation=3 WHERE id=$1::uuid", cappedID); err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := persistence.RepairMissingWakeups(ctx, pool, persistence.RepairWakeupRequest{Now: now, DeliveryGrace: time.Minute, Limit: 10, MaxGeneration: 3})
+	if err != nil || len(repaired) != 0 {
+		t.Fatalf("repair=%v err=%v", repaired, err)
+	}
+	for _, id := range []string{liveID, cappedID} {
+		var generation int64
+		if err := pool.QueryRow(ctx, "SELECT delivery_generation FROM due_work WHERE id=$1::uuid", id).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		if id == liveID && generation != 0 {
+			t.Fatalf("live generation=%d", generation)
+		}
+		if id == cappedID && generation != 3 {
+			t.Fatalf("capped generation=%d", generation)
+		}
+	}
+}
