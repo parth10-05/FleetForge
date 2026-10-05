@@ -102,3 +102,21 @@ func TestWorkerAcknowledgesAuthoritativelyIgnoredDelivery(t *testing.T) {
 		t.Fatalf("handle=%d complete=%d ack=%d", handler.calls, store.completed, acker.count)
 	}
 }
+
+func TestSafetyProbeHandlerAllowsNoDestructiveWork(t *testing.T) {
+	handler := SafetyProbeHandler{}
+	probe := testEnvelope()
+	probe.WorkType, probe.QueueClass = "SAFETY_PROBE", QueueControl
+	if !handler.Supports(probe) {
+		t.Fatal("safety probe should be supported")
+	}
+	for _, workType := range []string{"SUBMIT", "UPDATE_STEP", "RED FISH"} {
+		probe.WorkType = workType
+		if handler.Supports(probe) {
+			t.Fatalf("unsupported work type %q accepted", workType)
+		}
+	}
+	if err := handler.Handle(context.Background(), ClaimedWork{}); err != nil {
+		t.Fatal(err)
+	}
+}
