@@ -48,7 +48,10 @@ type Worker struct {
 	store    WorkStore
 	handler  WorkHandler
 	config   WorkerConfig
+	metrics  *Metrics
 }
+
+func (w *Worker) WithMetrics(metrics *Metrics) *Worker { w.metrics = metrics; return w }
 
 func NewWorker(receiver WakeupReceiver, acker WakeupAcknowledger, store WorkStore, handler WorkHandler, config WorkerConfig) (*Worker, error) {
 	if receiver == nil || acker == nil || store == nil || handler == nil || config.ReceiveBatch <= 0 || config.ReceiveBatch > 100 || config.Concurrency <= 0 || config.Concurrency > config.ReceiveBatch || config.HandlerTimeout <= 0 {
@@ -63,8 +66,10 @@ func NewWorker(receiver WakeupReceiver, acker WakeupAcknowledger, store WorkStor
 func (w *Worker) RunOnce(ctx context.Context) error {
 	receipts, err := w.receiver.Receive(ctx, w.config.ReceiveBatch)
 	if err != nil {
+		w.record("receive", "failure", "")
 		return err
 	}
+	w.record("receive", "success", "")
 	sem := make(chan struct{}, w.config.Concurrency)
 	errs := make(chan error, len(receipts))
 	var group sync.WaitGroup
@@ -94,28 +99,49 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 func (w *Worker) process(ctx context.Context, receipt Receipt) error {
 	envelope, err := Decode(receipt.Raw)
 	if err != nil {
+		w.record("quarantine", "success", "")
 		return w.quarantineThenAck(ctx, receipt, "MALFORMED_ENCODING")
 	}
 	if !w.handler.Supports(envelope) {
+		w.record("quarantine", "success", string(envelope.QueueClass))
 		return w.quarantineThenAck(ctx, receipt, "UNSUPPORTED_WORK_TYPE")
 	}
 	claimed, disposition, err := w.store.Claim(ctx, envelope)
 	if err != nil {
+		w.record("claim", "failure", string(envelope.QueueClass))
 		return err
 	}
 	if disposition == ClaimIgnored {
+		w.record("claim", "stale", string(envelope.QueueClass))
 		return w.acker.Ack(ctx, receipt)
 	}
+	w.record("claim", "success", string(envelope.QueueClass))
 	handlerContext, cancel := context.WithTimeout(ctx, w.config.HandlerTimeout)
 	err = w.handler.Handle(handlerContext, claimed)
 	cancel()
 	if err != nil {
+		w.record("dispatch", "failure", string(envelope.QueueClass))
 		return err
 	}
+	w.record("dispatch", "success", string(envelope.QueueClass))
 	if err := w.store.Complete(ctx, claimed); err != nil {
+		w.record("durable_complete", "failure", string(envelope.QueueClass))
 		return err
 	}
-	return w.acker.Ack(ctx, receipt)
+	w.record("durable_complete", "success", string(envelope.QueueClass))
+	err = w.acker.Ack(ctx, receipt)
+	if err != nil {
+		w.record("ack", "failure", string(envelope.QueueClass))
+		return err
+	}
+	w.record("ack", "success", string(envelope.QueueClass))
+	return nil
+}
+
+func (w *Worker) record(name, outcome, class string) {
+	if w.metrics != nil {
+		_ = w.metrics.Record(name, outcome, class)
+	}
 }
 
 func (w *Worker) quarantineThenAck(ctx context.Context, receipt Receipt, reason string) error {

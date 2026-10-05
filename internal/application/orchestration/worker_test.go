@@ -181,3 +181,17 @@ func TestWorkerBoundsConcurrentDispatch(t *testing.T) {
 		t.Fatalf("peak=%d ack=%d", handler.peak, acker.count)
 	}
 }
+
+func TestWorkerRecordsBoundedOutcomes(t *testing.T) {
+	store, handler, acker := &storeStub{claim: ClaimOwned}, &handlerStub{supported: true}, &ackerStub{}
+	metrics := NewMetrics()
+	worker := workerFor(t, validReceipt(t), store, handler, acker).WithMetrics(metrics)
+	if err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []MetricKey{{Name: "receive", Outcome: "success"}, {Name: "claim", Outcome: "success", Class: "control"}, {Name: "dispatch", Outcome: "success", Class: "control"}, {Name: "durable_complete", Outcome: "success", Class: "control"}, {Name: "ack", Outcome: "success", Class: "control"}} {
+		if metrics.Snapshot()[key] != 1 {
+			t.Fatalf("metric %#v = %d", key, metrics.Snapshot()[key])
+		}
+	}
+}
