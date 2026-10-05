@@ -52,3 +52,12 @@ func TestEnvelopeRejectsInvalidFence(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func FuzzDecode(f *testing.F) {
+	f.Add([]byte(`{"schema_version":"fleetforge.wakeup/v1","queue_class":"control"}`))
+	f.Add([]byte(`{"schema_version":"fleetforge.wakeup/v0"}`))
+	f.Add([]byte(`not json`))
+	f.Fuzz(func(t *testing.T, input []byte) {
+		_, _ = Decode(input)
+	})
+}
