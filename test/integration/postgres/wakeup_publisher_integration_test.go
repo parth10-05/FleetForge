@@ -77,7 +77,7 @@ func TestUnknownWakeupPublishRetriesSameIntentAndGeneration(t *testing.T) {
 	unknown := wakeupPublisherFunc(func(context.Context, orchestration.Envelope) (orchestration.PublishOutcome, error) {
 		return orchestration.PublishOutcomeUnknown, nil
 	})
-	if err := persistence.PublishClaimedWakeups(ctx, pool, unknown, persistence.ClaimOutboxRequest{Owner: "publisher-a", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1402-000000000003"}}, 3, func(time.Time) time.Time { return now }); err != nil {
+	if err := persistence.PublishClaimedWakeups(ctx, pool, unknown, persistence.ClaimOutboxRequest{Owner: "publisher-a", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1402-000000000003"}}, 3, func(persistence.ClaimedWakeup, time.Time) time.Time { return now }); err != nil {
 		t.Fatal(err)
 	}
 	second, err := persistence.ClaimWorkWakeups(ctx, pool, persistence.ClaimOutboxRequest{Owner: "publisher-b", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1402-000000000004"}})
@@ -97,7 +97,7 @@ func TestPermanentWakeupRejectionCreatesDurableQuarantine(t *testing.T) {
 	permanent := wakeupPublisherFunc(func(context.Context, orchestration.Envelope) (orchestration.PublishOutcome, error) {
 		return orchestration.PublishRejectedPermanent, nil
 	})
-	if err := persistence.PublishClaimedWakeups(ctx, pool, permanent, persistence.ClaimOutboxRequest{Owner: "publisher", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1403-000000000003"}}, 3, func(time.Time) time.Time { return now }); err != nil {
+	if err := persistence.PublishClaimedWakeups(ctx, pool, permanent, persistence.ClaimOutboxRequest{Owner: "publisher", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1403-000000000003"}}, 3, func(persistence.ClaimedWakeup, time.Time) time.Time { return now }); err != nil {
 		t.Fatal(err)
 	}
 	var state, reason string

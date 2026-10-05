@@ -234,7 +234,7 @@ func QuarantineWorkWakeup(ctx context.Context, pool *pgxpool.Pool, result Outbox
 
 // PublishClaimedWakeups performs transport I/O only after each claim has
 // committed. Unknown outcomes retry the same durable row and generation.
-func PublishClaimedWakeups(ctx context.Context, pool *pgxpool.Pool, publisher orchestration.WakeupPublisher, claim ClaimOutboxRequest, maxAttempts int64, retryAt func(time.Time) time.Time) error {
+func PublishClaimedWakeups(ctx context.Context, pool *pgxpool.Pool, publisher orchestration.WakeupPublisher, claim ClaimOutboxRequest, maxAttempts int64, retryAt func(ClaimedWakeup, time.Time) time.Time) error {
 	if publisher == nil || retryAt == nil || maxAttempts <= 0 {
 		return fmt.Errorf("wakeup publisher, retry schedule, and attempt budget are required")
 	}
@@ -246,7 +246,7 @@ func PublishClaimedWakeups(ctx context.Context, pool *pgxpool.Pool, publisher or
 		result := OutboxResult{EventID: item.EventID, ClaimToken: item.ClaimToken, Now: claim.Now, MaxAttempts: maxAttempts}
 		outcome, publishErr := publisher.Publish(ctx, item.Envelope)
 		if publishErr != nil || outcome == orchestration.PublishRejectedRetryable || outcome == orchestration.PublishOutcomeUnknown {
-			result.ErrorClass, result.RetryAt = "PUBLISH_RETRYABLE", retryAt(claim.Now)
+			result.ErrorClass, result.RetryAt = "PUBLISH_RETRYABLE", retryAt(item, claim.Now)
 			if err := RetryOrQuarantineOutbox(ctx, pool, result); err != nil {
 				return err
 			}
