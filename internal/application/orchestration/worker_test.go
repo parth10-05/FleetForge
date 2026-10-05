@@ -120,3 +120,64 @@ func TestSafetyProbeHandlerAllowsNoDestructiveWork(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type concurrentStore struct{}
+
+func (concurrentStore) Claim(context.Context, Envelope) (ClaimedWork, ClaimDisposition, error) {
+	return ClaimedWork{DueWorkID: "work", LeaseToken: "lease"}, ClaimOwned, nil
+}
+func (concurrentStore) Complete(context.Context, ClaimedWork) error       { return nil }
+func (concurrentStore) Quarantine(context.Context, Receipt, string) error { return nil }
+
+type concurrentHandler struct {
+	mu           sync.Mutex
+	active, peak int
+	entered      chan struct{}
+	release      <-chan struct{}
+}
+
+func (h *concurrentHandler) Supports(Envelope) bool { return true }
+func (h *concurrentHandler) Handle(context.Context, ClaimedWork) error {
+	h.mu.Lock()
+	h.active++
+	if h.active > h.peak {
+		h.peak = h.active
+	}
+	h.mu.Unlock()
+	h.entered <- struct{}{}
+	<-h.release
+	h.mu.Lock()
+	h.active--
+	h.mu.Unlock()
+	return nil
+}
+
+func TestWorkerBoundsConcurrentDispatch(t *testing.T) {
+	first, second := validReceipt(t), validReceipt(t)
+	release := make(chan struct{})
+	handler := &concurrentHandler{entered: make(chan struct{}, 2), release: release}
+	acker := &ackerStub{}
+	worker, err := NewWorker(receiverStub{receipts: []Receipt{first, second}}, acker, concurrentStore{}, handler, WorkerConfig{ReceiveBatch: 2, Concurrency: 1, HandlerTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- worker.RunOnce(context.Background()) }()
+	select {
+	case <-handler.entered:
+	case <-time.After(time.Second):
+		t.Fatal("first handler did not start")
+	}
+	select {
+	case <-handler.entered:
+		t.Fatal("worker exceeded concurrency")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if handler.peak != 1 || acker.count != 2 {
+		t.Fatalf("peak=%d ack=%d", handler.peak, acker.count)
+	}
+}
