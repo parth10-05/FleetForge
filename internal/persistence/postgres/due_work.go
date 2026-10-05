@@ -105,6 +105,22 @@ SET delivery_state='CLAIMED', lease_token=$2::uuid, lease_owner=$3, lease_expire
 WHERE id=$1::uuid AND command_id=$6::uuid AND delivery_generation=$7
   AND expected_revision=$8 AND expected_command_epoch IS NOT DISTINCT FROM $9
   AND delivery_state='PENDING' AND not_before <= $5
+	AND (
+		work_type <> 'SAFETY_PROBE'
+		OR EXISTS (
+			SELECT 1
+			FROM target_updates tu
+			JOIN campaign_targets ct ON ct.id=tu.campaign_target_id
+			JOIN campaigns c ON c.id=ct.campaign_id
+			JOIN target_enrollments e ON e.campaign_target_id=ct.id AND e.target_id=ct.target_id AND e.campaign_id=c.id AND e.state='ACTIVE'
+			WHERE tu.id=due_work.subject_id
+			  AND due_work.expected_command_epoch IS NOT NULL
+			  AND tu.revision=due_work.expected_revision
+			  AND tu.command_epoch=due_work.expected_command_epoch
+			  AND c.command_epoch=due_work.expected_command_epoch
+			  AND c.state IN ('RUNNING_CANARY','RUNNING_WAVES')
+		)
+	)
 RETURNING id::text,command_id::text,subject_type,subject_id::text,work_type,lease_token::text,expected_revision,expected_command_epoch,delivery_generation`,
 		req.DueWorkID, req.LeaseToken, req.Owner, req.LeaseExpiresAt, req.Now, req.CommandID, req.DeliveryGeneration, req.ExpectedRevision, req.ExpectedCommandEpoch,
 	).Scan(&item.ID, &item.CommandID, &item.SubjectType, &item.SubjectID, &item.WorkType, &item.LeaseToken, &item.ExpectedRevision, &item.ExpectedCommandEpoch, &item.DeliveryGeneration)

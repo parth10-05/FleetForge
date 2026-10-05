@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parth10-05/fleetforge/internal/application/orchestration"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
@@ -193,12 +194,14 @@ func TestWakeupSpecificClaimRejectsStaleFencingAndCoownership(t *testing.T) {
 func TestWakeupAdapterCompletesWithDurableEvidenceAndFencesReplay(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareSafetyProbeEligibility(t, pool, ctx, fixture, 1)
 	now := time.Date(2026, 10, 5, 7, 0, 0, 0, time.UTC)
 	const dueWorkID = "00000000-0000-0000-1408-000000000001"
 	const commandID = "00000000-0000-0000-1408-000000000002"
-	insertDueWork(t, pool, ctx, dueWorkID, commandID, fixture.targetUpdateID, "SAFETY_PROBE", now.Add(-time.Minute))
+	insertSafetyProbe(t, pool, ctx, dueWorkID, commandID, fixture.targetUpdateID, now.Add(-time.Minute), 1)
 	adapter := persistence.WakeupWorkAdapter{Pool: pool, Owner: "worker", LeaseDuration: time.Minute, Now: func() time.Time { return now }, NewToken: func() (string, error) { return "00000000-0000-0000-1408-000000000003", nil }}
-	envelope := orchestration.Envelope{SchemaVersion: orchestration.WakeupSchemaV1, QueueClass: orchestration.QueueControl, DueWorkID: dueWorkID, CommandID: commandID, DeliveryGeneration: 0, WorkType: "SAFETY_PROBE", SubjectType: "TARGET_UPDATE", SubjectID: fixture.targetUpdateID, ExpectedRevision: 0, NotBefore: now.Add(-time.Minute)}
+	epoch := int64(1)
+	envelope := orchestration.Envelope{SchemaVersion: orchestration.WakeupSchemaV1, QueueClass: orchestration.QueueControl, DueWorkID: dueWorkID, CommandID: commandID, DeliveryGeneration: 0, WorkType: "SAFETY_PROBE", SubjectType: "TARGET_UPDATE", SubjectID: fixture.targetUpdateID, ExpectedRevision: 0, ExpectedCommandEpoch: &epoch, NotBefore: now.Add(-time.Minute)}
 	work, disposition, err := adapter.Claim(ctx, envelope)
 	if err != nil || disposition != orchestration.ClaimOwned {
 		t.Fatalf("claim=%#v disposition=%v err=%v", work, disposition, err)
@@ -218,6 +221,55 @@ func TestWakeupAdapterCompletesWithDurableEvidenceAndFencesReplay(t *testing.T) 
 		t.Fatalf("evidence=%d err=%v", evidence, err)
 	}
 }
+
+func TestSafetyProbeClaimReloadsCampaignAndEnrollmentFences(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareSafetyProbeEligibility(t, pool, ctx, fixture, 3)
+	now := time.Date(2026, 10, 5, 7, 30, 0, 0, time.UTC)
+	const dueWorkID = "00000000-0000-0000-1408-000000000101"
+	const commandID = "00000000-0000-0000-1408-000000000102"
+	insertSafetyProbe(t, pool, ctx, dueWorkID, commandID, fixture.targetUpdateID, now.Add(-time.Minute), 3)
+
+	request := persistence.ClaimWakeupWorkRequest{Owner: "worker", LeaseToken: "00000000-0000-0000-1408-000000000103", DueWorkID: dueWorkID, CommandID: commandID, DeliveryGeneration: 0, ExpectedRevision: 0, ExpectedCommandEpoch: ptrInt64(3), Now: now, LeaseExpiresAt: now.Add(time.Minute)}
+	if _, owned, err := persistence.ClaimDueWorkForWakeup(ctx, pool, request); err != nil || !owned {
+		t.Fatalf("eligible claim owned=%t err=%v", owned, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE due_work SET delivery_state='PENDING',lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1::uuid", dueWorkID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE campaigns SET state='PAUSED',command_epoch=4 WHERE id=$1::uuid", fixture.campaignID); err != nil {
+		t.Fatal(err)
+	}
+	request.LeaseToken = "00000000-0000-0000-1408-000000000104"
+	if _, owned, err := persistence.ClaimDueWorkForWakeup(ctx, pool, request); err != nil || owned {
+		t.Fatalf("paused stale claim owned=%t err=%v", owned, err)
+	}
+	var state string
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1::uuid", dueWorkID).Scan(&state); err != nil || state != "PENDING" {
+		t.Fatalf("blocked work state=%q err=%v", state, err)
+	}
+}
+
+func prepareSafetyProbeEligibility(t *testing.T, pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture, epoch int64) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, "UPDATE campaigns SET state='RUNNING_WAVES',command_epoch=$2 WHERE id=$1::uuid", fixture.campaignID, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE target_updates SET command_epoch=$2 WHERE id=$1::uuid", fixture.targetUpdateID, epoch); err != nil {
+		t.Fatal(err)
+	}
+	insertEnrollment(t, pool, ctx, "00000000-0000-0000-1408-000000000110", fixture)
+}
+
+func insertSafetyProbe(t *testing.T, pool *pgxpool.Pool, ctx context.Context, dueWorkID, commandID, subjectID string, notBefore time.Time, epoch int64) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, "INSERT INTO due_work (id,command_id,subject_type,subject_id,work_type,schema_version,not_before,expected_revision,expected_command_epoch) VALUES ($1::uuid,$2::uuid,'TARGET_UPDATE',$3::uuid,'SAFETY_PROBE',1,$4,0,$5)", dueWorkID, commandID, subjectID, notBefore, epoch); err != nil {
+		t.Fatalf("insert safety probe: %v", err)
+	}
+}
+
+func ptrInt64(value int64) *int64 { return &value }
 
 func TestWakeupAdapterQuarantineIsDurablyDeduplicated(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
