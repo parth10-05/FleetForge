@@ -37,5 +37,85 @@ CREATE INDEX outbox_events_work_wakeup_publishable_index
 COMMENT ON INDEX outbox_events_work_wakeup_publishable_index IS
     'P04: oldest-first, bounded SKIP LOCKED publication of typed due-work wakeups.';
 
+-- A due-work insert and its initial transport hint share one database
+-- transaction.  The deterministic event ID keeps retries/backfill idempotent
+-- without making a provider identifier part of domain identity.
+-- +goose StatementBegin
+CREATE FUNCTION create_initial_work_wakeup() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    wakeup_class varchar(32);
+BEGIN
+    wakeup_class := CASE
+        WHEN NEW.work_type LIKE '%DISCOVER%' THEN 'discovery'
+        WHEN NEW.work_type LIKE '%ARTIFACT%' THEN 'artifact-verification'
+        WHEN NEW.work_type IN ('SUBMIT', 'UPDATE_STEP') THEN 'update-step'
+        WHEN NEW.work_type LIKE '%RECONCIL%' THEN 'reconciliation'
+        ELSE 'control'
+    END;
+
+    INSERT INTO outbox_events (
+        event_id, aggregate_type, aggregate_id, aggregate_revision,
+        event_type, schema_version, payload, next_attempt_at,
+        delivery_kind, due_work_id, command_id, delivery_generation, queue_class
+    ) VALUES (
+        md5('fleetforge.work-wakeup/v1:' || NEW.id::text || ':' || NEW.delivery_generation::text)::uuid,
+        NEW.subject_type, NEW.subject_id, NEW.expected_revision,
+        'work.wakeup.requested', 1, '{}'::jsonb, NEW.not_before,
+        'WORK_WAKEUP', NEW.id, NEW.command_id, NEW.delivery_generation, wakeup_class
+    ) ON CONFLICT (due_work_id, delivery_generation) WHERE delivery_kind = 'WORK_WAKEUP'
+      DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+-- +goose StatementEnd
+
+CREATE TRIGGER due_work_initial_wakeup
+    AFTER INSERT ON due_work
+    FOR EACH ROW EXECUTE FUNCTION create_initial_work_wakeup();
+
+-- Make the forward migration safe for P03 rows created before this contract.
+INSERT INTO outbox_events (
+    event_id, aggregate_type, aggregate_id, aggregate_revision,
+    event_type, schema_version, payload, next_attempt_at,
+    delivery_kind, due_work_id, command_id, delivery_generation, queue_class
+)
+SELECT
+    md5('fleetforge.work-wakeup/v1:' || d.id::text || ':' || d.delivery_generation::text)::uuid,
+    d.subject_type, d.subject_id, d.expected_revision,
+    'work.wakeup.requested', 1, '{}'::jsonb, d.not_before,
+    'WORK_WAKEUP', d.id, d.command_id, d.delivery_generation,
+    CASE
+        WHEN d.work_type LIKE '%DISCOVER%' THEN 'discovery'
+        WHEN d.work_type LIKE '%ARTIFACT%' THEN 'artifact-verification'
+        WHEN d.work_type IN ('SUBMIT', 'UPDATE_STEP') THEN 'update-step'
+        WHEN d.work_type LIKE '%RECONCIL%' THEN 'reconciliation'
+        ELSE 'control'
+    END
+FROM due_work d
+WHERE NOT EXISTS (
+    SELECT 1 FROM outbox_events o
+     WHERE o.delivery_kind = 'WORK_WAKEUP'
+       AND o.due_work_id = d.id
+       AND o.delivery_generation = d.delivery_generation
+);
+
+CREATE TABLE wakeup_quarantine (
+    id uuid PRIMARY KEY,
+    deduplication_key char(64) NOT NULL UNIQUE,
+    observed_schema_version varchar(64),
+    observed_queue_class varchar(32),
+    due_work_id uuid,
+    command_id uuid,
+    reason_code varchar(64) NOT NULL,
+    first_observed_at timestamptz NOT NULL,
+    last_observed_at timestamptz NOT NULL,
+    occurrences bigint NOT NULL DEFAULT 1,
+    resolution_state varchar(32) NOT NULL DEFAULT 'OPEN',
+    CONSTRAINT wakeup_quarantine_reason_known CHECK (reason_code IN ('OVERSIZE', 'MALFORMED_ENCODING', 'UNKNOWN_VERSION', 'INVALID_IDENTIFIER', 'INVALID_QUEUE_CLASS', 'INCONSISTENT_FENCING', 'UNSUPPORTED_WORK_TYPE', 'PERMANENT_PUBLISH_REJECTION')),
+    CONSTRAINT wakeup_quarantine_occurrences_positive CHECK (occurrences > 0),
+    CONSTRAINT wakeup_quarantine_resolution_known CHECK (resolution_state IN ('OPEN', 'RESOLVED')),
+    CONSTRAINT wakeup_quarantine_observation_ordered CHECK (last_observed_at >= first_observed_at)
+);
+
 -- +goose Down
 SELECT 1;
