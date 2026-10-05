@@ -367,6 +367,15 @@ type TargetUpdate struct {
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 }
 
+type WakeupExecutionEvidence struct {
+	ID                 pgtype.UUID        `json:"id"`
+	DueWorkID          pgtype.UUID        `json:"due_work_id"`
+	CommandID          pgtype.UUID        `json:"command_id"`
+	DeliveryGeneration int64              `json:"delivery_generation"`
+	WorkType           string             `json:"work_type"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+}
+
 type WakeupQuarantine struct {
 	ID                    pgtype.UUID        `json:"id"`
 	DeduplicationKey      string             `json:"deduplication_key"`

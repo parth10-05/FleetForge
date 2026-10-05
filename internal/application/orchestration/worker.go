@@ -22,6 +22,8 @@ type ClaimedWork struct {
 	DueWorkID, CommandID, LeaseToken string
 	WorkType                         string
 	DeliveryGeneration               int64
+	ExpectedRevision                 int64
+	ExpectedCommandEpoch             *int64
 }
 
 type WorkStore interface {
