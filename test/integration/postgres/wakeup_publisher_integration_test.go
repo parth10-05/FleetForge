@@ -189,3 +189,49 @@ func TestWakeupSpecificClaimRejectsStaleFencingAndCoownership(t *testing.T) {
 		t.Fatalf("stale generation ok=%t err=%v", ok, err)
 	}
 }
+
+func TestWakeupAdapterCompletesWithDurableEvidenceAndFencesReplay(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	now := time.Date(2026, 10, 5, 7, 0, 0, 0, time.UTC)
+	const dueWorkID = "00000000-0000-0000-1408-000000000001"
+	const commandID = "00000000-0000-0000-1408-000000000002"
+	insertDueWork(t, pool, ctx, dueWorkID, commandID, fixture.targetUpdateID, "SAFETY_PROBE", now.Add(-time.Minute))
+	adapter := persistence.WakeupWorkAdapter{Pool: pool, Owner: "worker", LeaseDuration: time.Minute, Now: func() time.Time { return now }, NewToken: func() (string, error) { return "00000000-0000-0000-1408-000000000003", nil }}
+	envelope := orchestration.Envelope{SchemaVersion: orchestration.WakeupSchemaV1, QueueClass: orchestration.QueueControl, DueWorkID: dueWorkID, CommandID: commandID, DeliveryGeneration: 0, WorkType: "SAFETY_PROBE", SubjectType: "TARGET_UPDATE", SubjectID: fixture.targetUpdateID, ExpectedRevision: 0, NotBefore: now.Add(-time.Minute)}
+	work, disposition, err := adapter.Claim(ctx, envelope)
+	if err != nil || disposition != orchestration.ClaimOwned {
+		t.Fatalf("claim=%#v disposition=%v err=%v", work, disposition, err)
+	}
+	if err := adapter.Complete(ctx, work); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Complete(ctx, work); !errors.Is(err, persistence.ErrLeaseConflict) {
+		t.Fatalf("replay completion=%v", err)
+	}
+	var state string
+	var evidence int
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1::uuid", dueWorkID).Scan(&state); err != nil || state != "COMPLETED" {
+		t.Fatalf("state=%q err=%v", state, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM wakeup_execution_evidence WHERE due_work_id=$1::uuid", dueWorkID).Scan(&evidence); err != nil || evidence != 1 {
+		t.Fatalf("evidence=%d err=%v", evidence, err)
+	}
+}
+
+func TestWakeupAdapterQuarantineIsDurablyDeduplicated(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	now := time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC)
+	adapter := persistence.WakeupWorkAdapter{Pool: pool, Now: func() time.Time { return now }}
+	receipt := orchestration.Receipt{Raw: []byte("not-json")}
+	if err := adapter.Quarantine(ctx, receipt, "MALFORMED_ENCODING"); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Quarantine(ctx, receipt, "MALFORMED_ENCODING"); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := pool.QueryRow(ctx, "SELECT occurrences FROM wakeup_quarantine WHERE reason_code='MALFORMED_ENCODING'").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("occurrences=%d err=%v", count, err)
+	}
+}
