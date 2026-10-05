@@ -36,6 +36,17 @@ type DueWorkResult struct {
 	RetryAt              time.Time
 }
 
+// ClaimWakeupWorkRequest fences a claim to the exact durable identity carried
+// by a wakeup. A generic oldest-first claim is deliberately insufficient at a
+// queue boundary because it could execute a different due-work row.
+type ClaimWakeupWorkRequest struct {
+	Owner, LeaseToken                    string
+	DueWorkID, CommandID                 string
+	DeliveryGeneration, ExpectedRevision int64
+	ExpectedCommandEpoch                 *int64
+	Now, LeaseExpiresAt                  time.Time
+}
+
 // ClaimDueWork atomically turns oldest due PENDING rows into fenced CLAIMED
 // rows. Tokens are supplied by the caller to make tests deterministic and keep
 // randomness outside the transaction boundary.
@@ -79,6 +90,31 @@ FROM due_work WHERE delivery_state='PENDING' AND not_before <= $1 ORDER BY not_b
 		return nil, classifyDueWorkError(err, "commit due-work claim")
 	}
 	return claimed, nil
+}
+
+// ClaimDueWorkForWakeup grants a fenced lease only if the wakeup still names
+// the current, eligible semantic work row. A false result is an authoritative
+// stale/already-terminal classification, not a reason to run a handler.
+func ClaimDueWorkForWakeup(ctx context.Context, pool *pgxpool.Pool, req ClaimWakeupWorkRequest) (ClaimedDueWork, bool, error) {
+	if req.Owner == "" || req.LeaseToken == "" || req.DueWorkID == "" || req.CommandID == "" || req.ExpectedRevision < 0 || req.DeliveryGeneration < 0 || req.Now.IsZero() || !req.LeaseExpiresAt.After(req.Now) {
+		return ClaimedDueWork{}, false, fmt.Errorf("invalid wakeup due-work claim request")
+	}
+	var item ClaimedDueWork
+	err := pool.QueryRow(ctx, `UPDATE due_work
+SET delivery_state='CLAIMED', lease_token=$2::uuid, lease_owner=$3, lease_expires_at=$4, updated_at=$5
+WHERE id=$1::uuid AND command_id=$6::uuid AND delivery_generation=$7
+  AND expected_revision=$8 AND expected_command_epoch IS NOT DISTINCT FROM $9
+  AND delivery_state='PENDING' AND not_before <= $5
+RETURNING id::text,command_id::text,subject_type,subject_id::text,work_type,lease_token::text,expected_revision,expected_command_epoch,delivery_generation`,
+		req.DueWorkID, req.LeaseToken, req.Owner, req.LeaseExpiresAt, req.Now, req.CommandID, req.DeliveryGeneration, req.ExpectedRevision, req.ExpectedCommandEpoch,
+	).Scan(&item.ID, &item.CommandID, &item.SubjectType, &item.SubjectID, &item.WorkType, &item.LeaseToken, &item.ExpectedRevision, &item.ExpectedCommandEpoch, &item.DeliveryGeneration)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ClaimedDueWork{}, false, nil
+	}
+	if err != nil {
+		return ClaimedDueWork{}, false, classifyDueWorkError(err, "claim wakeup due work")
+	}
+	return item, true, nil
 }
 
 func CompleteDueWork(ctx context.Context, pool *pgxpool.Pool, result DueWorkResult) error {

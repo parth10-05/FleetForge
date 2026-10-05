@@ -164,3 +164,28 @@ func TestWakeupLinkageConstraintsRejectPartialRows(t *testing.T) {
 		t.Fatalf("partial linkage error=%v", err)
 	}
 }
+
+func TestWakeupSpecificClaimRejectsStaleFencingAndCoownership(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	now := time.Date(2026, 10, 5, 6, 0, 0, 0, time.UTC)
+	const dueWorkID = "00000000-0000-0000-1407-000000000001"
+	const commandID = "00000000-0000-0000-1407-000000000002"
+	insertDueWork(t, pool, ctx, dueWorkID, commandID, fixture.targetUpdateID, "PRECHECK", now.Add(-time.Minute))
+	request := persistence.ClaimWakeupWorkRequest{Owner: "worker-a", LeaseToken: "00000000-0000-0000-1407-000000000003", DueWorkID: dueWorkID, CommandID: commandID, DeliveryGeneration: 0, ExpectedRevision: 0, Now: now, LeaseExpiresAt: now.Add(time.Minute)}
+	claimed, ok, err := persistence.ClaimDueWorkForWakeup(ctx, pool, request)
+	if err != nil || !ok {
+		t.Fatalf("claim=%#v ok=%t err=%v", claimed, ok, err)
+	}
+	if claimed.LeaseToken != request.LeaseToken {
+		t.Fatalf("token=%q", claimed.LeaseToken)
+	}
+	request.Owner, request.LeaseToken = "worker-b", "00000000-0000-0000-1407-000000000004"
+	if _, ok, err := persistence.ClaimDueWorkForWakeup(ctx, pool, request); err != nil || ok {
+		t.Fatalf("co-owner ok=%t err=%v", ok, err)
+	}
+	request.DeliveryGeneration = 1
+	if _, ok, err := persistence.ClaimDueWorkForWakeup(ctx, pool, request); err != nil || ok {
+		t.Fatalf("stale generation ok=%t err=%v", ok, err)
+	}
+}
