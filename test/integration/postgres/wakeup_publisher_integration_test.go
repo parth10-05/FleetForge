@@ -323,15 +323,15 @@ func TestQueueLossRepairsThroughNewGenerationAndCompletesSafeWork(t *testing.T) 
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	prepareSafetyProbeEligibility(t, pool, ctx, fixture, 1)
 	now := time.Date(2026, 10, 5, 9, 30, 0, 0, time.UTC)
-	const dueWorkID = "00000000-0000-0000-1409-000000000101"
-	const commandID = "00000000-0000-0000-1409-000000000102"
+	const dueWorkID = "00000000-0000-4000-8409-000000000101"
+	const commandID = "00000000-0000-4000-8409-000000000102"
 	insertSafetyProbe(t, pool, ctx, dueWorkID, commandID, fixture.targetUpdateID, now.Add(-time.Minute), 1)
 	queue, err := localwakeup.New(localwakeup.Config{Capacity: 4, Clock: orchestration.ClockFunc(func() time.Time { return now })})
 	if err != nil {
 		t.Fatal(err)
 	}
 	queue.SetFaults(localwakeup.Faults{Drop: true})
-	if err := persistence.PublishClaimedWakeups(ctx, pool, queue, persistence.ClaimOutboxRequest{Owner: "publisher", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1409-000000000103"}}, 3, func(persistence.ClaimedWakeup, time.Time) time.Time { return now }); err != nil {
+	if err := persistence.PublishClaimedWakeups(ctx, pool, queue, persistence.ClaimOutboxRequest{Owner: "publisher", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-4000-8409-000000000103"}}, 3, func(persistence.ClaimedWakeup, time.Time) time.Time { return now }); err != nil {
 		t.Fatal(err)
 	}
 	if receipts, err := queue.Receive(ctx, 1); err != nil || len(receipts) != 0 {
@@ -344,10 +344,10 @@ func TestQueueLossRepairsThroughNewGenerationAndCompletesSafeWork(t *testing.T) 
 		t.Fatalf("repair=%v err=%v", repaired, err)
 	}
 	queue.SetFaults(localwakeup.Faults{})
-	if err := persistence.PublishClaimedWakeups(ctx, pool, queue, persistence.ClaimOutboxRequest{Owner: "publisher", Now: repairAt, LeaseExpiresAt: repairAt.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1409-000000000104"}}, 3, func(persistence.ClaimedWakeup, time.Time) time.Time { return repairAt }); err != nil {
+	if err := persistence.PublishClaimedWakeups(ctx, pool, queue, persistence.ClaimOutboxRequest{Owner: "publisher", Now: repairAt, LeaseExpiresAt: repairAt.Add(time.Minute), Tokens: []string{"00000000-0000-4000-8409-000000000104"}}, 3, func(persistence.ClaimedWakeup, time.Time) time.Time { return repairAt }); err != nil {
 		t.Fatal(err)
 	}
-	adapter := persistence.WakeupWorkAdapter{Pool: pool, Owner: "worker", LeaseDuration: time.Minute, Now: func() time.Time { return repairAt }, NewToken: func() (string, error) { return "00000000-0000-0000-1409-000000000105", nil }}
+	adapter := persistence.WakeupWorkAdapter{Pool: pool, Owner: "worker", LeaseDuration: time.Minute, Now: func() time.Time { return repairAt }, NewToken: func() (string, error) { return "00000000-0000-4000-8409-000000000105", nil }}
 	worker, err := orchestration.NewWorker(queue, queue, adapter, orchestration.SafetyProbeHandler{}, orchestration.WorkerConfig{ReceiveBatch: 1, Concurrency: 1, HandlerTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
