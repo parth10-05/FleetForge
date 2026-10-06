@@ -78,11 +78,21 @@ func (a WakeupWorkAdapter) Quarantine(ctx context.Context, receipt orchestration
 	key := fmt.Sprintf("%x", sha256.Sum256(append([]byte(reason+":"), receipt.Raw...)))
 	metadata := wakeupReceiptMetadata(receipt.Raw)
 	now := a.Now().UTC()
-	_, err := a.Pool.Exec(ctx, `INSERT INTO wakeup_quarantine (id,deduplication_key,observed_schema_version,observed_queue_class,due_work_id,command_id,reason_code,first_observed_at,last_observed_at) VALUES (md5($1)::uuid,$2,$3,$4,$5::uuid,$6::uuid,$7,$8,$8) ON CONFLICT (deduplication_key) DO UPDATE SET last_observed_at=EXCLUDED.last_observed_at,occurrences=wakeup_quarantine.occurrences+1`, "fleetforge.wakeup-quarantine/v1:"+key, key, metadata.schemaVersion, metadata.queueClass, metadata.dueWorkID, metadata.commandID, reason, now)
+	_, err := a.Pool.Exec(ctx, `INSERT INTO wakeup_quarantine (id,deduplication_key,observed_schema_version,observed_queue_class,due_work_id,command_id,reason_code,first_observed_at,last_observed_at) VALUES (md5($1)::uuid,$2,$3,$4,$5::uuid,$6::uuid,$7,$8,$8) ON CONFLICT (deduplication_key) DO UPDATE SET last_observed_at=EXCLUDED.last_observed_at,occurrences=wakeup_quarantine.occurrences+1`, "fleetforge.wakeup-quarantine/v1:"+key, key, metadata.schemaVersion, metadata.queueClass, nullableWakeupUUID(metadata.dueWorkID), nullableWakeupUUID(metadata.commandID), reason, now)
 	if err != nil {
 		return fmt.Errorf("record wakeup quarantine: %w", err)
 	}
 	return nil
+}
+
+// nullableWakeupUUID ensures malformed input stays metadata-only. PostgreSQL
+// must receive NULL for an unavailable identifier; an empty string cannot be
+// cast to uuid and must never make the durable quarantine write fail.
+func nullableWakeupUUID(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func validWakeupQuarantineReason(reason string) bool {

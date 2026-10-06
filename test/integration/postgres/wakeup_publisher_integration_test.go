@@ -287,6 +287,10 @@ func TestWakeupAdapterQuarantineIsDurablyDeduplicated(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT occurrences FROM wakeup_quarantine WHERE reason_code='MALFORMED_ENCODING'").Scan(&count); err != nil || count != 2 {
 		t.Fatalf("occurrences=%d err=%v", count, err)
 	}
+	var dueWorkID, commandID *string
+	if err := pool.QueryRow(ctx, "SELECT due_work_id::text,command_id::text FROM wakeup_quarantine WHERE reason_code='MALFORMED_ENCODING'").Scan(&dueWorkID, &commandID); err != nil || dueWorkID != nil || commandID != nil {
+		t.Fatalf("malformed quarantine identifiers due_work=%v command=%v err=%v, want NULL metadata", dueWorkID, commandID, err)
+	}
 }
 
 func TestRepairMissingWakeupsAdvancesGenerationWithoutChangingCommand(t *testing.T) {
