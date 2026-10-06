@@ -2,6 +2,7 @@ package localwakeup
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -61,6 +62,46 @@ func TestDuplicateWakeupComponentCompletesOnceWithoutDestructiveHandler(t *testi
 		t.Fatalf("durable completions=%d, want 1", store.completions)
 	}
 	if remaining, err := queue.Receive(context.Background(), 4); err != nil || len(remaining) != 0 {
+		t.Fatalf("remaining=%d err=%v", len(remaining), err)
+	}
+}
+
+func TestAcknowledgementFailureRedeliversWithoutRepeatingCompletion(t *testing.T) {
+	now := time.Date(2026, 10, 5, 1, 0, 0, 0, time.UTC)
+	queue, err := New(Config{Capacity: 2, Clock: componentClock{now}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := orchestration.Envelope{SchemaVersion: orchestration.WakeupSchemaV1, QueueClass: orchestration.QueueControl, DueWorkID: "00000000-0000-4000-8000-000000000011", CommandID: "00000000-0000-4000-8000-000000000012", WorkType: "SAFETY_PROBE", SubjectType: "TARGET_UPDATE", SubjectID: "00000000-0000-4000-8000-000000000013", ExpectedRevision: 1, NotBefore: now}
+	if _, err := queue.Publish(context.Background(), envelope); err != nil {
+		t.Fatal(err)
+	}
+	store := &componentStore{}
+	worker, err := orchestration.NewWorker(queue, queue, store, orchestration.SafetyProbeHandler{}, orchestration.WorkerConfig{ReceiveBatch: 1, Concurrency: 1, HandlerTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue.SetFaults(Faults{AckFailure: true})
+	if err := worker.RunOnce(context.Background()); !errors.Is(err, ErrAck) {
+		t.Fatalf("first RunOnce() error = %v, want acknowledgement failure", err)
+	}
+	store.mu.Lock()
+	if store.completions != 1 {
+		store.mu.Unlock()
+		t.Fatalf("durable completions=%d, want 1", store.completions)
+	}
+	store.mu.Unlock()
+
+	queue.SetFaults(Faults{})
+	if err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.completions != 1 {
+		t.Fatalf("durable completions=%d, want redelivery to avoid replay", store.completions)
+	}
+	if remaining, err := queue.Receive(context.Background(), 1); err != nil || len(remaining) != 0 {
 		t.Fatalf("remaining=%d err=%v", len(remaining), err)
 	}
 }
