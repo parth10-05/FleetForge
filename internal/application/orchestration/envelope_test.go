@@ -26,6 +26,16 @@ func TestEnvelopeRoundTrip(t *testing.T) {
 		t.Fatalf("got %#v want %#v", got, want)
 	}
 }
+
+func TestEnvelopeAcceptsCanonicalPostgreSQLUUIDs(t *testing.T) {
+	e := testEnvelope()
+	e.DueWorkID = "bddd65f1-78c5-8f75-7634-79c74a4f11b8"
+	e.CommandID = "13d3b36b-19ca-df61-ae2b-a82b8e2e8c2f"
+	e.SubjectID = "d20a38dd-8e66-1b3c-3de1-6ea99fc9a5a9"
+	if _, err := Encode(e); err != nil {
+		t.Fatalf("Encode() error = %v, want canonical PostgreSQL UUIDs accepted", err)
+	}
+}
 func TestDecodeRejectsUnsafeForms(t *testing.T) {
 	raw, err := Encode(testEnvelope())
 	if err != nil {

@@ -27,8 +27,12 @@ const (
 
 var (
 	ErrInvalidEnvelope = errors.New("invalid wakeup envelope")
-	uuidPattern        = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	tracePattern       = regexp.MustCompile(`^[\da-f]{2}-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$`)
+	// PostgreSQL's uuid type accepts any canonical UUID text. Workflow IDs are
+	// database identities, not necessarily RFC 4122 versioned UUIDs, so the
+	// wakeup boundary must preserve that contract while retaining exact shape
+	// and lowercase validation.
+	uuidPattern  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	tracePattern = regexp.MustCompile(`^[\da-f]{2}-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$`)
 )
 
 type QueueClass string

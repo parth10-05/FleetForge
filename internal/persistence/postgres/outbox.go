@@ -123,7 +123,7 @@ func RetryOrQuarantineOutbox(ctx context.Context, pool *pgxpool.Pool, result Out
 	}
 	tag, err := pool.Exec(ctx, `UPDATE outbox_events
 SET delivery_state=CASE WHEN delivery_attempts >= $6 THEN 'QUARANTINED' ELSE 'PENDING' END,
-    next_attempt_at=CASE WHEN delivery_attempts >= $6 THEN $3 ELSE $4 END,
+    next_attempt_at=CASE WHEN delivery_attempts >= $6 THEN $3::timestamptz ELSE $4::timestamptz END,
     last_error_class=$5,claim_token=NULL,claim_owner=NULL,claim_expires_at=NULL
 WHERE event_id=$1::uuid AND delivery_state='CLAIMED' AND claim_token=$2::uuid`, result.EventID, result.ClaimToken, result.Now, next, result.ErrorClass, result.MaxAttempts)
 	if err != nil {
