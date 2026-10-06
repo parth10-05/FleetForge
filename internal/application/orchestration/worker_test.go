@@ -190,6 +190,50 @@ func TestWorkerBoundsConcurrentDispatch(t *testing.T) {
 	}
 }
 
+type cancellationHandler struct {
+	entered chan struct{}
+	calls   int
+}
+
+func (h *cancellationHandler) Supports(Envelope) bool { return true }
+func (h *cancellationHandler) Handle(ctx context.Context, _ ClaimedWork) error {
+	h.calls++
+	h.entered <- struct{}{}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestWorkerStopsSchedulingAndJoinsHandlersOnCancellation(t *testing.T) {
+	first, second := validReceipt(t), validReceipt(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler := &cancellationHandler{entered: make(chan struct{}, 1)}
+	acker := &ackerStub{}
+	worker, err := NewWorker(receiverStub{receipts: []Receipt{first, second}}, acker, concurrentStore{}, handler, WorkerConfig{ReceiveBatch: 2, Concurrency: 1, HandlerTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- worker.RunOnce(ctx) }()
+	select {
+	case <-handler.entered:
+	case <-time.After(time.Second):
+		t.Fatal("first handler did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("RunOnce() error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("worker did not join cancelled handler")
+	}
+	if handler.calls != 1 || acker.count != 0 {
+		t.Fatalf("calls=%d ack=%d, want one unacknowledged in-flight receipt", handler.calls, acker.count)
+	}
+}
+
 func TestWorkerRecordsBoundedOutcomes(t *testing.T) {
 	store, handler, acker := &storeStub{claim: ClaimOwned}, &handlerStub{supported: true}, &ackerStub{}
 	metrics := NewMetrics()

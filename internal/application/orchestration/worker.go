@@ -73,11 +73,16 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	sem := make(chan struct{}, w.config.Concurrency)
 	errs := make(chan error, len(receipts))
 	var group sync.WaitGroup
+	stopped := false
 	for _, receipt := range receipts {
-		if err := ctx.Err(); err != nil {
-			return err
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			stopped = true
 		}
-		sem <- struct{}{}
+		if stopped {
+			break
+		}
 		group.Add(1)
 		go func(receipt Receipt) {
 			defer group.Done()
@@ -91,6 +96,9 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	close(errs)
 	var joined error
 	for err := range errs {
+		joined = errors.Join(joined, err)
+	}
+	if err := ctx.Err(); err != nil {
 		joined = errors.Join(joined, err)
 	}
 	return joined
