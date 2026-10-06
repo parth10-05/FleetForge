@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parth10-05/fleetforge/internal/application/orchestration"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
+	"github.com/parth10-05/fleetforge/internal/platform/localwakeup"
 )
 
 type wakeupPublisherFunc func(context.Context, orchestration.Envelope) (orchestration.PublishOutcome, error)
@@ -310,6 +311,53 @@ func TestRepairMissingWakeupsAdvancesGenerationWithoutChangingCommand(t *testing
 	var intents int
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events WHERE due_work_id=$1::uuid AND delivery_generation=1 AND delivery_kind='WORK_WAKEUP'", dueWorkID).Scan(&intents); err != nil || intents != 1 {
 		t.Fatalf("new intents=%d err=%v", intents, err)
+	}
+}
+
+func TestQueueLossRepairsThroughNewGenerationAndCompletesSafeWork(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareSafetyProbeEligibility(t, pool, ctx, fixture, 1)
+	now := time.Date(2026, 10, 5, 9, 30, 0, 0, time.UTC)
+	const dueWorkID = "00000000-0000-0000-1409-000000000101"
+	const commandID = "00000000-0000-0000-1409-000000000102"
+	insertSafetyProbe(t, pool, ctx, dueWorkID, commandID, fixture.targetUpdateID, now.Add(-time.Minute), 1)
+	queue, err := localwakeup.New(localwakeup.Config{Capacity: 4, Clock: orchestration.ClockFunc(func() time.Time { return now })})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue.SetFaults(localwakeup.Faults{Drop: true})
+	if err := persistence.PublishClaimedWakeups(ctx, pool, queue, persistence.ClaimOutboxRequest{Owner: "publisher", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1409-000000000103"}}, 3, func(persistence.ClaimedWakeup, time.Time) time.Time { return now }); err != nil {
+		t.Fatal(err)
+	}
+	if receipts, err := queue.Receive(ctx, 1); err != nil || len(receipts) != 0 {
+		t.Fatalf("dropped wakeup receipts=%d err=%v", len(receipts), err)
+	}
+
+	repairAt := now.Add(2 * time.Minute)
+	repaired, err := persistence.RepairMissingWakeups(ctx, pool, persistence.RepairWakeupRequest{Now: repairAt, DeliveryGrace: time.Minute, Limit: 1, MaxGeneration: 3})
+	if err != nil || len(repaired) != 1 || repaired[0] != dueWorkID {
+		t.Fatalf("repair=%v err=%v", repaired, err)
+	}
+	queue.SetFaults(localwakeup.Faults{})
+	if err := persistence.PublishClaimedWakeups(ctx, pool, queue, persistence.ClaimOutboxRequest{Owner: "publisher", Now: repairAt, LeaseExpiresAt: repairAt.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1409-000000000104"}}, 3, func(persistence.ClaimedWakeup, time.Time) time.Time { return repairAt }); err != nil {
+		t.Fatal(err)
+	}
+	adapter := persistence.WakeupWorkAdapter{Pool: pool, Owner: "worker", LeaseDuration: time.Minute, Now: func() time.Time { return repairAt }, NewToken: func() (string, error) { return "00000000-0000-0000-1409-000000000105", nil }}
+	worker, err := orchestration.NewWorker(queue, queue, adapter, orchestration.SafetyProbeHandler{}, orchestration.WorkerConfig{ReceiveBatch: 1, Concurrency: 1, HandlerTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var state, gotCommand string
+	var generation, evidence int
+	if err := pool.QueryRow(ctx, "SELECT delivery_state,command_id::text,delivery_generation FROM due_work WHERE id=$1::uuid", dueWorkID).Scan(&state, &gotCommand, &generation); err != nil || state != "COMPLETED" || gotCommand != commandID || generation != 1 {
+		t.Fatalf("state=%q command=%q generation=%d err=%v", state, gotCommand, generation, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM wakeup_execution_evidence WHERE due_work_id=$1::uuid", dueWorkID).Scan(&evidence); err != nil || evidence != 1 {
+		t.Fatalf("completion evidence=%d err=%v", evidence, err)
 	}
 }
 
