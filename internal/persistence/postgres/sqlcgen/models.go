@@ -389,3 +389,19 @@ type WakeupQuarantine struct {
 	Occurrences           int64              `json:"occurrences"`
 	ResolutionState       string             `json:"resolution_state"`
 }
+
+// P04 bounded current telemetry snapshot; diagnostic-only and contains no workflow or provider identifiers.
+type WakeupTelemetrySnapshot struct {
+	Singleton                      bool               `json:"singleton"`
+	ObservedAt                     pgtype.Timestamptz `json:"observed_at"`
+	PendingWakeupCount             int64              `json:"pending_wakeup_count"`
+	OldestWakeupAgeSeconds         int64              `json:"oldest_wakeup_age_seconds"`
+	PendingDueWorkCount            int64              `json:"pending_due_work_count"`
+	OldestDueWorkAgeSeconds        int64              `json:"oldest_due_work_age_seconds"`
+	ExpiredDeliveryClaimCount      int64              `json:"expired_delivery_claim_count"`
+	ExpiredWorkLeaseCount          int64              `json:"expired_work_lease_count"`
+	ActiveReservationCount         int64              `json:"active_reservation_count"`
+	RetryExhaustedWakeupCount      int64              `json:"retry_exhausted_wakeup_count"`
+	OpenQuarantineCount            int64              `json:"open_quarantine_count"`
+	OldestOpenQuarantineAgeSeconds int64              `json:"oldest_open_quarantine_age_seconds"`
+}
