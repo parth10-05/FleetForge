@@ -165,6 +165,10 @@ ORDER BY o.next_attempt_at,o.created_at,o.event_id LIMIT $2 FOR UPDATE OF o SKIP
 		}
 		item.Envelope.SchemaVersion = orchestration.WakeupSchemaV1
 		item.Envelope.QueueClass = orchestration.QueueClass(queueClass)
+		// PostgreSQL returns timestamptz values using the connection's location,
+		// which can be time.Local even when the value has a UTC offset. Wakeup
+		// envelopes require a canonical UTC timestamp at the transport boundary.
+		item.Envelope.NotBefore = item.Envelope.NotBefore.UTC()
 		if err := item.Envelope.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid persisted wakeup %s: %w", item.EventID, err)
 		}
