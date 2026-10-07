@@ -43,6 +43,10 @@ func run(ctx context.Context) error {
 	if _, err := postgres.RepairMissingWakeups(ctx, pool, postgres.RepairWakeupRequest{Now: now, DeliveryGrace: budget.RepairGrace, Limit: int(budget.RepairBatch), MaxGeneration: int64(budget.RetryAttempts)}); err != nil {
 		return fmt.Errorf("repair missing wakeups: %w", err)
 	}
-	slog.Info("wakeup sweeper completed", "repair_batch", budget.RepairBatch)
+	telemetry, err := postgres.CollectWakeupTelemetry(ctx, pool, now)
+	if err != nil {
+		return fmt.Errorf("collect wakeup telemetry: %w", err)
+	}
+	slog.Info("wakeup sweeper completed", "repair_batch", budget.RepairBatch, "pending_wakeups", telemetry.PendingWakeupCount, "pending_due_work", telemetry.PendingDueWorkCount, "open_quarantines", telemetry.OpenQuarantineCount)
 	return nil
 }
