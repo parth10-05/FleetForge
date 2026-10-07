@@ -69,7 +69,7 @@ func ClaimOutbox(ctx context.Context, pool *pgxpool.Pool, req ClaimOutboxRequest
 	defer tx.Rollback(ctx) //nolint:errcheck
 	rows, err := tx.Query(ctx, `SELECT event_id,aggregate_type,aggregate_id,aggregate_revision,event_type,schema_version,payload,delivery_attempts FROM outbox_events WHERE delivery_state='PENDING' AND delivery_kind='DOMAIN_EVENT' AND next_attempt_at <= $1 ORDER BY next_attempt_at,created_at,event_id LIMIT $2 FOR UPDATE SKIP LOCKED`, req.Now, len(req.Tokens))
 	if err != nil {
-		return nil, fmt.Errorf("lock outbox rows: %w", err)
+		return nil, classifyOutboxError(err, "lock outbox rows")
 	}
 	defer rows.Close()
 	items := []ClaimedOutboxEvent{}
@@ -81,7 +81,7 @@ func ClaimOutbox(ctx context.Context, pool *pgxpool.Pool, req ClaimOutboxRequest
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read outbox rows: %w", err)
+		return nil, classifyOutboxError(err, "read outbox rows")
 	}
 	for i := range items {
 		items[i].ClaimToken = req.Tokens[i]
@@ -152,7 +152,7 @@ FROM outbox_events o JOIN due_work d ON d.id=o.due_work_id AND d.command_id=o.co
 WHERE o.delivery_state='PENDING' AND o.delivery_kind='WORK_WAKEUP' AND o.next_attempt_at <= $1
 ORDER BY o.next_attempt_at,o.created_at,o.event_id LIMIT $2 FOR UPDATE OF o SKIP LOCKED`, req.Now, len(req.Tokens))
 	if err != nil {
-		return nil, fmt.Errorf("lock wakeup intents: %w", err)
+		return nil, classifyOutboxError(err, "lock wakeup intents")
 	}
 	defer rows.Close()
 	items := make([]ClaimedWakeup, 0, len(req.Tokens))
@@ -175,7 +175,7 @@ ORDER BY o.next_attempt_at,o.created_at,o.event_id LIMIT $2 FOR UPDATE OF o SKIP
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read wakeup intents: %w", err)
+		return nil, classifyOutboxError(err, "read wakeup intents")
 	}
 	for i := range items {
 		items[i].ClaimToken = req.Tokens[i]
