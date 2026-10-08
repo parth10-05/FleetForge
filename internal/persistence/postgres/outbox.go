@@ -305,7 +305,7 @@ ORDER BY d.not_before,d.created_at,d.id LIMIT $4 FOR UPDATE OF d SKIP LOCKED`, r
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return nil, fmt.Errorf("read repairable wakeups: %w", err)
+		return nil, classifyOutboxError(err, "read repairable wakeups")
 	}
 	rows.Close()
 	ids := make([]string, 0, len(items))
