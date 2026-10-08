@@ -30,6 +30,11 @@ func TestOldestWorkQueriesUseDocumentedIndexesAtThousandTargetScale(t *testing.T
 	}
 	assertPlanUsesIndex(t, ctx, pool, "EXPLAIN (ANALYZE, BUFFERS) SELECT id FROM due_work WHERE delivery_state='PENDING' ORDER BY not_before,created_at,id LIMIT 10", "due_work_oldest_pending_index")
 	assertPlanUsesIndex(t, ctx, pool, "EXPLAIN (ANALYZE, BUFFERS) SELECT event_id FROM outbox_events WHERE delivery_state='PENDING' ORDER BY next_attempt_at,created_at,event_id LIMIT 10", "outbox_events_oldest_pending_index")
+	// These are the P04 production selector shapes, not proxy index checks.
+	assertPlanUsesIndex(t, ctx, pool, "EXPLAIN (ANALYZE, BUFFERS) SELECT event_id FROM outbox_events WHERE delivery_state='PENDING' AND delivery_kind='WORK_WAKEUP' AND next_attempt_at <= TIMESTAMPTZ '2026-09-21 00:00:00+00' ORDER BY next_attempt_at,created_at,event_id LIMIT 10", "outbox_events_work_wakeup_publishable_index")
+	assertPlanUsesIndex(t, ctx, pool, "EXPLAIN (ANALYZE, BUFFERS) SELECT id FROM due_work WHERE delivery_state='CLAIMED' AND lease_expires_at <= TIMESTAMPTZ '2026-09-21 00:00:00+00' ORDER BY lease_expires_at,created_at,id LIMIT 10", "due_work_expired_lease_index")
+	assertPlanUsesIndex(t, ctx, pool, "EXPLAIN (ANALYZE, BUFFERS) SELECT event_id FROM outbox_events WHERE delivery_state='CLAIMED' AND claim_expires_at <= TIMESTAMPTZ '2026-09-21 00:00:00+00' ORDER BY claim_expires_at,created_at,event_id LIMIT 10", "outbox_events_expired_claim_index")
+	assertPlanUsesIndex(t, ctx, pool, "EXPLAIN (ANALYZE, BUFFERS) SELECT id FROM due_work WHERE delivery_state='PENDING' AND not_before <= TIMESTAMPTZ '2026-09-21 00:00:00+00' ORDER BY not_before,created_at,id LIMIT 10", "due_work_oldest_pending_index")
 }
 
 func assertPlanUsesIndex(t *testing.T, ctx context.Context, pool *pgxpool.Pool, sql, index string) {

@@ -318,6 +318,54 @@ func TestRepairMissingWakeupsAdvancesGenerationWithoutChangingCommand(t *testing
 	}
 }
 
+// TestConcurrentWakeupRepairCreatesOneNextGeneration proves that two bounded
+// scheduler passes contend on the semantic due-work row rather than minting
+// duplicate delivery generations.
+func TestConcurrentWakeupRepairCreatesOneNextGeneration(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	now := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	const dueWorkID = "00000000-0000-0000-1412-000000000001"
+	const commandID = "00000000-0000-0000-1412-000000000002"
+	insertDueWork(t, pool, ctx, dueWorkID, commandID, fixture.targetUpdateID, "PRECHECK", now.Add(-time.Hour))
+	if _, err := pool.Exec(ctx, "UPDATE outbox_events SET delivery_state='PUBLISHED',published_at=$2 WHERE due_work_id=$1::uuid", dueWorkID, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		repaired []string
+		err      error
+	}
+	results, start := make(chan result, 2), make(chan struct{})
+	var group sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			rows, err := persistence.RepairMissingWakeups(context.Background(), pool, persistence.RepairWakeupRequest{Now: now, DeliveryGrace: time.Minute, Limit: 1, MaxGeneration: 3})
+			results <- result{rows, err}
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(results)
+	count := 0
+	for got := range results {
+		if got.err != nil && !errors.Is(got.err, persistence.ErrOutboxClaimConflict) {
+			t.Fatalf("concurrent repair: %v", got.err)
+		}
+		count += len(got.repaired)
+	}
+	if count != 1 {
+		t.Fatalf("repaired rows=%d, want exactly one", count)
+	}
+	var generation int64
+	var intents int
+	if err := pool.QueryRow(ctx, "SELECT delivery_generation,(SELECT COUNT(*) FROM outbox_events WHERE due_work_id=$1::uuid AND delivery_kind='WORK_WAKEUP') FROM due_work WHERE id=$1::uuid", dueWorkID).Scan(&generation, &intents); err != nil || generation != 1 || intents != 2 {
+		t.Fatalf("generation=%d intents=%d err=%v, want 1/2", generation, intents, err)
+	}
+}
+
 func TestQueueLossRepairsThroughNewGenerationAndCompletesSafeWork(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
@@ -422,5 +470,35 @@ func TestCapacityAvailableReadsExistingReservationTruthWithoutAdmission(t *testi
 	var admissions, reservations int
 	if err := pool.QueryRow(ctx, "SELECT (SELECT COUNT(*) FROM submission_admissions),(SELECT COUNT(*) FROM operation_reservations)").Scan(&admissions, &reservations); err != nil || admissions != 0 || reservations != 0 {
 		t.Fatalf("admissions=%d reservations=%d err=%v", admissions, reservations, err)
+	}
+}
+
+// TestCapacityAvailableDoesNotLetAHotRackMaskAnotherRack proves the P04
+// read-only backpressure view evaluates each ordered scope tuple independently.
+// It cannot create or release any admission/reservation.
+func TestCapacityAvailableDoesNotLetAHotRackMaskAnotherRack(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	for _, scope := range []persistence.ScopeCapacity{
+		{Level: "GLOBAL", Key: "GLOBAL", Limit: 2},
+		{Level: "SITE", Key: "site-a", Limit: 2},
+		{Level: "RACK", Key: "rack-hot", Limit: 1},
+		{Level: "RACK", Key: "rack-cool", Limit: 1},
+	} {
+		if _, err := pool.Exec(ctx, "INSERT INTO scope_capacities (scope_level,scope_key,capacity_limit) VALUES ($1,$2,$3)", scope.Level, scope.Key, scope.Limit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, "UPDATE scope_capacities SET active_reservation_count=1 WHERE scope_level='RACK' AND scope_key='rack-hot'"); err != nil {
+		t.Fatal(err)
+	}
+	global := persistence.ScopeCapacity{Level: "GLOBAL", Key: "GLOBAL", Limit: 2}
+	site := persistence.ScopeCapacity{Level: "SITE", Key: "site-a", Limit: 2}
+	hot, err := persistence.CapacityAvailable(ctx, pool, global, site, persistence.ScopeCapacity{Level: "RACK", Key: "rack-hot", Limit: 1})
+	if err != nil || hot {
+		t.Fatalf("hot rack available=%t err=%v, want false/nil", hot, err)
+	}
+	cool, err := persistence.CapacityAvailable(ctx, pool, global, site, persistence.ScopeCapacity{Level: "RACK", Key: "rack-cool", Limit: 1})
+	if err != nil || !cool {
+		t.Fatalf("cool rack available=%t err=%v, want true/nil", cool, err)
 	}
 }
