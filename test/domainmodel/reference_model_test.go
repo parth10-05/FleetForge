@@ -163,9 +163,12 @@ const (
 	TargetSkipped                  TargetState      = "SKIPPED"
 	TargetCancelled                TargetState      = "CANCELLED"
 	TargetResumePrecheck           TargetResumeStep = "PRECHECK"
-	TargetResumeSubmitting         TargetResumeStep = "SUBMITTING"
-	TargetResumeWaitingReboot      TargetResumeStep = "WAITING_REBOOT"
-	TargetResumeVerifying          TargetResumeStep = "VERIFYING"
+	TargetResumeSubmitAdmission    TargetResumeStep = "SUBMIT_ADMISSION"
+	TargetResumeTaskObserve        TargetResumeStep = "TASK_OBSERVE"
+	TargetResumeRebootWait         TargetResumeStep = "REBOOT_WAIT"
+	TargetResumeVerifyVersion      TargetResumeStep = "VERIFY_VERSION"
+	TargetResumeVerifyHealth       TargetResumeStep = "VERIFY_HEALTH"
+	TargetResumeAmbiguityReconcile TargetResumeStep = "AMBIGUITY_RECONCILE"
 	TargetStartPrecheck            TargetCommand    = "START_PRECHECK"
 	TargetPrecheckPassed           TargetCommand    = "PRECHECK_PASSED"
 	TargetPrecheckRetryable        TargetCommand    = "PRECHECK_RETRYABLE"
@@ -230,7 +233,7 @@ func stepTarget(current TargetAggregate, command TargetCommand) (TargetAggregate
 		case TargetRemoteAccepted:
 			return advance(TargetUpdateAccepted, "", false)
 		case TargetPreSendAbsent:
-			return advance(TargetRetryWait, TargetResumeSubmitting, false)
+			return advance(TargetRetryWait, TargetResumeSubmitAdmission, false)
 		case TargetPostSendAmbiguous:
 			return advance(TargetNeedsAttention, "", false)
 		}
@@ -248,7 +251,7 @@ func stepTarget(current TargetAggregate, command TargetCommand) (TargetAggregate
 		case TargetRebootObserved:
 			return advance(TargetVerifying, "", false)
 		case TargetVerificationRetryable:
-			return advance(TargetRetryWait, TargetResumeWaitingReboot, false)
+			return advance(TargetRetryWait, TargetResumeRebootWait, false)
 		case TargetContinueObservation:
 			return advance(TargetWaitingReboot, "", false)
 		}
@@ -257,7 +260,7 @@ func stepTarget(current TargetAggregate, command TargetCommand) (TargetAggregate
 		case TargetVerificationSucceeded:
 			return advance(TargetSucceeded, "", false)
 		case TargetVerificationRetryable:
-			return advance(TargetRetryWait, TargetResumeVerifying, false)
+			return advance(TargetRetryWait, TargetResumeVerifyVersion, false)
 		case TargetVerificationContradicted:
 			return advance(TargetFailedTerminal, "", false)
 		}
@@ -268,15 +271,15 @@ func stepTarget(current TargetAggregate, command TargetCommand) (TargetAggregate
 				return advance(TargetPrecheck, "", false)
 			}
 		case TargetAdmitSubmission:
-			if current.ResumeStep == TargetResumeSubmitting {
+			if current.ResumeStep == TargetResumeSubmitAdmission {
 				return advance(TargetSubmitting, "", true)
 			}
 		case TargetRebootObserved:
-			if current.ResumeStep == TargetResumeWaitingReboot {
+			if current.ResumeStep == TargetResumeRebootWait {
 				return advance(TargetWaitingReboot, "", false)
 			}
 		case TargetVerificationRetryable:
-			if current.ResumeStep == TargetResumeVerifying {
+			if current.ResumeStep == TargetResumeVerifyVersion {
 				return advance(TargetVerifying, "", false)
 			}
 		}
@@ -285,7 +288,7 @@ func stepTarget(current TargetAggregate, command TargetCommand) (TargetAggregate
 		case TargetAdoptOperation:
 			return advance(TargetUpdateAccepted, "", false)
 		case TargetAttentionRetry:
-			return advance(TargetRetryWait, TargetResumeSubmitting, false)
+			return advance(TargetRetryWait, TargetResumeSubmitAdmission, false)
 		case TargetAttentionTerminal:
 			return advance(TargetFailedTerminal, "", false)
 		case TargetContinueObservation:
@@ -332,7 +335,7 @@ func TestTargetReferenceRequiresMatchingResumeStep(t *testing.T) {
 	for _, testCase := range []struct {
 		resume  TargetResumeStep
 		command TargetCommand
-	}{{TargetResumePrecheck, TargetAdmitSubmission}, {TargetResumeSubmitting, TargetRetryDue}, {TargetResumeWaitingReboot, TargetVerificationRetryable}, {TargetResumeVerifying, TargetRebootObserved}} {
+	}{{TargetResumePrecheck, TargetAdmitSubmission}, {TargetResumeSubmitAdmission, TargetRetryDue}, {TargetResumeRebootWait, TargetVerificationRetryable}, {TargetResumeVerifyVersion, TargetRebootObserved}} {
 		before := TargetAggregate{State: TargetRetryWait, ResumeStep: testCase.resume}
 		got, advanced, submit := stepTarget(before, testCase.command)
 		if advanced || submit || got != before {
@@ -345,7 +348,7 @@ func TestTargetReferenceRequiresMatchingResumeStep(t *testing.T) {
 // submission from every RETRY_WAIT step. The independent oracle must disagree
 // with it, proving the property suite can expose that safety regression.
 func TestIndependentModelDetectsUnsafeRetryMutation(t *testing.T) {
-	before := TargetAggregate{State: TargetRetryWait, ResumeStep: TargetResumeVerifying}
+	before := TargetAggregate{State: TargetRetryWait, ResumeStep: TargetResumeVerifyVersion}
 	oracle, oracleAdvanced, oracleSubmit := stepTarget(before, TargetAdmitSubmission)
 	mutant, mutantAdvanced, mutantSubmit := unsafeRetryMutation(before, TargetAdmitSubmission)
 	if oracleAdvanced || oracleSubmit || oracle != before {

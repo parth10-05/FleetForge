@@ -114,9 +114,12 @@ func TestTargetUpdateRowResumeStepAcceptsNil(t *testing.T) {
 func TestTargetUpdateRowResumeStepAcceptsKnownSteps(t *testing.T) {
 	for _, step := range []targetupdate.ResumeStep{
 		targetupdate.ResumeStepPrecheck,
-		targetupdate.ResumeStepSubmitting,
-		targetupdate.ResumeStepWaitingReboot,
-		targetupdate.ResumeStepVerifying,
+		targetupdate.ResumeStepSubmitAdmission,
+		targetupdate.ResumeStepTaskObserve,
+		targetupdate.ResumeStepRebootWait,
+		targetupdate.ResumeStepVerifyVersion,
+		targetupdate.ResumeStepVerifyHealth,
+		targetupdate.ResumeStepAmbiguityReconcile,
 	} {
 		raw := string(step)
 		got, err := TargetUpdateRowResumeStep(&raw)

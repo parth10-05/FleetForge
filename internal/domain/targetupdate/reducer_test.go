@@ -48,7 +48,7 @@ func TestReduceRequiresSpecificSafetyProofs(t *testing.T) {
 func TestReducePreservesRetryAndBlocksStaleEvidence(t *testing.T) {
 	a := Aggregate{State: StateVerifying, Revision: 2}
 	d := Reduce(a, authorizedTargetInput(targetID(t), CommandVerificationRetryable, 2, 0))
-	if d.Class != DecisionAllowed || d.Aggregate.State != StateRetryWait || d.Aggregate.ResumeStep != ResumeStepVerifying {
+	if d.Class != DecisionAllowed || d.Aggregate.State != StateRetryWait || d.Aggregate.ResumeStep != ResumeStepVerifyVersion {
 		t.Fatalf("retry=%+v", d)
 	}
 	stale := authorizedTargetInput(targetID(t), CommandAdmitSubmission, 3, 0)
@@ -61,7 +61,7 @@ func TestReducePreservesRetryAndBlocksStaleEvidence(t *testing.T) {
 func TestReduceAttentionAndSubmissionEpoch(t *testing.T) {
 	a := Aggregate{State: StateNeedsAttention, Revision: 1, CommandEpoch: 4}
 	d := Reduce(a, authorizedTargetInput(targetID(t), CommandAttentionRetry, 1, 4))
-	if d.Class != DecisionAllowed || d.Aggregate.ResumeStep != ResumeStepSubmitting || d.Attention != AttentionExitProofRetry {
+	if d.Class != DecisionAllowed || d.Aggregate.ResumeStep != ResumeStepSubmitAdmission || d.Attention != AttentionExitProofRetry {
 		t.Fatalf("attention=%+v", d)
 	}
 	b := Aggregate{State: StateSubmitting, CommandEpoch: 4}
@@ -80,15 +80,15 @@ func TestReduceRetryWaitRequiresMatchingPersistedResumeStep(t *testing.T) {
 		{name: "precheck cannot admit submission", resume: ResumeStepPrecheck, command: CommandAdmitSubmission},
 		{name: "precheck cannot resume reboot observation", resume: ResumeStepPrecheck, command: CommandRebootObserved},
 		{name: "precheck cannot resume verification", resume: ResumeStepPrecheck, command: CommandVerificationRetryable},
-		{name: "submitting cannot restart precheck", resume: ResumeStepSubmitting, command: CommandRetryDue},
-		{name: "submitting cannot resume reboot observation", resume: ResumeStepSubmitting, command: CommandRebootObserved},
-		{name: "submitting cannot resume verification", resume: ResumeStepSubmitting, command: CommandVerificationRetryable},
-		{name: "waiting reboot cannot restart precheck", resume: ResumeStepWaitingReboot, command: CommandRetryDue},
-		{name: "waiting reboot cannot admit submission", resume: ResumeStepWaitingReboot, command: CommandAdmitSubmission},
-		{name: "waiting reboot cannot resume verification", resume: ResumeStepWaitingReboot, command: CommandVerificationRetryable},
-		{name: "verifying cannot restart precheck", resume: ResumeStepVerifying, command: CommandRetryDue},
-		{name: "verifying cannot admit submission", resume: ResumeStepVerifying, command: CommandAdmitSubmission},
-		{name: "verifying cannot resume reboot observation", resume: ResumeStepVerifying, command: CommandRebootObserved},
+		{name: "submit admission cannot restart precheck", resume: ResumeStepSubmitAdmission, command: CommandRetryDue},
+		{name: "submit admission cannot resume reboot observation", resume: ResumeStepSubmitAdmission, command: CommandRebootObserved},
+		{name: "submit admission cannot resume verification", resume: ResumeStepSubmitAdmission, command: CommandVerificationRetryable},
+		{name: "reboot wait cannot restart precheck", resume: ResumeStepRebootWait, command: CommandRetryDue},
+		{name: "reboot wait cannot admit submission", resume: ResumeStepRebootWait, command: CommandAdmitSubmission},
+		{name: "reboot wait cannot resume verification", resume: ResumeStepRebootWait, command: CommandVerificationRetryable},
+		{name: "verify version cannot restart precheck", resume: ResumeStepVerifyVersion, command: CommandRetryDue},
+		{name: "verify version cannot admit submission", resume: ResumeStepVerifyVersion, command: CommandAdmitSubmission},
+		{name: "verify version cannot resume reboot observation", resume: ResumeStepVerifyVersion, command: CommandRebootObserved},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			before := Aggregate{State: StateRetryWait, ResumeStep: testCase.resume}

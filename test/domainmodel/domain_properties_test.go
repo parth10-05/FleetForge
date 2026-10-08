@@ -190,7 +190,7 @@ func propertyRetrySteps(t *testing.T) {
 		resume  targetupdate.ResumeStep
 		command targetupdate.Command
 		want    targetupdate.State
-	}{{targetupdate.ResumeStepPrecheck, targetupdate.CommandRetryDue, targetupdate.StatePrecheck}, {targetupdate.ResumeStepSubmitting, targetupdate.CommandAdmitSubmission, targetupdate.StateSubmitting}, {targetupdate.ResumeStepWaitingReboot, targetupdate.CommandRebootObserved, targetupdate.StateWaitingReboot}, {targetupdate.ResumeStepVerifying, targetupdate.CommandVerificationRetryable, targetupdate.StateVerifying}}
+	}{{targetupdate.ResumeStepPrecheck, targetupdate.CommandRetryDue, targetupdate.StatePrecheck}, {targetupdate.ResumeStepSubmitAdmission, targetupdate.CommandAdmitSubmission, targetupdate.StateSubmitting}, {targetupdate.ResumeStepRebootWait, targetupdate.CommandRebootObserved, targetupdate.StateWaitingReboot}, {targetupdate.ResumeStepVerifyVersion, targetupdate.CommandVerificationRetryable, targetupdate.StateVerifying}}
 	for _, testCase := range cases {
 		before := targetupdate.Aggregate{State: targetupdate.StateRetryWait, ResumeStep: testCase.resume}
 		decision := targetupdate.Reduce(before, authorizedTargetInput(id, testCase.command, 0, 0))
@@ -198,11 +198,11 @@ func propertyRetrySteps(t *testing.T) {
 			t.Fatalf("retry %s/%s = %#v", testCase.resume, testCase.command, decision)
 		}
 	}
-	for _, resume := range []targetupdate.ResumeStep{targetupdate.ResumeStepPrecheck, targetupdate.ResumeStepSubmitting, targetupdate.ResumeStepWaitingReboot, targetupdate.ResumeStepVerifying} {
+	for _, resume := range []targetupdate.ResumeStep{targetupdate.ResumeStepPrecheck, targetupdate.ResumeStepSubmitAdmission, targetupdate.ResumeStepTaskObserve, targetupdate.ResumeStepRebootWait, targetupdate.ResumeStepVerifyVersion, targetupdate.ResumeStepVerifyHealth, targetupdate.ResumeStepAmbiguityReconcile} {
 		for _, command := range []targetupdate.Command{targetupdate.CommandRetryDue, targetupdate.CommandAdmitSubmission, targetupdate.CommandRebootObserved, targetupdate.CommandVerificationRetryable} {
 			before := targetupdate.Aggregate{State: targetupdate.StateRetryWait, ResumeStep: resume}
 			decision := targetupdate.Reduce(before, authorizedTargetInput(id, command, 0, 0))
-			if decision.Class == targetupdate.DecisionAllowed && decision.Aggregate.State == targetupdate.StateSubmitting && resume != targetupdate.ResumeStepSubmitting {
+			if decision.Class == targetupdate.DecisionAllowed && decision.Aggregate.State == targetupdate.StateSubmitting && resume != targetupdate.ResumeStepSubmitAdmission {
 				t.Fatalf("unsafe retry submit from %s", resume)
 			}
 		}
