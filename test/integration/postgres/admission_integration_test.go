@@ -39,11 +39,14 @@ func TestAdmissionPersistsFencedIntentReservationsAndEvidenceAtomically(t *testi
 		"SELECT COUNT(*) FROM due_work",
 	} {
 		var count int
-		if err := pool.QueryRow(ctx, query).Scan(&count); err != nil || count != 1 && query != "SELECT COUNT(*) FROM operation_reservations WHERE state='ACTIVE'" {
+		if err := pool.QueryRow(ctx, query).Scan(&count); err != nil || count != 1 && query != "SELECT COUNT(*) FROM operation_reservations WHERE state='ACTIVE'" && query != "SELECT COUNT(*) FROM outbox_events" {
 			t.Fatalf("%s count=%d err=%v, want 1", query, count, err)
 		}
 		if query == "SELECT COUNT(*) FROM operation_reservations WHERE state='ACTIVE'" && count != 3 {
 			t.Fatalf("active reservation count=%d, want 3", count)
+		}
+		if query == "SELECT COUNT(*) FROM outbox_events" && count != 2 {
+			t.Fatalf("outbox count=%d, want domain event plus typed wakeup", count)
 		}
 	}
 	var active int64

@@ -227,22 +227,27 @@ type OperationReservation struct {
 }
 
 type OutboxEvent struct {
-	EventID           pgtype.UUID        `json:"event_id"`
-	AggregateType     string             `json:"aggregate_type"`
-	AggregateID       pgtype.UUID        `json:"aggregate_id"`
-	AggregateRevision int64              `json:"aggregate_revision"`
-	EventType         string             `json:"event_type"`
-	SchemaVersion     int32              `json:"schema_version"`
-	Payload           []byte             `json:"payload"`
-	DeliveryState     string             `json:"delivery_state"`
-	DeliveryAttempts  int64              `json:"delivery_attempts"`
-	NextAttemptAt     pgtype.Timestamptz `json:"next_attempt_at"`
-	LastErrorClass    pgtype.Text        `json:"last_error_class"`
-	PublishedAt       pgtype.Timestamptz `json:"published_at"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	ClaimToken        pgtype.UUID        `json:"claim_token"`
-	ClaimOwner        pgtype.Text        `json:"claim_owner"`
-	ClaimExpiresAt    pgtype.Timestamptz `json:"claim_expires_at"`
+	EventID            pgtype.UUID        `json:"event_id"`
+	AggregateType      string             `json:"aggregate_type"`
+	AggregateID        pgtype.UUID        `json:"aggregate_id"`
+	AggregateRevision  int64              `json:"aggregate_revision"`
+	EventType          string             `json:"event_type"`
+	SchemaVersion      int32              `json:"schema_version"`
+	Payload            []byte             `json:"payload"`
+	DeliveryState      string             `json:"delivery_state"`
+	DeliveryAttempts   int64              `json:"delivery_attempts"`
+	NextAttemptAt      pgtype.Timestamptz `json:"next_attempt_at"`
+	LastErrorClass     pgtype.Text        `json:"last_error_class"`
+	PublishedAt        pgtype.Timestamptz `json:"published_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ClaimToken         pgtype.UUID        `json:"claim_token"`
+	ClaimOwner         pgtype.Text        `json:"claim_owner"`
+	ClaimExpiresAt     pgtype.Timestamptz `json:"claim_expires_at"`
+	DeliveryKind       string             `json:"delivery_kind"`
+	DueWorkID          pgtype.UUID        `json:"due_work_id"`
+	CommandID          pgtype.UUID        `json:"command_id"`
+	DeliveryGeneration pgtype.Int8        `json:"delivery_generation"`
+	QueueClass         pgtype.Text        `json:"queue_class"`
 }
 
 type PreflightCandidate struct {
@@ -360,4 +365,43 @@ type TargetUpdate struct {
 	ExpectedFirmwareVersion string             `json:"expected_firmware_version"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WakeupExecutionEvidence struct {
+	ID                 pgtype.UUID        `json:"id"`
+	DueWorkID          pgtype.UUID        `json:"due_work_id"`
+	CommandID          pgtype.UUID        `json:"command_id"`
+	DeliveryGeneration int64              `json:"delivery_generation"`
+	WorkType           string             `json:"work_type"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+}
+
+type WakeupQuarantine struct {
+	ID                    pgtype.UUID        `json:"id"`
+	DeduplicationKey      string             `json:"deduplication_key"`
+	ObservedSchemaVersion pgtype.Text        `json:"observed_schema_version"`
+	ObservedQueueClass    pgtype.Text        `json:"observed_queue_class"`
+	DueWorkID             pgtype.UUID        `json:"due_work_id"`
+	CommandID             pgtype.UUID        `json:"command_id"`
+	ReasonCode            string             `json:"reason_code"`
+	FirstObservedAt       pgtype.Timestamptz `json:"first_observed_at"`
+	LastObservedAt        pgtype.Timestamptz `json:"last_observed_at"`
+	Occurrences           int64              `json:"occurrences"`
+	ResolutionState       string             `json:"resolution_state"`
+}
+
+// P04 bounded current telemetry snapshot; diagnostic-only and contains no workflow or provider identifiers.
+type WakeupTelemetrySnapshot struct {
+	Singleton                      bool               `json:"singleton"`
+	ObservedAt                     pgtype.Timestamptz `json:"observed_at"`
+	PendingWakeupCount             int64              `json:"pending_wakeup_count"`
+	OldestWakeupAgeSeconds         int64              `json:"oldest_wakeup_age_seconds"`
+	PendingDueWorkCount            int64              `json:"pending_due_work_count"`
+	OldestDueWorkAgeSeconds        int64              `json:"oldest_due_work_age_seconds"`
+	ExpiredDeliveryClaimCount      int64              `json:"expired_delivery_claim_count"`
+	ExpiredWorkLeaseCount          int64              `json:"expired_work_lease_count"`
+	ActiveReservationCount         int64              `json:"active_reservation_count"`
+	RetryExhaustedWakeupCount      int64              `json:"retry_exhausted_wakeup_count"`
+	OpenQuarantineCount            int64              `json:"open_quarantine_count"`
+	OldestOpenQuarantineAgeSeconds int64              `json:"oldest_open_quarantine_age_seconds"`
 }

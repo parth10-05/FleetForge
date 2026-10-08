@@ -55,7 +55,7 @@ func TestConcurrentAdmissionLeavesOneCoherentDurableHistory(t *testing.T) {
 	assertHistoryCount(t, pool, ctx, "step_attempts", 1)
 	assertHistoryCount(t, pool, ctx, "decision_inputs", 1)
 	assertHistoryCount(t, pool, ctx, "audit_events", 1)
-	assertHistoryCount(t, pool, ctx, "outbox_events", 1)
+	assertHistoryCount(t, pool, ctx, "outbox_events", 2)
 	assertHistoryCount(t, pool, ctx, "due_work", 1)
 	var active int64
 	if err := pool.QueryRow(ctx, "SELECT COALESCE(SUM(active_reservation_count),0) FROM scope_capacities").Scan(&active); err != nil {

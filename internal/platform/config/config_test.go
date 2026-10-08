@@ -135,6 +135,23 @@ func TestLoadPostgreSQLUsesBoundedRoleSpecificConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadOrchestrationWorkerValidatesInternalBudgets(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	loaded, err := LoadOrchestrationWorker()
+	if err != nil || loaded.WorkerConcurrency > loaded.ReceiveBatch || loaded.HandlerTimeout >= loaded.LeaseDuration {
+		t.Fatalf("LoadOrchestrationWorker()=%#v err=%v", loaded, err)
+	}
+	t.Setenv("FLEETFORGE_WAKEUP_WORKER_CONCURRENCY", "101")
+	if _, err := LoadOrchestrationWorker(); err == nil {
+		t.Fatal("unbounded concurrency accepted")
+	}
+	t.Setenv("FLEETFORGE_WAKEUP_WORKER_CONCURRENCY", "1")
+	t.Setenv("FLEETFORGE_WAKEUP_HANDLER_TIMEOUT", "10s")
+	if _, err := LoadOrchestrationWorker(); err == nil {
+		t.Fatal("handler/shutdown inconsistency accepted")
+	}
+}
+
 func TestLoadPostgreSQLAcceptsNeonStandardConnectionVariables(t *testing.T) {
 	t.Setenv(postgresApplicationDSNKey, "")
 	t.Setenv(postgresMigrationDSNKey, "")

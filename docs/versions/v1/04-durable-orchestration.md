@@ -6,17 +6,17 @@ Use a provider-neutral at-least-once wakeup boundary only. PostgreSQL due work, 
 
 ## Tasks
 
-- [ ] **V1-P04-T01** Define a versioned identifier-only queue envelope containing queue class, `command_id`, delivery generation, expected state/revision/epoch, not-before time, and trace context. Never use delivery-provider IDs as semantic identity.
-- [ ] **V1-P04-T02** Define publisher and receipt ports outside AWS SDK types. Reject unknown envelope/work versions to an auditable quarantine path.
-- [ ] **V1-P04-T03** Implement bounded oldest-first outbox claim, publish outside the transaction, and fenced result marking. Unknown publish outcome may repeat the wakeup only with the same event/command identity.
-- [ ] **V1-P04-T04** Configure a bounded local publisher/sweeper trigger so overdue work recovers when no worker loop is active; preserve the same port and invocation contract for the later EventBridge Scheduler adapter.
-- [ ] **V1-P04-T05** Validate queue payload/schema/size and claim due work with owner, unguessable lease token, expiry, expected revision, and command epoch. Reload authoritative state after claim.
-- [ ] **V1-P04-T06** Recheck campaign epoch, pause/abort state, maintenance window, retry budget, enrollment, reservation, and expected state before dispatching a handler.
-- [ ] **V1-P04-T07** Implement a bounded worker pool and handler deadline shorter than lease/shutdown deadlines. No handler sleeps for future work and no unbounded goroutines are allowed.
-- [ ] **V1-P04-T08** Acknowledge or delete a wakeup only after a durable result transaction commits. A failed or unknown database commit must leave delivery safely retryable.
-- [ ] **V1-P04-T09** Implement indexed sweeper repair: recreate missing wakeups with a new delivery generation while retaining semantic `command_id`; repair expired leases without stealing unexpired work.
-- [ ] **V1-P04-T10** Acquire global, site, and rack reservation rows in the accepted total lock order. Capacity wait schedules jittered durable retry; no counter or reservation releases from work-lease expiry.
-- [ ] **V1-P04-T11** Persist safe metrics for queue age, due-work age, lease conflict/expiry, reservation use, retry budget, and dead-letter/quarantine age.
+- [x] **V1-P04-T01** Define a versioned identifier-only queue envelope containing queue class, `command_id`, delivery generation, expected state/revision/epoch, not-before time, and trace context. Never use delivery-provider IDs as semantic identity.
+- [x] **V1-P04-T02** Define publisher and receipt ports outside AWS SDK types. Reject unknown envelope/work versions to an auditable quarantine path.
+- [x] **V1-P04-T03** Implement bounded oldest-first outbox claim, publish outside the transaction, and fenced result marking. Unknown publish outcome may repeat the wakeup only with the same event/command identity.
+- [x] **V1-P04-T04** Configure a bounded local publisher/sweeper trigger so overdue work recovers when no worker loop is active; preserve the same port and invocation contract for the later EventBridge Scheduler adapter.
+- [x] **V1-P04-T05** Validate queue payload/schema/size and claim due work with owner, unguessable lease token, expiry, expected revision, and command epoch. Reload authoritative state after claim.
+- [x] **V1-P04-T06** Recheck campaign epoch, pause/abort state, maintenance window, retry budget, enrollment, reservation, and expected state before dispatching a handler.
+- [x] **V1-P04-T07** Implement a bounded worker pool and handler deadline shorter than lease/shutdown deadlines. No handler sleeps for future work and no unbounded goroutines are allowed.
+- [x] **V1-P04-T08** Acknowledge or delete a wakeup only after a durable result transaction commits. A failed or unknown database commit must leave delivery safely retryable.
+- [x] **V1-P04-T09** Implement indexed sweeper repair: recreate missing wakeups with a new delivery generation while retaining semantic `command_id`; repair expired leases without stealing unexpired work.
+- [x] **V1-P04-T10** Acquire global, site, and rack reservation rows in the accepted total lock order. Capacity wait schedules jittered durable retry; no counter or reservation releases from work-lease expiry.
+- [x] **V1-P04-T11** Persist safe metrics for queue age, due-work age, lease conflict/expiry, reservation use, retry budget, and dead-letter/quarantine age.
 
 ## Required proof
 
