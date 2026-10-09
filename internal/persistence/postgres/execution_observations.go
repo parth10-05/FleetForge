@@ -127,7 +127,7 @@ func validObservationRoute(workType, state, next string) bool {
 	case "REBOOT_OBSERVE":
 		return state == "WAITING_REBOOT" && (next == retryObservationWork || next == "INVENTORY_OBSERVE" || next == "TERMINAL")
 	case "INVENTORY_OBSERVE":
-		return state == "WAITING_REBOOT" && (next == retryObservationWork || next == "HEALTH_OBSERVE" || next == "TERMINAL")
+		return state == "VERIFYING" && (next == retryObservationWork || next == "HEALTH_OBSERVE" || next == "TERMINAL")
 	case "HEALTH_OBSERVE":
 		return state == "VERIFYING" && (next == retryObservationWork || next == "SUCCEEDED" || next == "TERMINAL")
 	default:
