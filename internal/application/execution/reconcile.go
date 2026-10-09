@@ -45,7 +45,11 @@ func (worker ReconciliationWorker) RunOnce(ctx context.Context, owner, leaseToke
 	if snapshot.Attempt.AttemptID == "" || snapshot.Attempt.TargetID == "" || snapshot.Attempt.StartedAt.IsZero() {
 		return true, fmt.Errorf("reconciliation attempt lacks immutable identity or time boundary")
 	}
-	journal, err := worker.Journal.ReadAcceptance(ctx, worker.RunID, snapshot.Attempt.TargetID, snapshot.Attempt.StartedAt, worker.Now().UTC())
+	until := worker.Now().UTC()
+	if until.Before(snapshot.Attempt.StartedAt) {
+		return true, fmt.Errorf("reconciliation clock precedes immutable attempt boundary")
+	}
+	journal, err := worker.Journal.ReadAcceptance(ctx, worker.RunID, snapshot.Attempt.TargetID, snapshot.Attempt.StartedAt, until)
 	if err != nil {
 		return true, fmt.Errorf("read independent acceptance journal: %w", err)
 	}

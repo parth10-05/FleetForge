@@ -73,3 +73,13 @@ func TestReconciliationWorkerFailsClosedWithoutAttemptTimeBoundary(t *testing.T)
 		t.Fatalf("err=%v reader calls=%d", err, reader.calls)
 	}
 }
+
+func TestReconciliationWorkerFailsClosedForInvertedEvidenceWindow(t *testing.T) {
+	work := WorkFence{DueWorkID: "work", CommandID: "command", LeaseToken: "lease"}
+	reader := &failingAcceptanceReader{}
+	started := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
+	worker := ReconciliationWorker{Claimer: reconciliationClaimer{work: work}, Repository: &reconciliationRepository{snapshot: ReconciliationSnapshot{Attempt: AttemptSnapshot{AttemptID: "attempt-1", TargetID: "target-1", StartedAt: started}}}, Journal: reader, RunID: "run", Now: func() time.Time { return started.Add(-time.Second) }}
+	if _, err := worker.RunOnce(context.Background(), "reconciler", "token"); err == nil || reader.calls != 0 {
+		t.Fatalf("err=%v reader calls=%d", err, reader.calls)
+	}
+}
