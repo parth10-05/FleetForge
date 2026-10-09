@@ -9,7 +9,7 @@ import (
 // later durable reconciliation transaction; this coordinator never infers
 // absence from a transport error and never calls the target twice.
 func SubmitOnce(ctx context.Context, repository ExecutionRepository, artifacts ExactArtifactReader, target RedfishExecutionPort, work WorkFence, attemptID, actionPath string) error {
-	if repository == nil || artifacts == nil || target == nil || attemptID == "" || actionPath == "" || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.DeliveryGeneration < 0 {
+	if repository == nil || artifacts == nil || target == nil || attemptID == "" || actionPath == "" || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.DeliveryGeneration < 0 || work.ExpectedRevision < 0 {
 		return fmt.Errorf("invalid submit execution request")
 	}
 	attempt, err := repository.LoadAttempt(ctx, attemptID)

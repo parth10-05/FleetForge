@@ -8,8 +8,9 @@ import (
 )
 
 type WorkFence struct {
-	DueWorkID, CommandID, LeaseToken string
-	DeliveryGeneration               int64
+	DueWorkID, CommandID, LeaseToken     string
+	DeliveryGeneration, ExpectedRevision int64
+	ExpectedCommandEpoch                 *int64
 }
 type ObjectIdentity struct {
 	Provider, Container, ObjectKey, ObjectVersion, SHA256 string
