@@ -1,6 +1,7 @@
 -- +goose Up
 -- A submit result may advance its outcome fields, but it must never rewrite
 -- the exact request that reached (or may have reached) a target.
+-- +goose StatementBegin
 CREATE FUNCTION fleetforge_reject_firmware_attempt_identity_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF OLD.step_attempt_id IS DISTINCT FROM NEW.step_attempt_id
@@ -27,6 +28,7 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+-- +goose StatementEnd
 
 CREATE TRIGGER firmware_update_attempts_identity_immutable
     BEFORE UPDATE OR DELETE ON firmware_update_attempts
