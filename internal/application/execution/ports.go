@@ -37,7 +37,7 @@ type AdmissionResult struct{ AttemptID, SubmitWorkID, SubmitCommandID string }
 type AttemptSnapshot struct {
 	AttemptID, ParentAttemptID, AdmissionID, TargetID, TargetUpdateID, CampaignID string
 	Artifact                                                                      ObjectIdentity
-	ExpectedVersion, CredentialReference, RequestFingerprint                      string
+	ExpectedVersion, CredentialReference, RequestFingerprint, RemoteTaskReference string
 	CommandEpoch, AdmittedRevision                                                int64
 }
 type SubmitRequest struct {
