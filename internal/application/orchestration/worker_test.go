@@ -54,6 +54,18 @@ type handlerStub struct {
 func (s *handlerStub) Supports(Envelope) bool                    { return s.supported }
 func (s *handlerStub) Handle(context.Context, ClaimedWork) error { s.calls++; return s.err }
 
+type finalizedHandlerStub struct {
+	supported bool
+	err       error
+	calls     int
+}
+
+func (s *finalizedHandlerStub) Supports(Envelope) bool { return s.supported }
+func (s *finalizedHandlerStub) HandleFinalized(context.Context, ClaimedWork) error {
+	s.calls++
+	return s.err
+}
+
 func validReceipt(t *testing.T) Receipt {
 	t.Helper()
 	raw, err := Encode(testEnvelope())
@@ -87,6 +99,49 @@ func TestWorkerDoesNotAcknowledgeAmbiguousCompletion(t *testing.T) {
 	}
 	if acker.count != 0 {
 		t.Fatalf("ack=%d, want 0", acker.count)
+	}
+}
+
+func TestWorkerAcknowledgesFinalizedHandlerWithoutGenericCompletion(t *testing.T) {
+	store, handler, acker := &storeStub{claim: ClaimOwned}, &finalizedHandlerStub{supported: true}, &ackerStub{}
+	worker, err := NewWorker(receiverStub{receipts: []Receipt{validReceipt(t)}}, acker, store, handler, WorkerConfig{ReceiveBatch: 1, Concurrency: 1, HandlerTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if store.completed != 0 || handler.calls != 1 || acker.count != 1 {
+		t.Fatalf("complete=%d finalized=%d ack=%d", store.completed, handler.calls, acker.count)
+	}
+}
+
+func TestWorkerRecordsFinalizedDurableCompletion(t *testing.T) {
+	store, handler, acker := &storeStub{claim: ClaimOwned}, &finalizedHandlerStub{supported: true}, &ackerStub{}
+	metrics := NewMetrics()
+	worker, err := NewWorker(receiverStub{receipts: []Receipt{validReceipt(t)}}, acker, store, handler, WorkerConfig{ReceiveBatch: 1, Concurrency: 1, HandlerTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.WithMetrics(metrics).RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if metrics.Snapshot()[MetricKey{Name: "durable_complete", Outcome: "success", Class: "control"}] != 1 {
+		t.Fatalf("missing finalized completion metric: %#v", metrics.Snapshot())
+	}
+}
+
+func TestWorkerLeavesReceiptWhenFinalizedHandlerFails(t *testing.T) {
+	store, handler, acker := &storeStub{claim: ClaimOwned}, &finalizedHandlerStub{supported: true, err: errors.New("commit failed")}, &ackerStub{}
+	worker, err := NewWorker(receiverStub{receipts: []Receipt{validReceipt(t)}}, acker, store, handler, WorkerConfig{ReceiveBatch: 1, Concurrency: 1, HandlerTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.RunOnce(context.Background()); err == nil {
+		t.Fatal("missing finalization error")
+	}
+	if store.completed != 0 || acker.count != 0 {
+		t.Fatalf("complete=%d ack=%d", store.completed, acker.count)
 	}
 }
 func TestWorkerQuarantinesBeforeAcknowledgingInvalidReceipt(t *testing.T) {

@@ -37,6 +37,25 @@ type WorkHandler interface {
 	Handle(context.Context, ClaimedWork) error
 }
 
+// FinalizingWorkHandler owns the entire fenced durable transition for a unit
+// of work. It is reserved for handlers whose domain transaction both records
+// the outcome and releases the lease; the wakeup worker must not issue a
+// second generic Complete after HandleFinalized returns.
+//
+// Keeping this separate from WorkHandler preserves the original completion
+// path for simple handlers and makes finalization ownership explicit at the
+// composition boundary.
+type FinalizingWorkHandler interface {
+	Supports(Envelope) bool
+	HandleFinalized(context.Context, ClaimedWork) error
+}
+
+// RoutedWorkHandler declares whether a handler owns a decoded wakeup. It is
+// shared by ordinary and self-finalizing handler contracts.
+type RoutedWorkHandler interface {
+	Supports(Envelope) bool
+}
+
 type WorkerConfig struct {
 	ReceiveBatch, Concurrency int
 	HandlerTimeout            time.Duration
@@ -46,16 +65,21 @@ type Worker struct {
 	receiver WakeupReceiver
 	acker    WakeupAcknowledger
 	store    WorkStore
-	handler  WorkHandler
+	handler  RoutedWorkHandler
 	config   WorkerConfig
 	metrics  *Metrics
 }
 
 func (w *Worker) WithMetrics(metrics *Metrics) *Worker { w.metrics = metrics; return w }
 
-func NewWorker(receiver WakeupReceiver, acker WakeupAcknowledger, store WorkStore, handler WorkHandler, config WorkerConfig) (*Worker, error) {
+func NewWorker(receiver WakeupReceiver, acker WakeupAcknowledger, store WorkStore, handler RoutedWorkHandler, config WorkerConfig) (*Worker, error) {
 	if receiver == nil || acker == nil || store == nil || handler == nil || config.ReceiveBatch <= 0 || config.ReceiveBatch > 100 || config.Concurrency <= 0 || config.Concurrency > config.ReceiveBatch || config.HandlerTimeout <= 0 {
 		return nil, fmt.Errorf("invalid wakeup worker configuration")
+	}
+	if _, ordinary := handler.(WorkHandler); !ordinary {
+		if _, finalizing := handler.(FinalizingWorkHandler); !finalizing {
+			return nil, fmt.Errorf("wakeup handler must implement a work execution contract")
+		}
 	}
 	return &Worker{receiver: receiver, acker: acker, store: store, handler: handler, config: config}, nil
 }
@@ -125,18 +149,31 @@ func (w *Worker) process(ctx context.Context, receipt Receipt) error {
 	}
 	w.record("claim", "success", string(envelope.QueueClass))
 	handlerContext, cancel := context.WithTimeout(ctx, w.config.HandlerTimeout)
-	err = w.handler.Handle(handlerContext, claimed)
+	finalized := false
+	switch handler := w.handler.(type) {
+	case FinalizingWorkHandler:
+		finalized = true
+		err = handler.HandleFinalized(handlerContext, claimed)
+	case WorkHandler:
+		err = handler.Handle(handlerContext, claimed)
+	default:
+		err = fmt.Errorf("wakeup handler has no execution contract")
+	}
 	cancel()
 	if err != nil {
 		w.record("dispatch", "failure", string(envelope.QueueClass))
 		return err
 	}
 	w.record("dispatch", "success", string(envelope.QueueClass))
-	if err := w.store.Complete(ctx, claimed); err != nil {
-		w.record("durable_complete", "failure", string(envelope.QueueClass))
-		return err
+	if !finalized {
+		if err := w.store.Complete(ctx, claimed); err != nil {
+			w.record("durable_complete", "failure", string(envelope.QueueClass))
+			return err
+		}
+		w.record("durable_complete", "success", string(envelope.QueueClass))
+	} else {
+		w.record("durable_complete", "success", string(envelope.QueueClass))
 	}
-	w.record("durable_complete", "success", string(envelope.QueueClass))
 	err = w.acker.Ack(ctx, receipt)
 	if err != nil {
 		w.record("ack", "failure", string(envelope.QueueClass))
