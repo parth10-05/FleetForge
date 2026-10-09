@@ -31,6 +31,13 @@ func (r acceptanceReader) ReadAcceptance(context.Context, string, string, time.T
 	return r.journal, nil
 }
 
+type failingAcceptanceReader struct{ calls int }
+
+func (r *failingAcceptanceReader) ReadAcceptance(context.Context, string, string, time.Time, time.Time) (AcceptanceJournal, error) {
+	r.calls++
+	return AcceptanceJournal{}, nil
+}
+
 func TestEvaluateAcceptanceJournalNeverGrantsRetryFromAbsenceAlone(t *testing.T) {
 	attempt := AttemptSnapshot{AttemptID: "attempt-1", RequestFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 	decision, outcome, err := EvaluateAcceptanceJournal(attempt, AcceptanceJournal{RunID: "run", CheckpointHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"})
@@ -55,5 +62,14 @@ func TestReconciliationWorkerAdoptsOnlyIndependentMatchingAcceptance(t *testing.
 	claimed, err := worker.RunOnce(context.Background(), "reconciler", "token")
 	if err != nil || !claimed || repository.committed.Outcome != reconciliationAdopt || repository.committed.Work != work {
 		t.Fatalf("claimed=%t err=%v decision=%+v", claimed, err, repository.committed)
+	}
+}
+
+func TestReconciliationWorkerFailsClosedWithoutAttemptTimeBoundary(t *testing.T) {
+	work := WorkFence{DueWorkID: "work", CommandID: "command", LeaseToken: "lease"}
+	reader := &failingAcceptanceReader{}
+	worker := ReconciliationWorker{Claimer: reconciliationClaimer{work: work}, Repository: &reconciliationRepository{snapshot: ReconciliationSnapshot{Attempt: AttemptSnapshot{AttemptID: "attempt-1", TargetID: "target-1"}}}, Journal: reader, RunID: "run", Now: time.Now}
+	if _, err := worker.RunOnce(context.Background(), "reconciler", "token"); err == nil || reader.calls != 0 {
+		t.Fatalf("err=%v reader calls=%d", err, reader.calls)
 	}
 }
