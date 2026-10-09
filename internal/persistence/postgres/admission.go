@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,6 +21,8 @@ var (
 	ErrCapacityExhausted     = errors.New("operation capacity exhausted")
 	ErrCapacityConfiguration = errors.New("operation capacity configuration conflict")
 )
+
+var sha256Pattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // ScopeCapacity is the immutable policy limit used while admitting one
 // operation. Existing durable rows must match this configuration exactly.
@@ -53,6 +56,21 @@ type AdmissionRequest struct {
 	ReducerVersion, DecisionPolicyVersion                              string
 	NormalizedFacts                                                    json.RawMessage
 	DecisionResult                                                     string
+	FirmwareAttempt                                                    *FirmwareAttemptRequest
+}
+
+// FirmwareAttemptRequest is the immutable, target-facing identity captured
+// with a P05 admission. It is intentionally separate from generic step
+// attempts: one semantic admission may later gain a proof-backed child, but
+// an ambiguous attempt can never be silently replayed.
+type FirmwareAttemptRequest struct {
+	AttemptID                string
+	Provider, Container      string
+	ObjectKey, ObjectVersion string
+	ObjectSize               int64
+	SHA256Digest             string
+	ExpectedVersion          string
+	RequestFingerprint       string
 }
 
 // AdmitOperation atomically fences an intended submission, reserves physical
@@ -100,6 +118,21 @@ func validateAdmissionRequest(r AdmissionRequest) error {
 		if id == "" {
 			return fmt.Errorf("admission request contains empty reservation ID")
 		}
+	}
+	if r.FirmwareAttempt != nil {
+		if err := validateFirmwareAttemptRequest(*r.FirmwareAttempt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFirmwareAttemptRequest(r FirmwareAttemptRequest) error {
+	if r.AttemptID == "" || r.Provider == "" || r.Container == "" || r.ObjectKey == "" || r.ObjectVersion == "" || r.ExpectedVersion == "" || r.ObjectSize <= 0 || r.ObjectSize > 16777216 {
+		return fmt.Errorf("firmware attempt request contains required empty or invalid field")
+	}
+	if !sha256Pattern.MatchString(r.SHA256Digest) || !sha256Pattern.MatchString(r.RequestFingerprint) {
+		return fmt.Errorf("firmware attempt request contains non-canonical fingerprint")
 	}
 	return nil
 }
@@ -168,6 +201,16 @@ WHERE ct.id=$1::uuid AND ct.campaign_id=$2::uuid AND ct.target_id=$3::uuid AND c
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO step_attempts (id,target_update_id,step,attempt_number,command_id) VALUES ($1::uuid,$2::uuid,$3,1,$4::uuid)", r.StepAttemptID, r.TargetUpdateID, r.Step, r.CommandID); err != nil {
 		return classifyAdmissionWrite(err, "insert submission step intent")
+	}
+	if r.FirmwareAttempt != nil {
+		a := r.FirmwareAttempt
+		if _, err = tx.Exec(ctx, `INSERT INTO firmware_update_attempts (id,step_attempt_id,submission_admission_id,target_update_id,campaign_id,target_id,artifact_id,provider,container,object_key,object_version,object_size,sha256_digest,expected_version,update_mechanism,request_fingerprint,captured_command_epoch,admitted_revision)
+VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8,$9,$10,$11,$12,$13,$14,'HTTP_PUSH_V1',$15,$16,$17)`, a.AttemptID, r.StepAttemptID, r.AdmissionID, r.TargetUpdateID, r.CampaignID, r.TargetID, r.ArtifactID, a.Provider, a.Container, a.ObjectKey, a.ObjectVersion, a.ObjectSize, a.SHA256Digest, a.ExpectedVersion, a.RequestFingerprint, r.CapturedCommandEpoch, r.ExpectedTargetRevision+1); err != nil {
+			return classifyAdmissionWrite(err, "insert firmware update attempt")
+		}
+		if _, err = tx.Exec(ctx, "UPDATE submission_admissions SET initial_attempt_id=$2::uuid,active_attempt_id=$2::uuid WHERE id=$1::uuid AND initial_attempt_id IS NULL AND active_attempt_id IS NULL", r.AdmissionID, a.AttemptID); err != nil {
+			return classifyAdmissionWrite(err, "link initial firmware attempt")
+		}
 	}
 	tag, err := tx.Exec(ctx, "UPDATE target_updates SET state=$3, revision=revision+1, resume_step=$4, updated_at=now() WHERE id=$1::uuid AND revision=$2 AND command_epoch=$5", r.TargetUpdateID, r.ExpectedTargetRevision, r.NextTargetState, r.ResumeStep, r.CapturedCommandEpoch)
 	if err != nil {

@@ -55,6 +55,31 @@ func TestAdmissionPersistsFencedIntentReservationsAndEvidenceAtomically(t *testi
 	}
 }
 
+func TestAdmissionPersistsInitialFirmwareAttemptAtomically(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	req := admissionRequest(fixture, "1011")
+	base := "00000000-0000-0000-1011-0000000000"
+	req.FirmwareAttempt = &persistence.FirmwareAttemptRequest{
+		AttemptID: base + "10", Provider: "local-versioned-v1", Container: "firmware", ObjectKey: "verified/firmware.bin", ObjectVersion: "v1", ObjectSize: 4096,
+		SHA256Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ExpectedVersion: "1.2.3", RequestFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}
+	if err := persistence.AdmitOperation(ctx, pool, req); err != nil {
+		t.Fatalf("AdmitOperation: %v", err)
+	}
+	var status, initial, active string
+	var revision int64
+	if err := pool.QueryRow(ctx, `SELECT a.status,a.admitted_revision,s.initial_attempt_id::text,s.active_attempt_id::text
+FROM firmware_update_attempts a JOIN submission_admissions s ON s.id=a.submission_admission_id
+WHERE a.id=$1::uuid`, req.FirmwareAttempt.AttemptID).Scan(&status, &revision, &initial, &active); err != nil {
+		t.Fatal(err)
+	}
+	if status != "ADMITTED" || revision != 1 || initial != req.FirmwareAttempt.AttemptID || active != req.FirmwareAttempt.AttemptID {
+		t.Fatalf("attempt=%s revision=%d initial=%s active=%s", status, revision, initial, active)
+	}
+}
+
 func TestAdmissionStaleEpochRollsBackCapacityAndEvidence(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
