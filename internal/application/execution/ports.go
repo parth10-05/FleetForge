@@ -100,6 +100,8 @@ type AdminResolutionCommand struct {
 	Principal                                      VerifiedPrincipal
 	Work                                           WorkFence
 	AttemptID, Action, Reason, EvidenceFingerprint string
+	JournalConfirmedAbsent, LateCallerExcluded     bool
+	LateCallerExclusionMethod, ProofReference      string
 	Now                                            time.Time
 }
 type ResolutionResult struct{ TargetUpdateID string }
