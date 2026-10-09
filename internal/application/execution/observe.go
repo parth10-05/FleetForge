@@ -15,6 +15,7 @@ type ObservationRepository interface {
 
 type ObservationTarget interface {
 	ObserveTask(context.Context, TaskObservationRequest) (Observation, error)
+	ObserveReboot(context.Context, RebootObservationRequest) (Observation, error)
 	ObserveInventory(context.Context, InventoryObservationRequest) (Observation, error)
 	ObserveHealth(context.Context, HealthObservationRequest) (Observation, error)
 }
@@ -62,6 +63,8 @@ func ObserveOnce(ctx context.Context, repository ObservationRepository, target O
 	switch workType {
 	case "TASK_OBSERVE":
 		observation, err = target.ObserveTask(ctx, TaskObservationRequest{Attempt: attempt})
+	case "REBOOT_OBSERVE":
+		observation, err = target.ObserveReboot(ctx, RebootObservationRequest{Attempt: attempt})
 	case "INVENTORY_OBSERVE":
 		observation, err = target.ObserveInventory(ctx, InventoryObservationRequest{Attempt: attempt})
 	case "HEALTH_OBSERVE":
@@ -100,10 +103,12 @@ func observationDecision(work WorkFence, observation Observation) (ObservationDe
 		state, _ := document["TaskState"].(string)
 		switch state {
 		case "Completed":
-			next = "INVENTORY_OBSERVE"
+			next = "REBOOT_OBSERVE"
 		case "Exception", "Killed":
 			next = "TERMINAL"
 		}
+	case ObservationReboot:
+		next = "INVENTORY_OBSERVE"
 	case ObservationInventory:
 		if !observation.ContradictsExpectedState {
 			next = "HEALTH_OBSERVE"

@@ -64,6 +64,7 @@ type ObservationKind string
 
 const (
 	ObservationTask      ObservationKind = "TASK"
+	ObservationReboot    ObservationKind = "REBOOT"
 	ObservationInventory ObservationKind = "INVENTORY"
 	ObservationHealth    ObservationKind = "HEALTH"
 )
@@ -76,6 +77,7 @@ type Observation struct {
 	Fresh, ContradictsExpectedState                                                        bool
 }
 type TaskObservationRequest struct{ Attempt AttemptSnapshot }
+type RebootObservationRequest struct{ Attempt AttemptSnapshot }
 type InventoryObservationRequest struct{ Attempt AttemptSnapshot }
 type HealthObservationRequest struct{ Attempt AttemptSnapshot }
 type ObservationDecision struct {
@@ -133,6 +135,7 @@ type RedfishExecutionPort interface {
 	Precheck(context.Context, PrecheckRequest) (PrecheckEvidence, error)
 	Submit(context.Context, SubmitRequest, io.Reader) SubmitResult
 	ObserveTask(context.Context, TaskObservationRequest) (Observation, error)
+	ObserveReboot(context.Context, RebootObservationRequest) (Observation, error)
 	ObserveInventory(context.Context, InventoryObservationRequest) (Observation, error)
 	ObserveHealth(context.Context, HealthObservationRequest) (Observation, error)
 }

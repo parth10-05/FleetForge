@@ -32,7 +32,7 @@ FROM due_work d JOIN submission_admissions s ON s.target_update_id=d.subject_id
 JOIN firmware_update_attempts a ON a.id=s.active_attempt_id JOIN target_updates tu ON tu.id=d.subject_id
 WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED'
 AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6
-AND d.work_type IN ('TASK_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status='ACCEPTED'
+AND d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status='ACCEPTED'
 FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(&attemptID, &updateID, &workType, &state, &epoch, &revision)
 	if err == pgx.ErrNoRows {
 		return fmt.Errorf("%w: claimed observation work no longer matches its fence", ErrLeaseConflict)
@@ -74,7 +74,7 @@ VALUES (md5($1)::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::jsonb,$8)`, "fleetforge.exe
 	if tag.RowsAffected() != 1 {
 		return fmt.Errorf("%w: observation work no longer claimed", ErrLeaseConflict)
 	}
-	if decision.NextWorkType == "INVENTORY_OBSERVE" || decision.NextWorkType == "HEALTH_OBSERVE" {
+	if decision.NextWorkType == "REBOOT_OBSERVE" || decision.NextWorkType == "INVENTORY_OBSERVE" || decision.NextWorkType == "HEALTH_OBSERVE" {
 		if _, err := tx.Exec(ctx, `INSERT INTO due_work (id,command_id,subject_type,subject_id,work_type,schema_version,not_before,expected_revision,expected_command_epoch)
 VALUES (md5($1)::uuid,md5($2)::uuid,'TARGET_UPDATE',$3::uuid,$4,1,$5,$6,$7)`, "fleetforge.execution.work/v1:"+attemptID+":"+decision.NextWorkType, "fleetforge.execution.command/v1:"+attemptID+":"+decision.NextWorkType, updateID, decision.NextWorkType, now.UTC(), revision+1, epoch); err != nil {
 			return fmt.Errorf("schedule execution observation: %w", err)
@@ -123,7 +123,9 @@ func validExecutionObservation(observation execution.Observation) bool {
 func validObservationRoute(workType, state, next string) bool {
 	switch workType {
 	case "TASK_OBSERVE":
-		return state == "UPDATE_ACCEPTED" && (next == retryObservationWork || next == "INVENTORY_OBSERVE" || next == "TERMINAL")
+		return state == "UPDATE_ACCEPTED" && (next == retryObservationWork || next == "REBOOT_OBSERVE" || next == "TERMINAL")
+	case "REBOOT_OBSERVE":
+		return state == "WAITING_REBOOT" && (next == retryObservationWork || next == "INVENTORY_OBSERVE" || next == "TERMINAL")
 	case "INVENTORY_OBSERVE":
 		return state == "WAITING_REBOOT" && (next == retryObservationWork || next == "HEALTH_OBSERVE" || next == "TERMINAL")
 	case "HEALTH_OBSERVE":
@@ -140,7 +142,7 @@ func observationNextState(workType, next string) string {
 	if workType == "TASK_OBSERVE" {
 		return "WAITING_REBOOT"
 	}
-	if workType == "INVENTORY_OBSERVE" {
+	if workType == "REBOOT_OBSERVE" || workType == "INVENTORY_OBSERVE" {
 		return "VERIFYING"
 	}
 	return "SUCCEEDED"

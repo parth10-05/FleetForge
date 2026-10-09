@@ -125,6 +125,25 @@ func (adapter Adapter) ObserveInventory(ctx context.Context, request execution.I
 	return adapter.observation(execution.ObservationInventory, request.Attempt, resource, document, received, inventory.Version != request.Attempt.ExpectedVersion), nil
 }
 
+// ObserveReboot proves only that the target's manager endpoint is reachable
+// again. Version and health are separately verified by their own later work
+// classes; reachability alone is never success evidence.
+func (adapter Adapter) ObserveReboot(ctx context.Context, request execution.RebootObservationRequest) (execution.Observation, error) {
+	const resource = "Managers/1"
+	document, received, err := adapter.getDocument(ctx, request.Attempt.TargetID, resource)
+	if err != nil {
+		return execution.Observation{}, err
+	}
+	var manager map[string]any
+	if err := json.Unmarshal(document, &manager); err != nil {
+		return execution.Observation{}, fmt.Errorf("decode Redfish reboot reachability: %w", err)
+	}
+	if manager == nil {
+		return execution.Observation{}, fmt.Errorf("decode Redfish reboot reachability: empty document")
+	}
+	return adapter.observation(execution.ObservationReboot, request.Attempt, resource, document, received, false), nil
+}
+
 func (adapter Adapter) ObserveHealth(ctx context.Context, request execution.HealthObservationRequest) (execution.Observation, error) {
 	const resource = "Managers/1"
 	document, received, err := adapter.getDocument(ctx, request.Attempt.TargetID, resource)

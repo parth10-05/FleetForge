@@ -75,6 +75,10 @@ func TestAdapterCollectsTaskInventoryAndHealthEvidence(t *testing.T) {
 	if err != nil || task.Kind != execution.ObservationTask || task.ContradictsExpectedState || task.EvidenceFingerprint == "" {
 		t.Fatalf("task=%+v err=%v", task, err)
 	}
+	reboot, err := adapter.ObserveReboot(context.Background(), execution.RebootObservationRequest{Attempt: attempt})
+	if err != nil || reboot.Kind != execution.ObservationReboot || reboot.ContradictsExpectedState {
+		t.Fatalf("reboot=%+v err=%v", reboot, err)
+	}
 	inventory, err := adapter.ObserveInventory(context.Background(), execution.InventoryObservationRequest{Attempt: attempt})
 	if err != nil || inventory.ContradictsExpectedState {
 		t.Fatalf("inventory=%+v err=%v", inventory, err)
