@@ -29,3 +29,11 @@ func TestVerifyIndependentJournalRejectsFalseProvenAbsent(t *testing.T) {
 		t.Fatal("false proven-absent resolution was not rejected")
 	}
 }
+
+func TestVerifyIndependentJournalRejectsNonCanonicalCheckpoint(t *testing.T) {
+	attempt := OracleAttempt{AttemptID: "attempt-1", IntendedUpdateID: "update-1", RequestFingerprint: oracleDigest("a")}
+	journal := AcceptanceJournal{RunID: "run-1", CheckpointHash: "not-a-checkpoint"}
+	if err := VerifyIndependentJournal([]OracleAttempt{attempt}, journal); err == nil {
+		t.Fatal("noncanonical checkpoint was accepted")
+	}
+}

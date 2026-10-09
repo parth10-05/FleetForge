@@ -1,6 +1,11 @@
 package execution
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+)
+
+var oracleSHA256 = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // OracleAttempt is the minimum durable FleetForge record required to compare
 // a firmware attempt against the independently retained simulator journal.
@@ -17,7 +22,7 @@ type OracleAttempt struct {
 // update, or a PROVEN_ABSENT record with any matching receive/accept evidence
 // invalidates the evidence set.
 func VerifyIndependentJournal(attempts []OracleAttempt, journal AcceptanceJournal) error {
-	if journal.RunID == "" || journal.CheckpointHash == "" {
+	if journal.RunID == "" || !oracleSHA256.MatchString(journal.CheckpointHash) {
 		return fmt.Errorf("oracle requires identified journal evidence")
 	}
 	byAttempt := make(map[string]OracleAttempt, len(attempts))
