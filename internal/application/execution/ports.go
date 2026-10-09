@@ -27,11 +27,42 @@ type PrecheckEvidence struct {
 	EvidenceFingerprint          string
 	ObservedAt                   time.Time
 }
+
+// CapacityLimit and AdmissionEnvelope carry the already-authorized,
+// immutable policy decision into the short persistence transaction after
+// precheck I/O completes. The execution worker cannot derive or relax these
+// values from target responses.
+type CapacityLimit struct {
+	Level, Key string
+	Limit      int64
+}
+type AdmissionEnvelope struct {
+	CampaignTargetID, ExpectedTargetState, NextTargetState  string
+	ResumeStep                                              *string
+	Step                                                    string
+	Global, Site, Rack                                      CapacityLimit
+	ReservationIDs                                          [3]string
+	ActorID, CorrelationID, CausationID, Action, ReasonCode string
+	AuditEventSequence                                      int64
+	OutboxEventID, OutboxEventType                          string
+	OutboxSchemaVersion                                     int
+	OutboxPayload                                           []byte
+	DueWorkID, DueWorkWorkType                              string
+	DueWorkSchemaVersion                                    int
+	DueWorkNotBefore                                        time.Time
+	DecisionInputID                                         string
+	DecisionSequence                                        int64
+	DecisionLogicalTime                                     time.Time
+	ReducerVersion, DecisionPolicyVersion                   string
+	NormalizedFacts                                         []byte
+	DecisionResult                                          string
+}
 type AdmissionCommand struct {
-	Work                                  WorkFence
-	Snapshot                              PrecheckSnapshot
-	Artifact                              ObjectIdentity
-	AttemptID, StepAttemptID, AdmissionID string
+	Work                                                      WorkFence
+	Snapshot                                                  PrecheckSnapshot
+	Artifact                                                  ObjectIdentity
+	AttemptID, StepAttemptID, AdmissionID, RequestFingerprint string
+	Envelope                                                  AdmissionEnvelope
 }
 type AdmissionResult struct{ AttemptID, SubmitWorkID, SubmitCommandID string }
 type AttemptSnapshot struct {

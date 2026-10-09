@@ -34,7 +34,8 @@ func precheckSnapshot() PrecheckSnapshot {
 }
 
 func precheckCommand() AdmissionCommand {
-	return AdmissionCommand{AttemptID: "attempt", StepAttemptID: "step", AdmissionID: "admission", Artifact: ObjectIdentity{Provider: "local", Container: "firmware", ObjectKey: "verified.bin", ObjectVersion: "v1", SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 3}}
+	now := time.Now().UTC()
+	return AdmissionCommand{AttemptID: "attempt", StepAttemptID: "step", AdmissionID: "admission", RequestFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Artifact: ObjectIdentity{Provider: "local", Container: "firmware", ObjectKey: "verified.bin", ObjectVersion: "v1", SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 3}, Envelope: AdmissionEnvelope{CampaignTargetID: "campaign-target", ExpectedTargetState: "PRECHECK", NextTargetState: "SUBMITTING", Step: "SUBMISSION", Global: CapacityLimit{Level: "GLOBAL", Key: "GLOBAL", Limit: 1}, Site: CapacityLimit{Level: "SITE", Key: "site-a", Limit: 1}, Rack: CapacityLimit{Level: "RACK", Key: "rack-a", Limit: 1}, ReservationIDs: [3]string{"global", "site", "rack"}, ActorID: "system", CorrelationID: "correlation", CausationID: "causation", Action: "SUBMISSION_ADMITTED", ReasonCode: "target.submission.authorized", OutboxEventID: "outbox", OutboxEventType: "target.submission_admitted", OutboxSchemaVersion: 1, OutboxPayload: []byte(`{"admitted":true}`), DueWorkID: "submit-work", DueWorkWorkType: "SUBMIT", DueWorkSchemaVersion: 1, DueWorkNotBefore: now, DecisionInputID: "decision", DecisionLogicalTime: now, ReducerVersion: "domain-v1", DecisionPolicyVersion: "policy-v1", NormalizedFacts: []byte(`{"eligible":true}`), DecisionResult: "SUBMITTING"}}
 }
 
 func TestPrecheckAndAdmitRequiresExactImmutableArtifact(t *testing.T) {

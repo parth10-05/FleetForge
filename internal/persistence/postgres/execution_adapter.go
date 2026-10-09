@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -16,6 +17,72 @@ import (
 type ExecutionAdapter struct {
 	Pool *pgxpool.Pool
 	Now  func() time.Time
+}
+
+// LoadPrecheck returns the frozen target-update identity only while an exact
+// PRECHECK due-work lease is held. It performs no target I/O and cannot be
+// reused after a lease, revision, or epoch change.
+func (adapter ExecutionAdapter) LoadPrecheck(ctx context.Context, work execution.WorkFence) (execution.PrecheckSnapshot, error) {
+	if adapter.Pool == nil || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 || work.DeliveryGeneration < 0 {
+		return execution.PrecheckSnapshot{}, fmt.Errorf("invalid execution precheck fence")
+	}
+	var snapshot execution.PrecheckSnapshot
+	err := adapter.Pool.QueryRow(ctx, `SELECT ct.target_id::text,ct.campaign_id::text,tu.id::text,ct.artifact_id::text,tu.expected_firmware_version,tu.command_epoch,tu.revision
+FROM due_work d
+JOIN target_updates tu ON tu.id=d.subject_id
+JOIN campaign_targets ct ON ct.id=tu.campaign_target_id
+WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED'
+AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6
+AND d.work_type='PRECHECK' AND tu.state='PRECHECK'`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(
+		&snapshot.TargetID, &snapshot.CampaignID, &snapshot.TargetUpdateID, &snapshot.ArtifactID, &snapshot.ExpectedVersion, &snapshot.CommandEpoch, &snapshot.Revision,
+	)
+	if err == pgx.ErrNoRows {
+		return execution.PrecheckSnapshot{}, fmt.Errorf("%w: no claimed precheck matches its fence", ErrLeaseConflict)
+	}
+	if err != nil {
+		return execution.PrecheckSnapshot{}, fmt.Errorf("load fenced firmware precheck: %w", err)
+	}
+	return snapshot, nil
+}
+
+// AdmitSubmission maps an already-authorized application envelope to the
+// single serializable admission transaction. It does not construct policy,
+// audit, capacity, or idempotency data from a target response.
+func (adapter ExecutionAdapter) AdmitSubmission(ctx context.Context, command execution.AdmissionCommand) (execution.AdmissionResult, error) {
+	if adapter.Pool == nil {
+		return execution.AdmissionResult{}, fmt.Errorf("execution admission requires a database pool")
+	}
+	request, err := admissionRequestFromExecution(command)
+	if err != nil {
+		return execution.AdmissionResult{}, err
+	}
+	if err := AdmitOperation(ctx, adapter.Pool, request); err != nil {
+		return execution.AdmissionResult{}, fmt.Errorf("admit fenced firmware submission: %w", err)
+	}
+	return execution.AdmissionResult{AttemptID: command.AttemptID, SubmitWorkID: command.Envelope.DueWorkID, SubmitCommandID: command.Work.CommandID}, nil
+}
+
+func admissionRequestFromExecution(command execution.AdmissionCommand) (AdmissionRequest, error) {
+	envelope := command.Envelope
+	snapshot := command.Snapshot
+	if command.Work.CommandID == "" || command.AttemptID == "" || command.StepAttemptID == "" || command.AdmissionID == "" || command.RequestFingerprint == "" || snapshot.CampaignID == "" || snapshot.TargetID == "" || snapshot.TargetUpdateID == "" || snapshot.ArtifactID == "" || snapshot.ExpectedVersion == "" || envelope.CampaignTargetID == "" {
+		return AdmissionRequest{}, fmt.Errorf("incomplete execution admission identity")
+	}
+	request := AdmissionRequest{
+		CampaignID: snapshot.CampaignID, CampaignTargetID: envelope.CampaignTargetID, TargetID: snapshot.TargetID, ArtifactID: snapshot.ArtifactID, TargetUpdateID: snapshot.TargetUpdateID,
+		ExpectedTargetRevision: command.Work.ExpectedRevision, CapturedCommandEpoch: snapshot.CommandEpoch, ExpectedTargetState: envelope.ExpectedTargetState, NextTargetState: envelope.NextTargetState, ResumeStep: envelope.ResumeStep,
+		CommandID: command.Work.CommandID, Step: envelope.Step, AdmissionID: command.AdmissionID, StepAttemptID: command.StepAttemptID,
+		Global: ScopeCapacity{Level: envelope.Global.Level, Key: envelope.Global.Key, Limit: envelope.Global.Limit}, Site: ScopeCapacity{Level: envelope.Site.Level, Key: envelope.Site.Key, Limit: envelope.Site.Limit}, Rack: ScopeCapacity{Level: envelope.Rack.Level, Key: envelope.Rack.Key, Limit: envelope.Rack.Limit}, ReservationIDs: envelope.ReservationIDs,
+		ActorID: envelope.ActorID, CorrelationID: envelope.CorrelationID, CausationID: envelope.CausationID, Action: envelope.Action, ReasonCode: envelope.ReasonCode, AuditEventSequence: envelope.AuditEventSequence,
+		OutboxEventID: envelope.OutboxEventID, OutboxEventType: envelope.OutboxEventType, OutboxSchemaVersion: envelope.OutboxSchemaVersion, OutboxPayload: json.RawMessage(envelope.OutboxPayload),
+		DueWorkID: envelope.DueWorkID, DueWorkWorkType: envelope.DueWorkWorkType, DueWorkSchemaVersion: envelope.DueWorkSchemaVersion, DueWorkNotBefore: envelope.DueWorkNotBefore,
+		DecisionInputID: envelope.DecisionInputID, DecisionSequence: envelope.DecisionSequence, DecisionLogicalTime: envelope.DecisionLogicalTime, ReducerVersion: envelope.ReducerVersion, DecisionPolicyVersion: envelope.DecisionPolicyVersion, NormalizedFacts: json.RawMessage(envelope.NormalizedFacts), DecisionResult: envelope.DecisionResult,
+		FirmwareAttempt: &FirmwareAttemptRequest{AttemptID: command.AttemptID, Provider: command.Artifact.Provider, Container: command.Artifact.Container, ObjectKey: command.Artifact.ObjectKey, ObjectVersion: command.Artifact.ObjectVersion, ObjectSize: command.Artifact.Size, SHA256Digest: command.Artifact.SHA256, ExpectedVersion: snapshot.ExpectedVersion, RequestFingerprint: command.RequestFingerprint},
+	}
+	if err := validateAdmissionRequest(request); err != nil {
+		return AdmissionRequest{}, fmt.Errorf("invalid execution admission envelope: %w", err)
+	}
+	return request, nil
 }
 
 // LoadOracleAttempts returns only the immutable identity and persisted
