@@ -109,6 +109,10 @@ func requeueObservation(ctx context.Context, tx pgx.Tx, work execution.WorkFence
 }
 
 func validExecutionObservation(observation execution.Observation) bool {
+	// Stale observations are durable diagnostic evidence. The application
+	// decision layer routes them back to the same safe-read work instead of
+	// advancing lifecycle state, so persistence must accept them for that
+	// bounded retry path.
 	if observation.TargetID == "" || observation.TargetUpdateID == "" || observation.AttemptID == "" || observation.ResourcePath == "" || observation.EvidenceFingerprint == "" || observation.ObservedAt.IsZero() || observation.ReceivedAt.IsZero() || len(observation.Data) == 0 || len(observation.Data) > 32768 {
 		return false
 	}

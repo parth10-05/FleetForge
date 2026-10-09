@@ -88,6 +88,13 @@ func observationDecision(work WorkFence, observation Observation) (ObservationDe
 	if err := json.Unmarshal(observation.Data, &document); err != nil {
 		return ObservationDecision{}, fmt.Errorf("decode normalized observation: %w", err)
 	}
+	// An observation is evidence only while it remains within the producer's
+	// configured freshness boundary. A stale task completion, inventory version,
+	// or health report must never advance this update; the current safe-read
+	// work is retried instead and remains unable to reach SUBMIT.
+	if !observation.Fresh {
+		return ObservationDecision{Work: work, Observation: observation, NextWorkType: next}, nil
+	}
 	switch observation.Kind {
 	case ObservationTask:
 		state, _ := document["TaskState"].(string)
