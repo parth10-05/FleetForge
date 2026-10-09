@@ -71,6 +71,13 @@ type DiscoveryWorker struct {
 	AllowedCIDRs []netip.Prefix
 	Credentials  map[string]syntheticcredentials.Credential
 }
+type ExecutionWorker struct {
+	Common
+	Root         string
+	Owner        string
+	AllowedCIDRs []netip.Prefix
+	Credentials  map[string]syntheticcredentials.Credential
+}
 
 // OrchestrationWorker is the bounded execution budget for P4 wakeup services.
 // It contains no provider credentials and grants no firmware submission power.
@@ -171,6 +178,33 @@ func LoadDiscoveryWorker() (DiscoveryWorker, error) {
 		return DiscoveryWorker{}, err
 	}
 	return DiscoveryWorker{Common: common, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
+}
+
+// LoadExecutionWorker grants only the exact local artifact store, explicit
+// synthetic target credentials, and explicit target-network allowlist needed
+// for one-shot firmware execution. It never receives simulator-admin secrets.
+func LoadExecutionWorker() (ExecutionWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return ExecutionWorker{}, err
+	}
+	root, err := requiredAbsolutePath(os.LookupEnv, objectStoreRootKey)
+	if err != nil {
+		return ExecutionWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_EXECUTION_WORKER_OWNER", "firmware-executor")
+	if len(owner) > 128 || strings.TrimSpace(owner) == "" {
+		return ExecutionWorker{}, &Error{Key: "FLEETFORGE_EXECUTION_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	allowedCIDRs, err := requiredCIDRs(os.LookupEnv, "FLEETFORGE_EXECUTION_ALLOWED_CIDRS")
+	if err != nil {
+		return ExecutionWorker{}, err
+	}
+	credentials, err := requiredSyntheticCredentials(os.LookupEnv, "FLEETFORGE_EXECUTION_CREDENTIALS_JSON")
+	if err != nil {
+		return ExecutionWorker{}, err
+	}
+	return ExecutionWorker{Common: common, Root: root, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
 }
 
 func LoadOrchestrationWorker() (OrchestrationWorker, error) {
