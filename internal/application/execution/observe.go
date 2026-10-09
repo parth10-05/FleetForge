@@ -19,6 +19,33 @@ type ObservationTarget interface {
 	ObserveHealth(context.Context, HealthObservationRequest) (Observation, error)
 }
 
+type ObservationWorkClaimer interface {
+	ClaimObservationWork(context.Context, string, string) (WorkFence, string, bool, error)
+}
+
+type ObservationWorker struct {
+	Claimer    ObservationWorkClaimer
+	Repository ObservationRepository
+	Target     ObservationTarget
+}
+
+// RunOnce claims at most one safe-read observation. The target port has no
+// submission method in this worker contract, making firmware side effects
+// structurally unavailable to this process.
+func (worker ObservationWorker) RunOnce(ctx context.Context, owner, leaseToken string) (bool, error) {
+	if worker.Claimer == nil || worker.Repository == nil || worker.Target == nil || owner == "" || leaseToken == "" {
+		return false, fmt.Errorf("invalid observation worker")
+	}
+	work, workType, claimed, err := worker.Claimer.ClaimObservationWork(ctx, owner, leaseToken)
+	if err != nil || !claimed {
+		return claimed, err
+	}
+	if err := ObserveOnce(ctx, worker.Repository, worker.Target, work, workType); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
 // ObserveOnce obtains exactly one evidence document and lets the repository
 // atomically persist it with the fenced lifecycle decision. It never submits
 // firmware and it never turns a missing/contradictory observation into retry

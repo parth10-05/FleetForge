@@ -62,6 +62,50 @@ WHERE id=$1::uuid AND work_type='SUBMIT' AND delivery_state='PENDING'`, work.Due
 	return work, true, nil
 }
 
+// ClaimObservationWork claims only safe read work. It is deliberately
+// separate from submission claims so an observation process cannot obtain a
+// target-side effect lease.
+func (adapter ExecutionAdapter) ClaimObservationWork(ctx context.Context, owner, leaseToken string) (execution.WorkFence, string, bool, error) {
+	if adapter.Pool == nil || owner == "" || leaseToken == "" {
+		return execution.WorkFence{}, "", false, fmt.Errorf("invalid execution observation claim")
+	}
+	now := time.Now().UTC()
+	if adapter.Now != nil {
+		now = adapter.Now().UTC()
+	}
+	tx, err := adapter.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return execution.WorkFence{}, "", false, fmt.Errorf("begin execution observation claim: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var work execution.WorkFence
+	var workType string
+	err = tx.QueryRow(ctx, `SELECT id::text,command_id::text,delivery_generation,expected_revision,expected_command_epoch,work_type
+FROM due_work WHERE work_type IN ('TASK_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND delivery_state='PENDING' AND not_before <= $1
+ORDER BY not_before,created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, now).Scan(&work.DueWorkID, &work.CommandID, &work.DeliveryGeneration, &work.ExpectedRevision, &work.ExpectedCommandEpoch, &workType)
+	if err == pgx.ErrNoRows {
+		if err := tx.Commit(ctx); err != nil {
+			return execution.WorkFence{}, "", false, classifyDueWorkError(err, "commit empty observation claim")
+		}
+		return execution.WorkFence{}, "", false, nil
+	}
+	if err != nil {
+		return execution.WorkFence{}, "", false, classifyDueWorkError(err, "lock execution observation work")
+	}
+	work.LeaseToken = leaseToken
+	tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='CLAIMED',lease_token=$2::uuid,lease_owner=$3,lease_expires_at=$4,updated_at=$5 WHERE id=$1::uuid AND delivery_state='PENDING'`, work.DueWorkID, leaseToken, owner, now.Add(time.Minute), now)
+	if err != nil {
+		return execution.WorkFence{}, "", false, classifyDueWorkError(err, "claim execution observation work")
+	}
+	if tag.RowsAffected() != 1 {
+		return execution.WorkFence{}, "", false, fmt.Errorf("%w: execution observation work changed", ErrLeaseConflict)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return execution.WorkFence{}, "", false, classifyDueWorkError(err, "commit execution observation claim")
+	}
+	return work, workType, true, nil
+}
+
 func (adapter ExecutionAdapter) LoadAttempt(ctx context.Context, work execution.WorkFence) (execution.AttemptSnapshot, error) {
 	if adapter.Pool == nil || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 || work.DeliveryGeneration < 0 {
 		return execution.AttemptSnapshot{}, fmt.Errorf("invalid execution attempt fence")
