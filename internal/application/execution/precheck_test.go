@@ -34,7 +34,17 @@ func precheckSnapshot() PrecheckSnapshot {
 }
 
 func precheckCommand() AdmissionCommand {
-	return AdmissionCommand{AttemptID: "attempt", StepAttemptID: "step", AdmissionID: "admission"}
+	return AdmissionCommand{AttemptID: "attempt", StepAttemptID: "step", AdmissionID: "admission", Artifact: ObjectIdentity{Provider: "local", Container: "firmware", ObjectKey: "verified.bin", ObjectVersion: "v1", SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 3}}
+}
+
+func TestPrecheckAndAdmitRequiresExactImmutableArtifact(t *testing.T) {
+	repository := &precheckRepositoryStub{snapshot: precheckSnapshot()}
+	evidence := PrecheckEvidence{CurrentVersion: "1.0", Capable: true, Healthy: true, Compatible: true, EvidenceFingerprint: "sha256:evidence", ObservedAt: time.Now().UTC()}
+	command := precheckCommand()
+	command.Artifact.ObjectVersion = ""
+	if _, _, err := PrecheckAndAdmit(context.Background(), repository, precheckTargetStub{evidence: evidence}, precheckWork(), command, "credential"); err == nil || repository.admissions != 0 {
+		t.Fatalf("err=%v admissions=%d", err, repository.admissions)
+	}
 }
 
 func TestPrecheckAndAdmitRequiresEligibleFreshEvidence(t *testing.T) {
