@@ -8,16 +8,16 @@ import (
 // SubmitOnce is deliberately single-shot. Any retry decision belongs to a
 // later durable reconciliation transaction; this coordinator never infers
 // absence from a transport error and never calls the target twice.
-func SubmitOnce(ctx context.Context, repository ExecutionRepository, artifacts ExactArtifactReader, target RedfishExecutionPort, work WorkFence, attemptID, actionPath string) error {
-	if repository == nil || artifacts == nil || target == nil || attemptID == "" || actionPath == "" || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.DeliveryGeneration < 0 || work.ExpectedRevision < 0 {
+func SubmitOnce(ctx context.Context, repository SubmitRepository, artifacts ExactArtifactReader, target SubmitTarget, work WorkFence, actionPath string) error {
+	if repository == nil || artifacts == nil || target == nil || actionPath == "" || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.DeliveryGeneration < 0 || work.ExpectedRevision < 0 {
 		return fmt.Errorf("invalid submit execution request")
 	}
-	attempt, err := repository.LoadAttempt(ctx, attemptID)
+	attempt, err := repository.LoadAttempt(ctx, work)
 	if err != nil {
 		return fmt.Errorf("load immutable attempt: %w", err)
 	}
-	if attempt.AttemptID != attemptID {
-		return fmt.Errorf("attempt identity mismatch")
+	if attempt.AttemptID == "" || attempt.AdmittedRevision != work.ExpectedRevision || attempt.CommandEpoch < 0 {
+		return fmt.Errorf("attempt does not match submit fence")
 	}
 	stream, err := OpenVerifiedExact(ctx, artifacts, attempt.Artifact)
 	if err != nil {

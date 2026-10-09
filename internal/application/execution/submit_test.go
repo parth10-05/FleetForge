@@ -19,7 +19,7 @@ func (r *submitRepo) LoadPrecheck(context.Context, WorkFence) (PrecheckSnapshot,
 func (r *submitRepo) AdmitSubmission(context.Context, AdmissionCommand) (AdmissionResult, error) {
 	panic("unused")
 }
-func (r *submitRepo) LoadAttempt(context.Context, string) (AttemptSnapshot, error) {
+func (r *submitRepo) LoadAttempt(context.Context, WorkFence) (AttemptSnapshot, error) {
 	return r.attempt, nil
 }
 func (r *submitRepo) CommitSubmitResult(context.Context, WorkFence, SubmitResult) error {
@@ -65,7 +65,7 @@ func TestSubmitOnceCallsTargetAndCommitsOneClosedResult(t *testing.T) {
 	reader := exactReaderFunc(func(context.Context, ObjectIdentity) (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader([]byte("abc"))), nil
 	})
-	err := SubmitOnce(context.Background(), repo, reader, target, WorkFence{DueWorkID: "work", CommandID: "command", LeaseToken: "lease"}, "attempt", "/redfish/v1/UpdateService/Actions/UpdateService.SimpleUpdate")
+	err := SubmitOnce(context.Background(), repo, reader, target, WorkFence{DueWorkID: "work", CommandID: "command", LeaseToken: "lease"}, "/redfish/v1/UpdateService/Actions/UpdateService.SimpleUpdate")
 	if err != nil || target.calls != 1 || repo.committed != 1 {
 		t.Fatalf("err=%v calls=%d commits=%d", err, target.calls, repo.committed)
 	}

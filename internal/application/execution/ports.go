@@ -106,12 +106,24 @@ type ResolutionResult struct{ TargetUpdateID string }
 type ExecutionRepository interface {
 	LoadPrecheck(context.Context, WorkFence) (PrecheckSnapshot, error)
 	AdmitSubmission(context.Context, AdmissionCommand) (AdmissionResult, error)
-	LoadAttempt(context.Context, string) (AttemptSnapshot, error)
+	LoadAttempt(context.Context, WorkFence) (AttemptSnapshot, error)
 	CommitSubmitResult(context.Context, WorkFence, SubmitResult) error
 	CommitObservation(context.Context, WorkFence, ObservationDecision) error
 	LoadReconciliation(context.Context, WorkFence) (ReconciliationSnapshot, error)
 	CommitReconciliation(context.Context, WorkFence, ReconciliationDecision) error
 	ResolveAttention(context.Context, AdminResolutionCommand) (ResolutionResult, error)
+}
+
+// SubmitRepository is intentionally narrower than ExecutionRepository. The
+// one-shot side-effect coordinator must have no access to retry, observation,
+// or administrative-resolution operations.
+type SubmitRepository interface {
+	LoadAttempt(context.Context, WorkFence) (AttemptSnapshot, error)
+	CommitSubmitResult(context.Context, WorkFence, SubmitResult) error
+}
+
+type SubmitTarget interface {
+	Submit(context.Context, SubmitRequest, io.Reader) SubmitResult
 }
 type RedfishExecutionPort interface {
 	Precheck(context.Context, PrecheckRequest) (PrecheckEvidence, error)
