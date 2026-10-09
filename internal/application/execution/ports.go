@@ -85,6 +85,7 @@ type ObservationDecision struct {
 type ReconciliationSnapshot struct{ Attempt AttemptSnapshot }
 type ReconciliationDecision struct {
 	Work                                                          WorkFence
+	Outcome                                                       string
 	ProvenAbsent, LateCallerExcluded                              bool
 	EvidenceFingerprint, JournalRunID, CheckpointHash, ReasonCode string
 	JournalSequenceStart, JournalSequenceEnd                      int64

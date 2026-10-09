@@ -38,15 +38,18 @@ func EvaluateAcceptanceJournal(attempt AttemptSnapshot, journal AcceptanceJourna
 	}
 	decision.JournalSequenceStart, decision.JournalSequenceEnd = first, last
 	if foundAcceptance {
+		decision.Outcome = reconciliationAdopt
 		decision.ReasonCode = "execution.journal.accepted"
 		return decision, reconciliationAdopt, nil
 	}
 	if foundRequest {
+		decision.Outcome = reconciliationNeedsAttention
 		decision.ReasonCode = "execution.journal.request_without_acceptance"
 		return decision, reconciliationNeedsAttention, nil
 	}
 	// Do not infer absence here. A late worker holding a preexisting delivery
 	// may append after this checkpoint; an independent exclusion mechanism is
 	// required before ProvenAbsent/LateCallerExcluded can ever be true.
+	decision.Outcome = reconciliationNeedsAttention
 	return decision, reconciliationNeedsAttention, nil
 }
