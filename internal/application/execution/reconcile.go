@@ -1,9 +1,61 @@
 package execution
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 )
+
+// ReconciliationRepository intentionally contains no admission or submission
+// operation. Reconciliation can adopt independent evidence or retain
+// attention, but it can never issue another target-side request.
+type ReconciliationRepository interface {
+	LoadReconciliation(context.Context, WorkFence) (ReconciliationSnapshot, error)
+	CommitReconciliation(context.Context, WorkFence, ReconciliationDecision) error
+}
+
+type ReconciliationWorkClaimer interface {
+	ClaimReconciliationWork(context.Context, string, string) (WorkFence, bool, error)
+}
+
+type ReconciliationWorker struct {
+	Claimer    ReconciliationWorkClaimer
+	Repository ReconciliationRepository
+	Journal    IndependentAcceptanceReader
+	RunID      string
+	Now        func() time.Time
+}
+
+// RunOnce consumes at most one ambiguous-attempt work item. It can only
+// reconcile independently retained evidence; retry authorization remains an
+// explicit, separately verified administrator decision.
+func (worker ReconciliationWorker) RunOnce(ctx context.Context, owner, leaseToken string) (bool, error) {
+	if worker.Claimer == nil || worker.Repository == nil || worker.Journal == nil || worker.RunID == "" || worker.Now == nil || owner == "" || leaseToken == "" {
+		return false, fmt.Errorf("invalid reconciliation worker")
+	}
+	work, claimed, err := worker.Claimer.ClaimReconciliationWork(ctx, owner, leaseToken)
+	if err != nil || !claimed {
+		return claimed, err
+	}
+	snapshot, err := worker.Repository.LoadReconciliation(ctx, work)
+	if err != nil {
+		return true, fmt.Errorf("load fenced reconciliation attempt: %w", err)
+	}
+	journal, err := worker.Journal.ReadAcceptance(ctx, worker.RunID, snapshot.Attempt.TargetID, snapshot.Attempt.StartedAt, worker.Now().UTC())
+	if err != nil {
+		return true, fmt.Errorf("read independent acceptance journal: %w", err)
+	}
+	decision, _, err := EvaluateAcceptanceJournal(snapshot.Attempt, journal)
+	if err != nil {
+		return true, err
+	}
+	decision.Work = work
+	if err := worker.Repository.CommitReconciliation(ctx, work, decision); err != nil {
+		return true, fmt.Errorf("commit reconciliation decision: %w", err)
+	}
+	return true, nil
+}
 
 const (
 	reconciliationAdopt          = "ADOPT"
