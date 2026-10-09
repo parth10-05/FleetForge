@@ -18,6 +18,38 @@ type ExecutionAdapter struct {
 	Now  func() time.Time
 }
 
+// LoadOracleAttempts returns only the immutable identity and persisted
+// absence-proof status required by the independent execution journal checker.
+// It has no capability to claim work, mutate attempts, or call a target.
+func (adapter ExecutionAdapter) LoadOracleAttempts(ctx context.Context) ([]execution.OracleAttempt, error) {
+	if adapter.Pool == nil {
+		return nil, fmt.Errorf("execution oracle requires a database pool")
+	}
+	rows, err := adapter.Pool.Query(ctx, `SELECT a.id::text,a.target_update_id::text,a.request_fingerprint,
+CASE WHEN a.status='PROVEN_ABSENT' THEN 'PROVEN_ABSENT' ELSE '' END,
+COALESCE((SELECT r.late_caller_excluded FROM ambiguity_resolutions r
+          WHERE r.attempt_id=a.id AND r.outcome='PROVEN_ABSENT'
+          ORDER BY r.created_at DESC,r.id DESC LIMIT 1),false)
+FROM firmware_update_attempts a
+ORDER BY a.target_update_id,a.started_at,a.id`)
+	if err != nil {
+		return nil, fmt.Errorf("query durable oracle attempts: %w", err)
+	}
+	defer rows.Close()
+	attempts := []execution.OracleAttempt{}
+	for rows.Next() {
+		var attempt execution.OracleAttempt
+		if err := rows.Scan(&attempt.AttemptID, &attempt.IntendedUpdateID, &attempt.RequestFingerprint, &attempt.Resolution, &attempt.LateCallerExcluded); err != nil {
+			return nil, fmt.Errorf("scan durable oracle attempt: %w", err)
+		}
+		attempts = append(attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read durable oracle attempts: %w", err)
+	}
+	return attempts, nil
+}
+
 // ClaimSubmitWork claims the oldest eligible firmware submission only. A
 // separate method avoids claiming arbitrary due work and deciding its type
 // after a lease is already held.

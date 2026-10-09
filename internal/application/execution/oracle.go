@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 )
@@ -14,6 +15,26 @@ var oracleSHA256 = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 type OracleAttempt struct {
 	AttemptID, IntendedUpdateID, RequestFingerprint, Resolution string
 	LateCallerExcluded                                          bool
+}
+
+// OracleAttemptSource exposes immutable FleetForge execution evidence to an
+// independent checker. It intentionally has no mutation, admission, or target
+// capability: checking a simulator journal cannot affect an in-flight update.
+type OracleAttemptSource interface {
+	LoadOracleAttempts(context.Context) ([]OracleAttempt, error)
+}
+
+// VerifyPersistedJournal joins retained simulator evidence to the durable
+// attempt/admission record before evaluating the safety invariants.
+func VerifyPersistedJournal(ctx context.Context, source OracleAttemptSource, journal AcceptanceJournal) error {
+	if source == nil {
+		return fmt.Errorf("oracle attempt source is required")
+	}
+	attempts, err := source.LoadOracleAttempts(ctx)
+	if err != nil {
+		return fmt.Errorf("load durable oracle attempts: %w", err)
+	}
+	return VerifyIndependentJournal(attempts, journal)
 }
 
 // VerifyIndependentJournal rejects safety claims that conflict with the
