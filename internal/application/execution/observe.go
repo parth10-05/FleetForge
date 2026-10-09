@@ -52,7 +52,7 @@ func (worker ObservationWorker) RunOnce(ctx context.Context, owner, leaseToken s
 // firmware and it never turns a missing/contradictory observation into retry
 // authority for a firmware request.
 func ObserveOnce(ctx context.Context, repository ObservationRepository, target ObservationTarget, work WorkFence, workType string) error {
-	if repository == nil || target == nil || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 {
+	if repository == nil || target == nil || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 || work.DeliveryGeneration < 0 {
 		return fmt.Errorf("invalid observation execution request")
 	}
 	attempt, err := repository.LoadAttempt(ctx, work)

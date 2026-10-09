@@ -1,9 +1,42 @@
 package execution
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
+
+type observationRepositoryStub struct{}
+
+func (observationRepositoryStub) LoadAttempt(context.Context, WorkFence) (AttemptSnapshot, error) {
+	return AttemptSnapshot{}, errors.New("must not load attempt")
+}
+func (observationRepositoryStub) CommitObservation(context.Context, WorkFence, ObservationDecision) error {
+	return errors.New("must not commit observation")
+}
+
+type observationTargetStub struct{}
+
+func (observationTargetStub) ObserveTask(context.Context, TaskObservationRequest) (Observation, error) {
+	return Observation{}, nil
+}
+func (observationTargetStub) ObserveReboot(context.Context, RebootObservationRequest) (Observation, error) {
+	return Observation{}, nil
+}
+func (observationTargetStub) ObserveInventory(context.Context, InventoryObservationRequest) (Observation, error) {
+	return Observation{}, nil
+}
+func (observationTargetStub) ObserveHealth(context.Context, HealthObservationRequest) (Observation, error) {
+	return Observation{}, nil
+}
+
+func TestObserveOnceRejectsInvalidDeliveryGenerationBeforeTargetRead(t *testing.T) {
+	err := ObserveOnce(context.Background(), observationRepositoryStub{}, observationTargetStub{}, WorkFence{DueWorkID: "work", CommandID: "command", LeaseToken: "lease", ExpectedRevision: 0, DeliveryGeneration: -1}, "TASK_OBSERVE")
+	if err == nil {
+		t.Fatal("invalid delivery generation was accepted")
+	}
+}
 
 func TestObservationDecisionRoutesOnlyEvidenceLifecycleSteps(t *testing.T) {
 	now := time.Now().UTC()
