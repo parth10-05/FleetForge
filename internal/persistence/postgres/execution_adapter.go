@@ -173,6 +173,17 @@ AND ((d.work_type='SUBMIT' AND a.status='ADMITTED') OR (d.work_type IN ('TASK_OB
 	return attempt, nil
 }
 
+// LoadReconciliation exposes only the exact immutable attempt snapshot needed
+// by the reconciliation role. It reuses LoadAttempt's claimed-work fence and
+// grants no path to submit or admit firmware.
+func (adapter ExecutionAdapter) LoadReconciliation(ctx context.Context, work execution.WorkFence) (execution.ReconciliationSnapshot, error) {
+	attempt, err := adapter.LoadAttempt(ctx, work)
+	if err != nil {
+		return execution.ReconciliationSnapshot{}, err
+	}
+	return execution.ReconciliationSnapshot{Attempt: attempt}, nil
+}
+
 func (adapter ExecutionAdapter) CommitSubmitResult(ctx context.Context, work execution.WorkFence, result execution.SubmitResult) error {
 	if adapter.Pool == nil {
 		return fmt.Errorf("invalid execution adapter")

@@ -72,6 +72,16 @@ func TestLoadDiscoveryWorkerRedactsCredentialInput(t *testing.T) {
 	}
 }
 
+func TestLoadReconciliationWorkerUsesOnlyRetainedJournalConfiguration(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv("FLEETFORGE_RECONCILIATION_JOURNAL_PATH", t.TempDir()+"/journal.jsonl")
+	t.Setenv("FLEETFORGE_RECONCILIATION_RUN_ID", "simulation-run-1")
+	loaded, err := LoadReconciliationWorker()
+	if err != nil || loaded.Owner == "" || loaded.JournalPath == "" || loaded.RunID != "simulation-run-1" {
+		t.Fatalf("LoadReconciliationWorker()=%#v err=%v", loaded, err)
+	}
+}
+
 func TestLoadObjectStoreRedactsInvalidSecret(t *testing.T) {
 	const secret = "credential-that-must-not-appear"
 	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")

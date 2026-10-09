@@ -79,6 +79,13 @@ type ExecutionWorker struct {
 	Credentials  map[string]syntheticcredentials.Credential
 }
 
+// ReconciliationWorker can read retained simulator evidence but has neither
+// device credentials nor artifact-store access.
+type ReconciliationWorker struct {
+	Common
+	Owner, JournalPath, RunID string
+}
+
 // OrchestrationWorker is the bounded execution budget for P4 wakeup services.
 // It contains no provider credentials and grants no firmware submission power.
 type OrchestrationWorker struct {
@@ -205,6 +212,29 @@ func LoadExecutionWorker() (ExecutionWorker, error) {
 		return ExecutionWorker{}, err
 	}
 	return ExecutionWorker{Common: common, Root: root, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
+}
+
+// LoadReconciliationWorker grants the minimum configuration necessary to
+// inspect an independently retained simulator journal. The run identity is
+// explicit so a worker cannot silently reconcile against an arbitrary run.
+func LoadReconciliationWorker() (ReconciliationWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return ReconciliationWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_RECONCILIATION_WORKER_OWNER", "firmware-reconciler")
+	if strings.TrimSpace(owner) == "" || len(owner) > 128 {
+		return ReconciliationWorker{}, &Error{Key: "FLEETFORGE_RECONCILIATION_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	journalPath, err := requiredAbsolutePath(os.LookupEnv, "FLEETFORGE_RECONCILIATION_JOURNAL_PATH")
+	if err != nil {
+		return ReconciliationWorker{}, err
+	}
+	runID := optional(os.LookupEnv, "FLEETFORGE_RECONCILIATION_RUN_ID", "")
+	if strings.TrimSpace(runID) == "" || len(runID) > 128 || strings.ContainsAny(runID, "\r\n\t") {
+		return ReconciliationWorker{}, &Error{Key: "FLEETFORGE_RECONCILIATION_RUN_ID", Reason: "must be nonempty, single-line, and at most 128 bytes"}
+	}
+	return ReconciliationWorker{Common: common, Owner: owner, JournalPath: journalPath, RunID: runID}, nil
 }
 
 func LoadOrchestrationWorker() (OrchestrationWorker, error) {
