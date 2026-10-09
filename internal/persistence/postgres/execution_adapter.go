@@ -68,6 +68,16 @@ func admissionRequestFromExecution(command execution.AdmissionCommand) (Admissio
 	if command.Work.CommandID == "" || command.AttemptID == "" || command.StepAttemptID == "" || command.AdmissionID == "" || command.RequestFingerprint == "" || snapshot.CampaignID == "" || snapshot.TargetID == "" || snapshot.TargetUpdateID == "" || snapshot.ArtifactID == "" || snapshot.ExpectedVersion == "" || envelope.CampaignTargetID == "" {
 		return AdmissionRequest{}, fmt.Errorf("incomplete execution admission identity")
 	}
+	precheckEvidence, err := json.Marshal(map[string]any{
+		"current_version":      command.PrecheckEvidence.CurrentVersion,
+		"capable":              command.PrecheckEvidence.Capable,
+		"healthy":              command.PrecheckEvidence.Healthy,
+		"compatible":           command.PrecheckEvidence.Compatible,
+		"evidence_fingerprint": command.PrecheckEvidence.EvidenceFingerprint,
+	})
+	if err != nil {
+		return AdmissionRequest{}, fmt.Errorf("encode firmware precheck evidence: %w", err)
+	}
 	request := AdmissionRequest{
 		CampaignID: snapshot.CampaignID, CampaignTargetID: envelope.CampaignTargetID, TargetID: snapshot.TargetID, ArtifactID: snapshot.ArtifactID, TargetUpdateID: snapshot.TargetUpdateID,
 		ExpectedTargetRevision: command.Work.ExpectedRevision, CapturedCommandEpoch: snapshot.CommandEpoch, ExpectedTargetState: envelope.ExpectedTargetState, NextTargetState: envelope.NextTargetState, ResumeStep: envelope.ResumeStep,
@@ -77,7 +87,7 @@ func admissionRequestFromExecution(command execution.AdmissionCommand) (Admissio
 		OutboxEventID: envelope.OutboxEventID, OutboxEventType: envelope.OutboxEventType, OutboxSchemaVersion: envelope.OutboxSchemaVersion, OutboxPayload: json.RawMessage(envelope.OutboxPayload),
 		DueWorkID: envelope.DueWorkID, DueWorkWorkType: envelope.DueWorkWorkType, DueWorkSchemaVersion: envelope.DueWorkSchemaVersion, DueWorkNotBefore: envelope.DueWorkNotBefore,
 		DecisionInputID: envelope.DecisionInputID, DecisionSequence: envelope.DecisionSequence, DecisionLogicalTime: envelope.DecisionLogicalTime, ReducerVersion: envelope.ReducerVersion, DecisionPolicyVersion: envelope.DecisionPolicyVersion, NormalizedFacts: json.RawMessage(envelope.NormalizedFacts), DecisionResult: envelope.DecisionResult,
-		FirmwareAttempt: &FirmwareAttemptRequest{AttemptID: command.AttemptID, Provider: command.Artifact.Provider, Container: command.Artifact.Container, ObjectKey: command.Artifact.ObjectKey, ObjectVersion: command.Artifact.ObjectVersion, ObjectSize: command.Artifact.Size, SHA256Digest: command.Artifact.SHA256, ExpectedVersion: snapshot.ExpectedVersion, RequestFingerprint: command.RequestFingerprint},
+		FirmwareAttempt: &FirmwareAttemptRequest{AttemptID: command.AttemptID, Provider: command.Artifact.Provider, Container: command.Artifact.Container, ObjectKey: command.Artifact.ObjectKey, ObjectVersion: command.Artifact.ObjectVersion, ObjectSize: command.Artifact.Size, SHA256Digest: command.Artifact.SHA256, ExpectedVersion: snapshot.ExpectedVersion, RequestFingerprint: command.RequestFingerprint}, PrecheckEvidence: precheckEvidence, PrecheckObservedAt: command.PrecheckEvidence.ObservedAt,
 	}
 	if err := validateAdmissionRequest(request); err != nil {
 		return AdmissionRequest{}, fmt.Errorf("invalid execution admission envelope: %w", err)

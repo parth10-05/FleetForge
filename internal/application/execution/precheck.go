@@ -43,7 +43,7 @@ func PrecheckAndAdmit(ctx context.Context, repository PrecheckRepository, target
 	if !evidence.Capable || !evidence.Healthy || !evidence.Compatible {
 		return AdmissionResult{}, evidence, fmt.Errorf("target is ineligible for firmware admission")
 	}
-	command.Work, command.Snapshot = work, snapshot
+	command.Work, command.Snapshot, command.PrecheckEvidence = work, snapshot, evidence
 	result, err := repository.AdmitSubmission(ctx, command)
 	if err != nil {
 		return AdmissionResult{}, evidence, fmt.Errorf("persist firmware admission: %w", err)

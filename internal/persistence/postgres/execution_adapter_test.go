@@ -16,6 +16,7 @@ func TestAdmissionRequestFromExecutionPreservesAuthorizedEnvelope(t *testing.T) 
 		StepAttemptID:      "step-attempt",
 		AdmissionID:        "admission",
 		RequestFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		PrecheckEvidence:   execution.PrecheckEvidence{CurrentVersion: "1.0", Capable: true, Healthy: true, Compatible: true, EvidenceFingerprint: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", ObservedAt: now},
 		Artifact:           execution.ObjectIdentity{Provider: "local", Container: "firmware", ObjectKey: "verified.bin", ObjectVersion: "v1", SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 3},
 		Envelope: execution.AdmissionEnvelope{
 			CampaignTargetID: "campaign-target", ExpectedTargetState: "PRECHECK", NextTargetState: "SUBMITTING", Step: "SUBMISSION",
@@ -31,7 +32,7 @@ func TestAdmissionRequestFromExecutionPreservesAuthorizedEnvelope(t *testing.T) 
 	if request.CommandID != command.Work.CommandID || request.ExpectedTargetRevision != command.Work.ExpectedRevision || request.CapturedCommandEpoch != command.Snapshot.CommandEpoch || request.CampaignTargetID != command.Envelope.CampaignTargetID || request.FirmwareAttempt == nil || request.FirmwareAttempt.RequestFingerprint != command.RequestFingerprint || request.FirmwareAttempt.SHA256Digest != command.Artifact.SHA256 {
 		t.Fatalf("mapped request lost fenced or immutable identity: %#v", request)
 	}
-	if request.Global.Key != "GLOBAL" || request.Site.Key != "site-a" || request.Rack.Key != "rack-a" || string(request.OutboxPayload) != `{"admitted":true}` || string(request.NormalizedFacts) != `{"eligible":true}` {
+	if request.Global.Key != "GLOBAL" || request.Site.Key != "site-a" || request.Rack.Key != "rack-a" || string(request.OutboxPayload) != `{"admitted":true}` || string(request.NormalizedFacts) != `{"eligible":true}` || request.PrecheckObservedAt != now || len(request.PrecheckEvidence) == 0 {
 		t.Fatalf("mapped request lost authorized envelope: %#v", request)
 	}
 }

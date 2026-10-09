@@ -9,13 +9,15 @@ import (
 type precheckRepositoryStub struct {
 	snapshot   PrecheckSnapshot
 	admissions int
+	command    AdmissionCommand
 }
 
 func (s *precheckRepositoryStub) LoadPrecheck(context.Context, WorkFence) (PrecheckSnapshot, error) {
 	return s.snapshot, nil
 }
-func (s *precheckRepositoryStub) AdmitSubmission(context.Context, AdmissionCommand) (AdmissionResult, error) {
+func (s *precheckRepositoryStub) AdmitSubmission(_ context.Context, command AdmissionCommand) (AdmissionResult, error) {
 	s.admissions++
+	s.command = command
 	return AdmissionResult{AttemptID: "attempt"}, nil
 }
 
@@ -54,6 +56,9 @@ func TestPrecheckAndAdmitRequiresEligibleFreshEvidence(t *testing.T) {
 	result, _, err := PrecheckAndAdmit(context.Background(), repository, precheckTargetStub{evidence: evidence}, precheckWork(), precheckCommand(), "credential")
 	if err != nil || result.AttemptID != "attempt" || repository.admissions != 1 {
 		t.Fatalf("result=%+v err=%v admissions=%d", result, err, repository.admissions)
+	}
+	if repository.command.PrecheckEvidence.EvidenceFingerprint != evidence.EvidenceFingerprint || repository.command.PrecheckEvidence.ObservedAt != evidence.ObservedAt {
+		t.Fatalf("admission command did not retain precheck evidence: %#v", repository.command.PrecheckEvidence)
 	}
 }
 

@@ -57,6 +57,8 @@ type AdmissionRequest struct {
 	NormalizedFacts                                                    json.RawMessage
 	DecisionResult                                                     string
 	FirmwareAttempt                                                    *FirmwareAttemptRequest
+	PrecheckEvidence                                                   json.RawMessage
+	PrecheckObservedAt                                                 time.Time
 }
 
 // FirmwareAttemptRequest is the immutable, target-facing identity captured
@@ -123,6 +125,13 @@ func validateAdmissionRequest(r AdmissionRequest) error {
 		if err := validateFirmwareAttemptRequest(*r.FirmwareAttempt); err != nil {
 			return err
 		}
+		if r.PrecheckObservedAt.IsZero() || len(r.PrecheckEvidence) == 0 || len(r.PrecheckEvidence) > 32768 || !json.Valid(r.PrecheckEvidence) {
+			return fmt.Errorf("firmware admission requires valid precheck evidence")
+		}
+		var evidence map[string]any
+		if err := json.Unmarshal(r.PrecheckEvidence, &evidence); err != nil || evidence == nil {
+			return fmt.Errorf("firmware admission precheck evidence must be an object")
+		}
 	}
 	return nil
 }
@@ -171,6 +180,12 @@ WHERE ct.id=$1::uuid AND ct.campaign_id=$2::uuid AND ct.target_id=$3::uuid AND c
 	}
 	if enrolledCampaign != r.CampaignID {
 		return fmt.Errorf("%w: target belongs to another campaign", ErrAdmissionBlocked)
+	}
+	if r.FirmwareAttempt != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO device_observations (id,target_id,target_update_id,kind,observed_at,received_at,normalized_data)
+VALUES (md5($1)::uuid,$2::uuid,$3::uuid,'FIRMWARE_PRECHECK',$4,$5,$6::jsonb)`, "fleetforge.firmware-precheck/v1:"+r.AdmissionID, r.TargetID, r.TargetUpdateID, r.PrecheckObservedAt.UTC(), r.DecisionLogicalTime.UTC(), r.PrecheckEvidence); err != nil {
+			return classifyAdmissionWrite(err, "persist firmware precheck evidence")
+		}
 	}
 
 	for _, scope := range []struct {

@@ -62,6 +62,7 @@ type AdmissionCommand struct {
 	Snapshot                                                  PrecheckSnapshot
 	Artifact                                                  ObjectIdentity
 	AttemptID, StepAttemptID, AdmissionID, RequestFingerprint string
+	PrecheckEvidence                                          PrecheckEvidence
 	Envelope                                                  AdmissionEnvelope
 }
 type AdmissionResult struct{ AttemptID, SubmitWorkID, SubmitCommandID string }

@@ -4,6 +4,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -18,6 +19,10 @@ func TestFencedSubmitResultAcceptedSchedulesObservationExactlyOnce(t *testing.T)
 	req := executionAdmissionRequest(fixture, "5101")
 	if err := persistence.AdmitOperation(ctx, pool, req); err != nil {
 		t.Fatal(err)
+	}
+	var precheckEvidenceCount int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM device_observations WHERE target_update_id=$1::uuid AND kind='FIRMWARE_PRECHECK'", fixture.targetUpdateID).Scan(&precheckEvidenceCount); err != nil || precheckEvidenceCount != 1 {
+		t.Fatalf("precheck evidence count=%d err=%v, want one durable observation", precheckEvidenceCount, err)
 	}
 	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
 	work := claimExecutionSubmitWork(t, ctx, adapter, "00000000-0000-0000-5101-000000000099")
@@ -122,6 +127,8 @@ func executionAdmissionRequest(f ownershipFixture, suffix string) persistence.Ad
 	req := admissionRequest(f, suffix)
 	base := "00000000-0000-0000-" + suffix + "-0000000000"
 	req.FirmwareAttempt = &persistence.FirmwareAttemptRequest{AttemptID: base + "10", Provider: "local-versioned-v1", Container: "firmware", ObjectKey: "verified/firmware.bin", ObjectVersion: "v1", ObjectSize: 4096, SHA256Digest: executionDigest("a"), ExpectedVersion: "1.2.3", RequestFingerprint: executionDigest("b")}
+	req.PrecheckEvidence = json.RawMessage(`{"current_version":"1.0.0","capable":true,"healthy":true,"compatible":true,"evidence_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`)
+	req.PrecheckObservedAt = time.Now().UTC()
 	return req
 }
 
