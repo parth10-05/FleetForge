@@ -176,19 +176,20 @@ func RepairExpiredDueWork(ctx context.Context, pool *pgxpool.Pool, now time.Time
 		return nil, fmt.Errorf("begin due-work repair: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	rows, err := tx.Query(ctx, `SELECT id, work_type, discovery_attempts FROM due_work WHERE delivery_state='CLAIMED' AND lease_expires_at <= $1 ORDER BY lease_expires_at, created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED`, now, limit)
+	rows, err := tx.Query(ctx, `SELECT id, subject_id::text, work_type, discovery_attempts FROM due_work WHERE delivery_state='CLAIMED' AND lease_expires_at <= $1 ORDER BY lease_expires_at, created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED`, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("lock expired due work: %w", err)
 	}
 	type expiredDueWork struct {
 		id                string
+		subjectID         string
 		workType          string
 		discoveryAttempts int
 	}
 	expired := []expiredDueWork{}
 	for rows.Next() {
 		var item expiredDueWork
-		if err := rows.Scan(&item.id, &item.workType, &item.discoveryAttempts); err != nil {
+		if err := rows.Scan(&item.id, &item.subjectID, &item.workType, &item.discoveryAttempts); err != nil {
 			return nil, fmt.Errorf("scan expired due work: %w", err)
 		}
 		expired = append(expired, item)
@@ -215,12 +216,56 @@ func RepairExpiredDueWork(ctx context.Context, pool *pgxpool.Pool, now time.Time
 		if _, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state=$2, lease_token=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=$3 WHERE id=$1::uuid AND delivery_state='CLAIMED'`, work.id, state, now); err != nil {
 			return nil, classifyDueWorkError(err, "repair expired due work")
 		}
+		if work.workType == "SUBMIT" {
+			if err := repairExpiredFirmwareSubmit(ctx, tx, work.subjectID, work.id, now); err != nil {
+				return nil, err
+			}
+		}
 		ids = append(ids, work.id)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, classifyDueWorkError(err, "commit due-work repair")
 	}
 	return ids, nil
+}
+
+// repairExpiredFirmwareSubmit converts the possible side effect into durable
+// ambiguity and schedules reconciliation. No path from this repair inserts a
+// SUBMIT work row or changes operation reservation ownership.
+func repairExpiredFirmwareSubmit(ctx context.Context, tx pgx.Tx, updateID, oldWorkID string, now time.Time) error {
+	var attemptID string
+	var revision, epoch int64
+	err := tx.QueryRow(ctx, `SELECT a.id::text,tu.revision,a.captured_command_epoch
+FROM submission_admissions s JOIN firmware_update_attempts a ON a.id=s.active_attempt_id
+JOIN target_updates tu ON tu.id=s.target_update_id
+WHERE s.target_update_id=$1::uuid AND a.status='ADMITTED' FOR UPDATE OF s,a,tu`, updateID).Scan(&attemptID, &revision, &epoch)
+	if err == pgx.ErrNoRows {
+		// Pre-P05 submit work has no attempt record and retains its historical
+		// reconciliation-required behavior without inventing new evidence.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock expired firmware submit: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `UPDATE firmware_update_attempts SET status='AMBIGUOUS',result_class='UNSAFE_RESPONSE',transport_finished_at=$2 WHERE id=$1::uuid AND status='ADMITTED'`, attemptID, now)
+	if err != nil {
+		return fmt.Errorf("mark expired firmware submit ambiguous: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("%w: expired firmware attempt changed", ErrLeaseConflict)
+	}
+	tag, err = tx.Exec(ctx, `UPDATE target_updates SET state='NEEDS_ATTENTION',resume_step=NULL,revision=revision+1,updated_at=$2 WHERE id=$1::uuid AND revision=$3 AND command_epoch=$4`, updateID, now, revision, epoch)
+	if err != nil {
+		return fmt.Errorf("advance expired firmware submit: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("%w: expired firmware target changed", ErrLeaseConflict)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO due_work (id,command_id,subject_type,subject_id,work_type,schema_version,not_before,expected_revision,expected_command_epoch)
+VALUES (md5($1)::uuid,md5($2)::uuid,'TARGET_UPDATE',$3::uuid,'AMBIGUITY_RECONCILE',1,$4,$5,$6)`, "fleetforge.execution.work/v1:"+attemptID+":AMBIGUITY_RECONCILE:expired:"+oldWorkID, "fleetforge.execution.command/v1:"+attemptID+":AMBIGUITY_RECONCILE:expired:"+oldWorkID, updateID, now, revision+1, epoch); err != nil {
+		return fmt.Errorf("schedule expired firmware reconciliation: %w", err)
+	}
+	return nil
 }
 
 // pgx exposes a command tag interface; keep it local to avoid leaking pgx

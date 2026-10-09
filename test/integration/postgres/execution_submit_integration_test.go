@@ -76,6 +76,39 @@ WHERE a.id=$1::uuid`, req.FirmwareAttempt.AttemptID).Scan(&status, &state, &resu
 	}
 }
 
+func TestExpiredSubmitBecomesReconciliationOnly(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	req := executionAdmissionRequest(fixture, "5103")
+	if err := persistence.AdmitOperation(ctx, pool, req); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := pool.Exec(ctx, `UPDATE due_work SET delivery_state='CLAIMED',lease_token='00000000-0000-4000-8000-000000000001',lease_owner='dead-worker',lease_expires_at=$2 WHERE id=$1::uuid`, req.DueWorkID, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := persistence.RepairExpiredDueWork(ctx, pool, now, 10); err != nil {
+		t.Fatal(err)
+	}
+	var oldState, attemptState, updateState, nextType string
+	if err := pool.QueryRow(ctx, `SELECT d.delivery_state,a.status,tu.state,n.work_type
+FROM due_work d JOIN target_updates tu ON tu.id=d.subject_id
+JOIN submission_admissions s ON s.target_update_id=tu.id
+JOIN firmware_update_attempts a ON a.id=s.active_attempt_id
+JOIN due_work n ON n.subject_id=tu.id AND n.work_type='AMBIGUITY_RECONCILE'
+WHERE d.id=$1::uuid`, req.DueWorkID).Scan(&oldState, &attemptState, &updateState, &nextType); err != nil {
+		t.Fatal(err)
+	}
+	if oldState != "RECONCILIATION_REQUIRED" || attemptState != "AMBIGUOUS" || updateState != "NEEDS_ATTENTION" || nextType != "AMBIGUITY_RECONCILE" {
+		t.Fatalf("old=%s attempt=%s update=%s next=%s", oldState, attemptState, updateState, nextType)
+	}
+	var pendingSubmits int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&pendingSubmits); err != nil || pendingSubmits != 0 {
+		t.Fatalf("pending submits=%d err=%v", pendingSubmits, err)
+	}
+}
+
 func claimExecutionSubmitWork(t *testing.T, ctx context.Context, adapter persistence.ExecutionAdapter, token string) execution.WorkFence {
 	t.Helper()
 	work, claimed, err := adapter.ClaimSubmitWork(ctx, "execution-test", token)
