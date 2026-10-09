@@ -126,7 +126,7 @@ func claimExecutionSubmitWork(t *testing.T, ctx context.Context, adapter persist
 func executionAdmissionRequest(f ownershipFixture, suffix string) persistence.AdmissionRequest {
 	req := admissionRequest(f, suffix)
 	base := "00000000-0000-0000-" + suffix + "-0000000000"
-	req.FirmwareAttempt = &persistence.FirmwareAttemptRequest{AttemptID: base + "10", Provider: "local-versioned-v1", Container: "firmware", ObjectKey: "verified/firmware.bin", ObjectVersion: "v1", ObjectSize: 4096, SHA256Digest: executionDigest("a"), ExpectedVersion: "1.2.3", RequestFingerprint: executionDigest("b")}
+	req.FirmwareAttempt = &persistence.FirmwareAttemptRequest{AttemptID: base + "10", Provider: "local-versioned-v1", Container: "firmware", ObjectKey: "verified/firmware.bin", ObjectVersion: "v1", ObjectSize: 4096, SHA256Digest: executionDigest("a"), ExpectedVersion: "1.2.3", RequestFingerprint: executionDigest("a")}
 	req.PrecheckEvidence = json.RawMessage(`{"current_version":"1.0.0","capable":true,"healthy":true,"compatible":true,"evidence_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`)
 	req.PrecheckObservedAt = time.Now().UTC()
 	return req

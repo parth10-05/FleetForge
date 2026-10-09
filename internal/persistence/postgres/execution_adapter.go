@@ -65,7 +65,7 @@ func (adapter ExecutionAdapter) AdmitSubmission(ctx context.Context, command exe
 func admissionRequestFromExecution(command execution.AdmissionCommand) (AdmissionRequest, error) {
 	envelope := command.Envelope
 	snapshot := command.Snapshot
-	if command.Work.CommandID == "" || command.AttemptID == "" || command.StepAttemptID == "" || command.AdmissionID == "" || command.RequestFingerprint == "" || snapshot.CampaignID == "" || snapshot.TargetID == "" || snapshot.TargetUpdateID == "" || snapshot.ArtifactID == "" || snapshot.ExpectedVersion == "" || envelope.CampaignTargetID == "" {
+	if command.Work.CommandID == "" || command.AttemptID == "" || command.StepAttemptID == "" || command.AdmissionID == "" || command.RequestFingerprint == "" || command.RequestFingerprint != command.Artifact.SHA256 || snapshot.CampaignID == "" || snapshot.TargetID == "" || snapshot.TargetUpdateID == "" || snapshot.ArtifactID == "" || snapshot.ExpectedVersion == "" || envelope.CampaignTargetID == "" {
 		return AdmissionRequest{}, fmt.Errorf("incomplete execution admission identity")
 	}
 	precheckEvidence, err := json.Marshal(map[string]any{

@@ -37,7 +37,7 @@ func precheckSnapshot() PrecheckSnapshot {
 
 func precheckCommand() AdmissionCommand {
 	now := time.Now().UTC()
-	return AdmissionCommand{AttemptID: "attempt", StepAttemptID: "step", AdmissionID: "admission", RequestFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Artifact: ObjectIdentity{Provider: "local", Container: "firmware", ObjectKey: "verified.bin", ObjectVersion: "v1", SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 3}, Envelope: AdmissionEnvelope{CampaignTargetID: "campaign-target", ExpectedTargetState: "PRECHECK", NextTargetState: "SUBMITTING", Step: "SUBMISSION", Global: CapacityLimit{Level: "GLOBAL", Key: "GLOBAL", Limit: 1}, Site: CapacityLimit{Level: "SITE", Key: "site-a", Limit: 1}, Rack: CapacityLimit{Level: "RACK", Key: "rack-a", Limit: 1}, ReservationIDs: [3]string{"global", "site", "rack"}, ActorID: "system", CorrelationID: "correlation", CausationID: "causation", Action: "SUBMISSION_ADMITTED", ReasonCode: "target.submission.authorized", OutboxEventID: "outbox", OutboxEventType: "target.submission_admitted", OutboxSchemaVersion: 1, OutboxPayload: []byte(`{"admitted":true}`), DueWorkID: "submit-work", DueWorkWorkType: "SUBMIT", DueWorkSchemaVersion: 1, DueWorkNotBefore: now, DecisionInputID: "decision", DecisionLogicalTime: now, ReducerVersion: "domain-v1", DecisionPolicyVersion: "policy-v1", NormalizedFacts: []byte(`{"eligible":true}`), DecisionResult: "SUBMITTING"}}
+	return AdmissionCommand{AttemptID: "attempt", StepAttemptID: "step", AdmissionID: "admission", RequestFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Artifact: ObjectIdentity{Provider: "local", Container: "firmware", ObjectKey: "verified.bin", ObjectVersion: "v1", SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 3}, Envelope: AdmissionEnvelope{CampaignTargetID: "campaign-target", ExpectedTargetState: "PRECHECK", NextTargetState: "SUBMITTING", Step: "SUBMISSION", Global: CapacityLimit{Level: "GLOBAL", Key: "GLOBAL", Limit: 1}, Site: CapacityLimit{Level: "SITE", Key: "site-a", Limit: 1}, Rack: CapacityLimit{Level: "RACK", Key: "rack-a", Limit: 1}, ReservationIDs: [3]string{"global", "site", "rack"}, ActorID: "system", CorrelationID: "correlation", CausationID: "causation", Action: "SUBMISSION_ADMITTED", ReasonCode: "target.submission.authorized", OutboxEventID: "outbox", OutboxEventType: "target.submission_admitted", OutboxSchemaVersion: 1, OutboxPayload: []byte(`{"admitted":true}`), DueWorkID: "submit-work", DueWorkWorkType: "SUBMIT", DueWorkSchemaVersion: 1, DueWorkNotBefore: now, DecisionInputID: "decision", DecisionLogicalTime: now, ReducerVersion: "domain-v1", DecisionPolicyVersion: "policy-v1", NormalizedFacts: []byte(`{"eligible":true}`), DecisionResult: "SUBMITTING"}}
 }
 
 func TestPrecheckAndAdmitRequiresExactImmutableArtifact(t *testing.T) {
@@ -45,6 +45,16 @@ func TestPrecheckAndAdmitRequiresExactImmutableArtifact(t *testing.T) {
 	evidence := PrecheckEvidence{CurrentVersion: "1.0", Capable: true, Healthy: true, Compatible: true, EvidenceFingerprint: "sha256:evidence", ObservedAt: time.Now().UTC()}
 	command := precheckCommand()
 	command.Artifact.ObjectVersion = ""
+	if _, _, err := PrecheckAndAdmit(context.Background(), repository, precheckTargetStub{evidence: evidence}, precheckWork(), command, "credential"); err == nil || repository.admissions != 0 {
+		t.Fatalf("err=%v admissions=%d", err, repository.admissions)
+	}
+}
+
+func TestPrecheckAndAdmitRequiresJournalMatchableRequestFingerprint(t *testing.T) {
+	repository := &precheckRepositoryStub{snapshot: precheckSnapshot()}
+	evidence := PrecheckEvidence{CurrentVersion: "1.0", Capable: true, Healthy: true, Compatible: true, EvidenceFingerprint: "sha256:evidence", ObservedAt: time.Now().UTC()}
+	command := precheckCommand()
+	command.RequestFingerprint = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	if _, _, err := PrecheckAndAdmit(context.Background(), repository, precheckTargetStub{evidence: evidence}, precheckWork(), command, "credential"); err == nil || repository.admissions != 0 {
 		t.Fatalf("err=%v admissions=%d", err, repository.admissions)
 	}

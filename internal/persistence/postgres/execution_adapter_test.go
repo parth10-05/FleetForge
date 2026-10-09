@@ -15,7 +15,7 @@ func TestAdmissionRequestFromExecutionPreservesAuthorizedEnvelope(t *testing.T) 
 		AttemptID:          "attempt",
 		StepAttemptID:      "step-attempt",
 		AdmissionID:        "admission",
-		RequestFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		RequestFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		PrecheckEvidence:   execution.PrecheckEvidence{CurrentVersion: "1.0", Capable: true, Healthy: true, Compatible: true, EvidenceFingerprint: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", ObservedAt: now},
 		Artifact:           execution.ObjectIdentity{Provider: "local", Container: "firmware", ObjectKey: "verified.bin", ObjectVersion: "v1", SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 3},
 		Envelope: execution.AdmissionEnvelope{
@@ -34,5 +34,23 @@ func TestAdmissionRequestFromExecutionPreservesAuthorizedEnvelope(t *testing.T) 
 	}
 	if request.Global.Key != "GLOBAL" || request.Site.Key != "site-a" || request.Rack.Key != "rack-a" || string(request.OutboxPayload) != `{"admitted":true}` || string(request.NormalizedFacts) != `{"eligible":true}` || request.PrecheckObservedAt != now || len(request.PrecheckEvidence) == 0 {
 		t.Fatalf("mapped request lost authorized envelope: %#v", request)
+	}
+}
+
+func TestAdmissionRequestFromExecutionRejectsUnmatchableRequestFingerprint(t *testing.T) {
+	now := time.Now().UTC()
+	command := execution.AdmissionCommand{
+		Work:               execution.WorkFence{CommandID: "command", ExpectedRevision: 4},
+		Snapshot:           execution.PrecheckSnapshot{CampaignID: "campaign", TargetID: "target", TargetUpdateID: "update", ArtifactID: "artifact", ExpectedVersion: "2.0", CommandEpoch: 7},
+		AttemptID:          "attempt",
+		StepAttemptID:      "step-attempt",
+		AdmissionID:        "admission",
+		RequestFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		PrecheckEvidence:   execution.PrecheckEvidence{CurrentVersion: "1.0", Capable: true, Healthy: true, Compatible: true, EvidenceFingerprint: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", ObservedAt: now},
+		Artifact:           execution.ObjectIdentity{Provider: "local", Container: "firmware", ObjectKey: "verified.bin", ObjectVersion: "v1", SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 3},
+		Envelope:           execution.AdmissionEnvelope{CampaignTargetID: "campaign-target"},
+	}
+	if _, err := admissionRequestFromExecution(command); err == nil {
+		t.Fatal("unmatchable request fingerprint was accepted")
 	}
 }

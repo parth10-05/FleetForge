@@ -20,7 +20,7 @@ type PrecheckTarget interface {
 // never holds a database transaction while calling the target, and it never
 // converts a stale/ineligible/already-current response into a submission.
 func PrecheckAndAdmit(ctx context.Context, repository PrecheckRepository, target PrecheckTarget, work WorkFence, command AdmissionCommand, credentialReference string) (AdmissionResult, PrecheckEvidence, error) {
-	if repository == nil || target == nil || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 || work.DeliveryGeneration < 0 || credentialReference == "" || command.AttemptID == "" || command.StepAttemptID == "" || command.AdmissionID == "" || command.RequestFingerprint == "" || command.Artifact.Provider == "" || command.Artifact.Container == "" || command.Artifact.ObjectKey == "" || command.Artifact.ObjectVersion == "" || command.Artifact.SHA256 == "" || command.Artifact.Size <= 0 || !validAdmissionEnvelope(command.Envelope) {
+	if repository == nil || target == nil || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 || work.DeliveryGeneration < 0 || credentialReference == "" || command.AttemptID == "" || command.StepAttemptID == "" || command.AdmissionID == "" || command.RequestFingerprint == "" || command.RequestFingerprint != command.Artifact.SHA256 || command.Artifact.Provider == "" || command.Artifact.Container == "" || command.Artifact.ObjectKey == "" || command.Artifact.ObjectVersion == "" || command.Artifact.SHA256 == "" || command.Artifact.Size <= 0 || !validAdmissionEnvelope(command.Envelope) {
 		return AdmissionResult{}, PrecheckEvidence{}, fmt.Errorf("invalid precheck admission request")
 	}
 	snapshot, err := repository.LoadPrecheck(ctx, work)
