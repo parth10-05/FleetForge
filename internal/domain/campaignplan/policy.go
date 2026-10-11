@@ -118,20 +118,13 @@ func validLimits(limits Limits, count uint64) bool {
 	return limits.Global > 0 && limits.Site > 0 && limits.Rack > 0 && limits.Rack <= limits.Site && limits.Site <= limits.Global && limits.Global <= count
 }
 func validChecks(checks []string) bool {
-	if len(checks) == 0 || len(checks) > 32 {
+	// V1 has one contract-tested post-update health probe. Rejecting unknown
+	// names is safer than accepting a frozen policy that the worker cannot
+	// collect and then silently marking it healthy.
+	if len(checks) != 1 || checks[0] != "boot" {
 		return false
 	}
-	seen := make(map[string]struct{}, len(checks))
-	for _, check := range checks {
-		if !visible(check, 128) {
-			return false
-		}
-		if _, exists := seen[check]; exists {
-			return false
-		}
-		seen[check] = struct{}{}
-	}
-	return true
+	return visible(checks[0], 128)
 }
 func validMaintenance(window MaintenanceWindow) bool {
 	if !visible(window.Timezone, 64) || len(window.Weekdays) == 0 || len(window.Weekdays) > 7 || window.StartMinute >= 1440 || window.EndMinute >= 1440 || window.StartMinute == window.EndMinute {

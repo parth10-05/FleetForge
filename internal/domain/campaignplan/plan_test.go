@@ -126,7 +126,7 @@ func TestBuildAlwaysAssignsEveryGeneratedCandidateOnce(t *testing.T) {
 }
 
 func validPolicy(canary Size) Policy {
-	return Policy{Version: PolicyVersionV1, Canary: canary, Limits: Limits{Global: 1, Site: 1, Rack: 1}, FailureBudget: Fraction{Numerator: 1, Denominator: 4}, ExpectedFirmwareVersion: "v2", RequiredHealthChecks: []string{"reachable", "inventory"}, Maintenance: MaintenanceWindow{Timezone: "UTC", Weekdays: []int{1, 2}, StartMinute: 60, EndMinute: 120}, MaximumDurationSeconds: 3600, RetryBudget: 3, ObservationWindowSecond: 300, ObservationEverySecond: 60, ObservationFreshSecond: 120, GovernanceID: "change-42"}
+	return Policy{Version: PolicyVersionV1, Canary: canary, Limits: Limits{Global: 1, Site: 1, Rack: 1}, FailureBudget: Fraction{Numerator: 1, Denominator: 4}, ExpectedFirmwareVersion: "v2", RequiredHealthChecks: []string{"boot"}, Maintenance: MaintenanceWindow{Timezone: "UTC", Weekdays: []int{1, 2}, StartMinute: 60, EndMinute: 120}, MaximumDurationSeconds: 3600, RetryBudget: 3, ObservationWindowSecond: 300, ObservationEverySecond: 60, ObservationFreshSecond: 120, GovernanceID: "change-42"}
 }
 func candidate(t testing.TB, rawID, site, rack string) Candidate {
 	t.Helper()

@@ -26,15 +26,15 @@ func CommitObservation(ctx context.Context, pool *pgxpool.Pool, work execution.W
 		return fmt.Errorf("begin execution observation: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	var attemptID, updateID, workType, state string
+	var attemptID, updateID, campaignTargetID, workType, state string
 	var epoch, revision int64
-	err = tx.QueryRow(ctx, `SELECT a.id::text,a.target_update_id::text,d.work_type,tu.state,a.captured_command_epoch,tu.revision
+	err = tx.QueryRow(ctx, `SELECT a.id::text,a.target_update_id::text,tu.campaign_target_id::text,d.work_type,tu.state,a.captured_command_epoch,tu.revision
 FROM due_work d JOIN submission_admissions s ON s.target_update_id=d.subject_id
 JOIN firmware_update_attempts a ON a.id=s.active_attempt_id JOIN target_updates tu ON tu.id=d.subject_id
 WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED'
 AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6
 AND d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status='ACCEPTED'
-FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(&attemptID, &updateID, &workType, &state, &epoch, &revision)
+FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(&attemptID, &updateID, &campaignTargetID, &workType, &state, &epoch, &revision)
 	if err == pgx.ErrNoRows {
 		return fmt.Errorf("%w: claimed observation work no longer matches its fence", ErrLeaseConflict)
 	}
@@ -51,6 +51,12 @@ FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID, work.DeliveryGeneration
 VALUES (md5($1)::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::jsonb,$8)`, "fleetforge.execution-observation/v1:"+work.DueWorkID+":"+fmt.Sprint(work.DeliveryGeneration), decision.Observation.TargetID, updateID, decision.Observation.Kind, decision.Observation.ObservedAt.UTC(), decision.Observation.ReceivedAt.UTC(), decision.Observation.Data, decision.Observation.ResourcePath)
 	if err != nil {
 		return fmt.Errorf("persist execution observation: %w", err)
+	}
+	if workType == "HEALTH_OBSERVE" && decision.NextWorkType == "SUCCEEDED" {
+		if _, err = tx.Exec(ctx, `INSERT INTO campaign_health_evidence (id,campaign_target_id,check_name,scheduled_at,observed_at,passed,observation_id)
+VALUES (md5($1)::uuid,$2::uuid,'boot',$3,$3,true,md5($4)::uuid) ON CONFLICT (campaign_target_id,check_name,scheduled_at) DO NOTHING`, "fleetforge.execution-health/v1:"+attemptID+":"+fmt.Sprint(work.DeliveryGeneration), campaignTargetID, decision.Observation.ObservedAt.UTC(), "fleetforge.execution-observation/v1:"+work.DueWorkID+":"+fmt.Sprint(work.DeliveryGeneration)); err != nil {
+			return fmt.Errorf("persist required boot health evidence: %w", err)
+		}
 	}
 	if decision.NextWorkType == retryObservationWork {
 		return requeueObservation(ctx, tx, work, now)
