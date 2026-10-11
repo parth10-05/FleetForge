@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -75,8 +76,9 @@ VALUES (md5($1)::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::jsonb,$8)`, "fleetforge.exe
 		return fmt.Errorf("%w: observation work no longer claimed", ErrLeaseConflict)
 	}
 	if decision.NextWorkType == "REBOOT_OBSERVE" || decision.NextWorkType == "INVENTORY_OBSERVE" || decision.NextWorkType == "HEALTH_OBSERVE" {
+		notBefore := now.Add(observationDelay(attemptID+":"+decision.NextWorkType, 0))
 		if _, err := tx.Exec(ctx, `INSERT INTO due_work (id,command_id,subject_type,subject_id,work_type,schema_version,not_before,expected_revision,expected_command_epoch)
-VALUES (md5($1)::uuid,md5($2)::uuid,'TARGET_UPDATE',$3::uuid,$4,1,$5,$6,$7)`, "fleetforge.execution.work/v1:"+attemptID+":"+decision.NextWorkType, "fleetforge.execution.command/v1:"+attemptID+":"+decision.NextWorkType, updateID, decision.NextWorkType, now.UTC(), revision+1, epoch); err != nil {
+VALUES (md5($1)::uuid,md5($2)::uuid,'TARGET_UPDATE',$3::uuid,$4,1,$5,$6,$7)`, "fleetforge.execution.work/v1:"+attemptID+":"+decision.NextWorkType, "fleetforge.execution.command/v1:"+attemptID+":"+decision.NextWorkType, updateID, decision.NextWorkType, notBefore, revision+1, epoch); err != nil {
 			return fmt.Errorf("schedule execution observation: %w", err)
 		}
 	}
@@ -95,7 +97,8 @@ func (adapter ExecutionAdapter) CommitObservation(ctx context.Context, work exec
 }
 
 func requeueObservation(ctx context.Context, tx pgx.Tx, work execution.WorkFence, now time.Time) error {
-	tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='PENDING',not_before=$5,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$6 WHERE id=$1::uuid AND command_id=$2::uuid AND delivery_generation=$3 AND delivery_state='CLAIMED' AND lease_token=$4::uuid`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, now.Add(10*time.Second), now)
+	retryAt := now.Add(observationDelay(work.DueWorkID, work.DeliveryGeneration))
+	tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='PENDING',not_before=$5,lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$6 WHERE id=$1::uuid AND command_id=$2::uuid AND delivery_generation=$3 AND delivery_state='CLAIMED' AND lease_token=$4::uuid`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, retryAt, now)
 	if err != nil {
 		return classifyDueWorkError(err, "requeue execution observation")
 	}
@@ -106,6 +109,16 @@ func requeueObservation(ctx context.Context, tx pgx.Tx, work execution.WorkFence
 		return classifyDueWorkError(err, "commit observation requeue")
 	}
 	return nil
+}
+
+// observationDelay gives each durable observation path a stable delay in the
+// five-to-ten-second interval. It spreads target reads without relying on
+// process-local randomness; after a worker restart the same fenced work keeps
+// the same schedule and cannot become a submission retry.
+func observationDelay(identity string, generation int64) time.Duration {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(fmt.Sprintf("%s:%d", identity, generation)))
+	return 5*time.Second + time.Duration(hash.Sum32()%5001)*time.Millisecond
 }
 
 func validExecutionObservation(observation execution.Observation) bool {

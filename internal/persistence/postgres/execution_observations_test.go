@@ -1,6 +1,9 @@
 package postgres
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestObservationRoutesRespectSeparatedRebootAndVersionStages(t *testing.T) {
 	cases := []struct {
@@ -17,5 +20,18 @@ func TestObservationRoutesRespectSeparatedRebootAndVersionStages(t *testing.T) {
 		if got := validObservationRoute(testCase.workType, testCase.state, testCase.next); got != testCase.valid {
 			t.Fatalf("validObservationRoute(%q,%q,%q)=%t, want %t", testCase.workType, testCase.state, testCase.next, got, testCase.valid)
 		}
+	}
+}
+
+func TestObservationDelayIsStableAndBounded(t *testing.T) {
+	first := observationDelay("attempt-a:TASK_OBSERVE", 2)
+	if again := observationDelay("attempt-a:TASK_OBSERVE", 2); again != first {
+		t.Fatalf("observation delay must be stable: %s != %s", first, again)
+	}
+	if first < 5*time.Second || first > 10*time.Second {
+		t.Fatalf("observation delay %s is outside [5s,10s]", first)
+	}
+	if next := observationDelay("attempt-a:TASK_OBSERVE", 3); next == first {
+		t.Fatalf("generation must contribute to durable retry jitter")
 	}
 }
