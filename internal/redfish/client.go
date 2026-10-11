@@ -30,6 +30,7 @@ const (
 	ErrorUnreachable     ErrorKind = "unreachable"
 	ErrorRateLimited     ErrorKind = "rate_limited"
 	ErrorMalformed       ErrorKind = "malformed"
+	ErrorNotFound        ErrorKind = "not_found"
 	ErrorUnsupported     ErrorKind = "unsupported"
 	ErrorTransient       ErrorKind = "transient_server"
 	ErrorTimeout         ErrorKind = "timeout"
@@ -182,6 +183,9 @@ func (client *Client) getDocument(ctx context.Context, address TargetAddress, re
 	}
 	if response.StatusCode >= 500 && response.StatusCode <= 599 {
 		return nil, DiscoveryError{Kind: ErrorTransient, err: ErrUnexpectedStatus}
+	}
+	if response.StatusCode == http.StatusNotFound {
+		return nil, DiscoveryError{Kind: ErrorNotFound, err: ErrUnexpectedStatus}
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		return nil, DiscoveryError{Kind: ErrorUnsupported, err: fmt.Errorf("%w: %d", ErrUnexpectedStatus, response.StatusCode)}

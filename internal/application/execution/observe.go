@@ -104,6 +104,11 @@ func observationDecision(work WorkFence, observation Observation) (ObservationDe
 		switch state {
 		case "Completed":
 			next = "REBOOT_OBSERVE"
+		case "Missing":
+			// A task may be garbage-collected during reboot. Its disappearance
+			// is diagnostic evidence only, so defer to authoritative inventory
+			// verification rather than retrying submission or declaring success.
+			next = "INVENTORY_OBSERVE"
 		case "Exception", "Killed":
 			next = "TERMINAL"
 		}

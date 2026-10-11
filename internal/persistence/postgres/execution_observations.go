@@ -136,7 +136,7 @@ func validExecutionObservation(observation execution.Observation) bool {
 func validObservationRoute(workType, state, next string) bool {
 	switch workType {
 	case "TASK_OBSERVE":
-		return state == "UPDATE_ACCEPTED" && (next == retryObservationWork || next == "REBOOT_OBSERVE" || next == "TERMINAL")
+		return state == "UPDATE_ACCEPTED" && (next == retryObservationWork || next == "REBOOT_OBSERVE" || next == "INVENTORY_OBSERVE" || next == "TERMINAL")
 	case "REBOOT_OBSERVE":
 		return state == "WAITING_REBOOT" && (next == retryObservationWork || next == "INVENTORY_OBSERVE" || next == "TERMINAL")
 	case "INVENTORY_OBSERVE":
@@ -152,7 +152,7 @@ func observationNextState(workType, next string) string {
 	if next == "TERMINAL" {
 		return "FAILED_TERMINAL"
 	}
-	if workType == "TASK_OBSERVE" {
+	if workType == "TASK_OBSERVE" && next != "INVENTORY_OBSERVE" {
 		return "WAITING_REBOOT"
 	}
 	if workType == "REBOOT_OBSERVE" || workType == "INVENTORY_OBSERVE" {

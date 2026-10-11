@@ -88,3 +88,18 @@ func TestAdapterCollectsTaskInventoryAndHealthEvidence(t *testing.T) {
 		t.Fatalf("health=%+v err=%v", health, err)
 	}
 }
+
+func TestAdapterTreatsMissingTaskAsInventoryOnlyEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.NotFound(writer, request)
+	}))
+	defer server.Close()
+	credential, _ := syntheticcredentials.NewCredential("user", "pass")
+	resolver, _ := syntheticcredentials.New(map[string]syntheticcredentials.Credential{"node-a": credential})
+	adapter := Adapter{Loader: targetLoader{target: Target{Origin: server.URL, TargetKey: "node-a", CredentialReference: "synthetic-test:node-a"}}, Client: redfish.NewClient(redfish.ClientConfig{HTTPClient: server.Client(), Total: time.Second, MaxBytes: 1024}), Resolver: resolver}
+	attempt := execution.AttemptSnapshot{AttemptID: "attempt", TargetID: "target", TargetUpdateID: "update", ExpectedVersion: "2", RemoteTaskReference: "/redfish/v1/TaskService/Tasks/task-1"}
+	observation, err := adapter.ObserveTask(context.Background(), execution.TaskObservationRequest{Attempt: attempt})
+	if err != nil || observation.Kind != execution.ObservationTask || string(observation.Data) != `{"TaskState":"Missing","Reason":"not_found"}` || observation.ContradictsExpectedState {
+		t.Fatalf("missing task observation=%+v err=%v", observation, err)
+	}
+}

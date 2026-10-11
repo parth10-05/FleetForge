@@ -11,6 +11,7 @@ func TestObservationRoutesRespectSeparatedRebootAndVersionStages(t *testing.T) {
 		valid                 bool
 	}{
 		{"TASK_OBSERVE", "UPDATE_ACCEPTED", "REBOOT_OBSERVE", true},
+		{"TASK_OBSERVE", "UPDATE_ACCEPTED", "INVENTORY_OBSERVE", true},
 		{"REBOOT_OBSERVE", "WAITING_REBOOT", "INVENTORY_OBSERVE", true},
 		{"INVENTORY_OBSERVE", "VERIFYING", "HEALTH_OBSERVE", true},
 		{"INVENTORY_OBSERVE", "WAITING_REBOOT", "HEALTH_OBSERVE", false},

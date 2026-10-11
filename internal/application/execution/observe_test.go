@@ -48,6 +48,7 @@ func TestObservationDecisionRoutesOnlyEvidenceLifecycleSteps(t *testing.T) {
 		fresh       bool
 	}{
 		{"completed task", Observation{Kind: ObservationTask, Data: []byte(`{"TaskState":"Completed"}`), ObservedAt: now, ReceivedAt: now}, "REBOOT_OBSERVE", true},
+		{"missing task defers to inventory", Observation{Kind: ObservationTask, Data: []byte(`{"TaskState":"Missing"}`), ObservedAt: now, ReceivedAt: now}, "INVENTORY_OBSERVE", true},
 		{"running task", Observation{Kind: ObservationTask, Data: []byte(`{"TaskState":"Running"}`), ObservedAt: now, ReceivedAt: now}, retryObservationWork, true},
 		{"failed task", Observation{Kind: ObservationTask, Data: []byte(`{"TaskState":"Exception"}`), ObservedAt: now, ReceivedAt: now}, "TERMINAL", true},
 		{"reachable after reboot", Observation{Kind: ObservationReboot, Data: []byte(`{"Status":{"State":"Enabled"}}`), ObservedAt: now, ReceivedAt: now}, "INVENTORY_OBSERVE", true},

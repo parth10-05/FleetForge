@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -99,6 +100,11 @@ func (adapter Adapter) ObserveTask(ctx context.Context, request execution.TaskOb
 	}
 	document, received, err := adapter.getDocument(ctx, request.Attempt.TargetID, request.Attempt.RemoteTaskReference)
 	if err != nil {
+		var discoveryError redfish.DiscoveryError
+		if errors.As(err, &discoveryError) && discoveryError.Kind == redfish.ErrorNotFound {
+			missing := []byte(`{"TaskState":"Missing","Reason":"not_found"}`)
+			return adapter.observation(execution.ObservationTask, request.Attempt, request.Attempt.RemoteTaskReference, missing, adapter.now(), false), nil
+		}
 		return execution.Observation{}, err
 	}
 	var task struct {
