@@ -24,7 +24,7 @@ func TestPersistedOracleRejectsReceivedOperationClaimedProvenAbsent(t *testing.T
 	if err := adapter.CommitSubmitResult(ctx, work, execution.SubmitResult{Class: execution.SubmitPossiblyAccepted, ResponseFingerprint: executionDigest("d"), FinishedAt: time.Now().UTC().Add(time.Second)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := adapter.ResolveAttention(ctx, execution.AdminResolutionCommand{
+	resolution := execution.AdminResolutionCommand{
 		Principal:                 execution.VerifiedPrincipal{Subject: "admin", IssuerClass: "local-test", Roles: []string{"firmware:resolve"}, Verified: true, AuthenticatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute)},
 		Work:                      execution.WorkFence{CommandID: "00000000-0000-0000-5104-000000000098", ExpectedRevision: 2},
 		AttemptID:                 req.FirmwareAttempt.AttemptID,
@@ -36,8 +36,12 @@ func TestPersistedOracleRejectsReceivedOperationClaimedProvenAbsent(t *testing.T
 		LateCallerExclusionMethod: "test-fence",
 		ProofReference:            "test://absence-proof",
 		Now:                       time.Now().UTC().Add(2 * time.Second),
-	}); err != nil {
+	}
+	if _, err := adapter.ResolveAttention(ctx, resolution); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := adapter.ResolveAttention(ctx, resolution); err != nil {
+		t.Fatalf("idempotent retry of administrator resolution: %v", err)
 	}
 	journal := execution.AcceptanceJournal{RunID: "independent-run", CheckpointHash: executionDigest("f"), Entries: []execution.AcceptanceEntry{{
 		AttemptID:          req.FirmwareAttempt.AttemptID,

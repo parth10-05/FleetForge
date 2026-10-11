@@ -109,6 +109,14 @@ WHERE a.id=$1::uuid FOR UPDATE OF a,tu`, command.AttemptID).Scan(&updateID, &adm
 		return execution.ResolutionResult{}, fmt.Errorf("lock attention attempt: %w", err)
 	}
 	if state != "NEEDS_ATTENTION" || (status != "AMBIGUOUS" && status != "NEEDS_ATTENTION") || revision != command.Work.ExpectedRevision || (command.Work.ExpectedCommandEpoch != nil && epoch != *command.Work.ExpectedCommandEpoch) {
+		var persistedFingerprint string
+		err = tx.QueryRow(ctx, `SELECT evidence_fingerprint FROM ambiguity_resolutions WHERE attempt_id=$1::uuid AND command_id=$2::uuid`, command.AttemptID, command.Work.CommandID).Scan(&persistedFingerprint)
+		if err == nil && persistedFingerprint == command.EvidenceFingerprint {
+			if err = tx.Commit(ctx); err != nil {
+				return execution.ResolutionResult{}, classifyDueWorkError(err, "commit idempotent attention resolution")
+			}
+			return execution.ResolutionResult{TargetUpdateID: updateID}, nil
+		}
 		return execution.ResolutionResult{}, fmt.Errorf("%w: attention resolution fence changed", ErrLeaseConflict)
 	}
 	outcome, nextState, nextStatus, nextWork, resume, err := adminResolutionTransition(command)
