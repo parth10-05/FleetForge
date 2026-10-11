@@ -171,6 +171,51 @@ WHERE id=$1::uuid AND work_type='SUBMIT' AND delivery_state='PENDING'`, work.Due
 	return work, true, nil
 }
 
+// ClaimPrecheckWork claims the oldest bounded PRECHECK read. Keeping it
+// separate from submission claims preserves role separation: this lease is
+// sufficient to collect evidence and persist a policy-approved result, never
+// to invoke the target update action.
+func (adapter ExecutionAdapter) ClaimPrecheckWork(ctx context.Context, owner, leaseToken string) (execution.WorkFence, bool, error) {
+	if adapter.Pool == nil || owner == "" || leaseToken == "" {
+		return execution.WorkFence{}, false, fmt.Errorf("invalid firmware precheck claim")
+	}
+	now := time.Now().UTC()
+	if adapter.Now != nil {
+		now = adapter.Now().UTC()
+	}
+	tx, err := adapter.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return execution.WorkFence{}, false, fmt.Errorf("begin firmware precheck claim: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var work execution.WorkFence
+	err = tx.QueryRow(ctx, `SELECT id::text,command_id::text,delivery_generation,expected_revision,expected_command_epoch
+FROM due_work WHERE work_type='PRECHECK' AND delivery_state='PENDING' AND not_before <= $1
+ORDER BY not_before,created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, now).Scan(&work.DueWorkID, &work.CommandID, &work.DeliveryGeneration, &work.ExpectedRevision, &work.ExpectedCommandEpoch)
+	if err == pgx.ErrNoRows {
+		if err := tx.Commit(ctx); err != nil {
+			return execution.WorkFence{}, false, classifyDueWorkError(err, "commit empty firmware precheck claim")
+		}
+		return execution.WorkFence{}, false, nil
+	}
+	if err != nil {
+		return execution.WorkFence{}, false, classifyDueWorkError(err, "lock firmware precheck work")
+	}
+	work.LeaseToken = leaseToken
+	tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='CLAIMED',lease_token=$2::uuid,lease_owner=$3,lease_expires_at=$4,updated_at=$5
+WHERE id=$1::uuid AND work_type='PRECHECK' AND delivery_state='PENDING'`, work.DueWorkID, work.LeaseToken, owner, now.Add(time.Minute), now)
+	if err != nil {
+		return execution.WorkFence{}, false, classifyDueWorkError(err, "claim firmware precheck work")
+	}
+	if tag.RowsAffected() != 1 {
+		return execution.WorkFence{}, false, fmt.Errorf("%w: firmware precheck work changed", ErrLeaseConflict)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return execution.WorkFence{}, false, classifyDueWorkError(err, "commit firmware precheck claim")
+	}
+	return work, true, nil
+}
+
 // ClaimObservationWork claims only safe read work. It is deliberately
 // separate from submission claims so an observation process cannot obtain a
 // target-side effect lease.

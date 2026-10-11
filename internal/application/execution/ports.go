@@ -57,6 +57,25 @@ type AdmissionEnvelope struct {
 	NormalizedFacts                                         []byte
 	DecisionResult                                          string
 }
+
+// CompletionEnvelope is the immutable decision/audit envelope for a
+// precheck that proves an update is already active and healthy. Unlike an
+// admission it deliberately contains no capacity reservation or follow-up
+// submission work: completing this route must never create a target write.
+type CompletionEnvelope struct {
+	CampaignTargetID, ExpectedTargetState, NextTargetState  string
+	ActorID, CorrelationID, CausationID, Action, ReasonCode string
+	AuditEventSequence                                      int64
+	OutboxEventID, OutboxEventType                          string
+	OutboxSchemaVersion                                     int
+	OutboxPayload                                           []byte
+	DecisionInputID                                         string
+	DecisionSequence                                        int64
+	DecisionLogicalTime                                     time.Time
+	ReducerVersion, DecisionPolicyVersion                   string
+	NormalizedFacts                                         []byte
+	DecisionResult                                          string
+}
 type AdmissionCommand struct {
 	Work                                                      WorkFence
 	Snapshot                                                  PrecheckSnapshot
@@ -64,8 +83,18 @@ type AdmissionCommand struct {
 	AttemptID, StepAttemptID, AdmissionID, RequestFingerprint string
 	PrecheckEvidence                                          PrecheckEvidence
 	Envelope                                                  AdmissionEnvelope
+	AlreadyCurrentEnvelope                                    CompletionEnvelope
 }
-type AdmissionResult struct{ AttemptID, SubmitWorkID, SubmitCommandID string }
+type AdmissionResult struct {
+	AttemptID, SubmitWorkID, SubmitCommandID string
+	AlreadyCurrent                           bool
+}
+type AlreadyCurrentCommand struct {
+	Work     WorkFence
+	Snapshot PrecheckSnapshot
+	Evidence PrecheckEvidence
+	Envelope CompletionEnvelope
+}
 type AttemptSnapshot struct {
 	AttemptID, ParentAttemptID, AdmissionID, TargetID, TargetUpdateID, CampaignID string
 	Artifact                                                                      ObjectIdentity
@@ -144,6 +173,7 @@ type ResolutionResult struct{ TargetUpdateID string }
 type ExecutionRepository interface {
 	LoadPrecheck(context.Context, WorkFence) (PrecheckSnapshot, error)
 	AdmitSubmission(context.Context, AdmissionCommand) (AdmissionResult, error)
+	CompleteAlreadyCurrent(context.Context, AlreadyCurrentCommand) error
 	LoadAttempt(context.Context, WorkFence) (AttemptSnapshot, error)
 	CommitSubmitResult(context.Context, WorkFence, SubmitResult) error
 	CommitObservation(context.Context, WorkFence, ObservationDecision) error

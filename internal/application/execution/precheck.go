@@ -10,6 +10,7 @@ import (
 type PrecheckRepository interface {
 	LoadPrecheck(context.Context, WorkFence) (PrecheckSnapshot, error)
 	AdmitSubmission(context.Context, AdmissionCommand) (AdmissionResult, error)
+	CompleteAlreadyCurrent(context.Context, AlreadyCurrentCommand) error
 }
 
 type PrecheckTarget interface {
@@ -18,10 +19,11 @@ type PrecheckTarget interface {
 
 // PrecheckAndAdmit performs bounded target I/O between two durable phases. It
 // never holds a database transaction while calling the target, and it never
-// converts a stale/ineligible/already-current response into a submission.
+// converts a stale/ineligible response into a submission. An already-current
+// target is instead completed through its own evidence-backed write path.
 func PrecheckAndAdmit(ctx context.Context, repository PrecheckRepository, target PrecheckTarget, work WorkFence, command AdmissionCommand, credentialReference string) (AdmissionResult, PrecheckEvidence, error) {
-	if repository == nil || target == nil || work.DueWorkID == "" || work.CommandID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 || work.DeliveryGeneration < 0 || credentialReference == "" || command.AttemptID == "" || command.StepAttemptID == "" || command.AdmissionID == "" || command.RequestFingerprint == "" || command.RequestFingerprint != command.Artifact.SHA256 || command.Artifact.Provider == "" || command.Artifact.Container == "" || command.Artifact.ObjectKey == "" || command.Artifact.ObjectVersion == "" || command.Artifact.SHA256 == "" || command.Artifact.Size <= 0 || !validAdmissionEnvelope(command.Envelope) {
-		return AdmissionResult{}, PrecheckEvidence{}, fmt.Errorf("invalid precheck admission request")
+	if repository == nil || target == nil || !validWorkFence(work) || credentialReference == "" {
+		return AdmissionResult{}, PrecheckEvidence{}, fmt.Errorf("invalid precheck request")
 	}
 	snapshot, err := repository.LoadPrecheck(ctx, work)
 	if err != nil {
@@ -38,7 +40,17 @@ func PrecheckAndAdmit(ctx context.Context, repository PrecheckRepository, target
 		return AdmissionResult{}, PrecheckEvidence{}, fmt.Errorf("target returned incomplete precheck evidence")
 	}
 	if evidence.CurrentVersion == snapshot.ExpectedVersion {
-		return AdmissionResult{}, evidence, fmt.Errorf("target is already at expected version")
+		if !evidence.Healthy || !validCompletionEnvelope(command.AlreadyCurrentEnvelope) {
+			return AdmissionResult{}, evidence, fmt.Errorf("already-current target lacks configured health proof or completion envelope")
+		}
+		completion := AlreadyCurrentCommand{Work: work, Snapshot: snapshot, Evidence: evidence, Envelope: command.AlreadyCurrentEnvelope}
+		if err := repository.CompleteAlreadyCurrent(ctx, completion); err != nil {
+			return AdmissionResult{}, evidence, fmt.Errorf("persist already-current completion: %w", err)
+		}
+		return AdmissionResult{AlreadyCurrent: true}, evidence, nil
+	}
+	if !validAdmissionCommand(command) {
+		return AdmissionResult{}, evidence, fmt.Errorf("invalid precheck admission request")
 	}
 	if !evidence.Capable || !evidence.Healthy || !evidence.Compatible {
 		return AdmissionResult{}, evidence, fmt.Errorf("target is ineligible for firmware admission")
@@ -49,6 +61,14 @@ func PrecheckAndAdmit(ctx context.Context, repository PrecheckRepository, target
 		return AdmissionResult{}, evidence, fmt.Errorf("persist firmware admission: %w", err)
 	}
 	return result, evidence, nil
+}
+
+func validWorkFence(work WorkFence) bool {
+	return work.DueWorkID != "" && work.CommandID != "" && work.LeaseToken != "" && work.ExpectedRevision >= 0 && work.DeliveryGeneration >= 0
+}
+
+func validAdmissionCommand(command AdmissionCommand) bool {
+	return command.AttemptID != "" && command.StepAttemptID != "" && command.AdmissionID != "" && command.RequestFingerprint != "" && command.RequestFingerprint == command.Artifact.SHA256 && command.Artifact.Provider != "" && command.Artifact.Container != "" && command.Artifact.ObjectKey != "" && command.Artifact.ObjectVersion != "" && command.Artifact.SHA256 != "" && command.Artifact.Size > 0 && validAdmissionEnvelope(command.Envelope)
 }
 
 func validAdmissionEnvelope(envelope AdmissionEnvelope) bool {
@@ -66,4 +86,8 @@ func validAdmissionEnvelope(envelope AdmissionEnvelope) bool {
 		}
 	}
 	return true
+}
+
+func validCompletionEnvelope(envelope CompletionEnvelope) bool {
+	return envelope.CampaignTargetID != "" && envelope.ExpectedTargetState == "PRECHECK" && envelope.NextTargetState == "SUCCEEDED" && envelope.ActorID != "" && envelope.CorrelationID != "" && envelope.CausationID != "" && envelope.Action != "" && envelope.ReasonCode != "" && envelope.OutboxEventID != "" && envelope.OutboxEventType != "" && envelope.OutboxSchemaVersion > 0 && len(envelope.OutboxPayload) > 0 && envelope.DecisionInputID != "" && !envelope.DecisionLogicalTime.IsZero() && envelope.ReducerVersion != "" && envelope.DecisionPolicyVersion != "" && len(envelope.NormalizedFacts) > 0 && envelope.DecisionResult == "SUCCEEDED"
 }
