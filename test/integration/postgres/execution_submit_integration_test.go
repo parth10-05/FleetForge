@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -96,6 +97,11 @@ func TestExpiredSubmitBecomesReconciliationOnly(t *testing.T) {
 	if _, err := persistence.RepairExpiredDueWork(ctx, pool, now, 10); err != nil {
 		t.Fatal(err)
 	}
+	staleEpoch := int64(7)
+	staleWork := execution.WorkFence{DueWorkID: req.DueWorkID, CommandID: req.CommandID, LeaseToken: "00000000-0000-4000-8000-000000000001", DeliveryGeneration: 0, ExpectedRevision: 1, ExpectedCommandEpoch: &staleEpoch}
+	if err := persistence.CommitFirmwareSubmitResult(ctx, pool, staleWork, execution.SubmitResult{Class: execution.SubmitAccepted, RemoteTaskReference: "/redfish/v1/TaskService/Tasks/late", ResponseFingerprint: executionDigest("e"), FinishedAt: now.Add(time.Second)}, now.Add(time.Second)); !errors.Is(err, persistence.ErrLeaseConflict) {
+		t.Fatalf("stale worker commit=%v, want lease conflict", err)
+	}
 	var oldState, attemptState, updateState, nextType string
 	if err := pool.QueryRow(ctx, `SELECT d.delivery_state,a.status,tu.state,n.work_type
 FROM due_work d JOIN target_updates tu ON tu.id=d.subject_id
@@ -111,6 +117,10 @@ WHERE d.id=$1::uuid`, req.DueWorkID).Scan(&oldState, &attemptState, &updateState
 	var pendingSubmits int
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&pendingSubmits); err != nil || pendingSubmits != 0 {
 		t.Fatalf("pending submits=%d err=%v", pendingSubmits, err)
+	}
+	var activeReservations int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM operation_reservations WHERE admission_id=(SELECT id FROM submission_admissions WHERE target_update_id=$1::uuid)", fixture.targetUpdateID).Scan(&activeReservations); err != nil || activeReservations != 3 {
+		t.Fatalf("active reservations=%d err=%v, want all three retained through reconciliation", activeReservations, err)
 	}
 }
 
