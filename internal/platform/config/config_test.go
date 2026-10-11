@@ -72,6 +72,17 @@ func TestLoadDiscoveryWorkerRedactsCredentialInput(t *testing.T) {
 	}
 }
 
+func TestLoadPrecheckWorkerDoesNotRequireArtifactStore(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv(objectStoreRootKey, "")
+	t.Setenv("FLEETFORGE_PRECHECK_ALLOWED_CIDRS", "127.0.0.0/8")
+	t.Setenv("FLEETFORGE_PRECHECK_CREDENTIALS_JSON", `{"rack-a":{"username":"sim-user","password":"test-secret"}}`)
+	loaded, err := LoadPrecheckWorker()
+	if err != nil || loaded.Owner == "" || len(loaded.AllowedCIDRs) != 1 || len(loaded.Credentials) != 1 {
+		t.Fatalf("LoadPrecheckWorker()=%#v err=%v", loaded, err)
+	}
+}
+
 func TestLoadReconciliationWorkerUsesOnlyRetainedJournalConfiguration(t *testing.T) {
 	t.Setenv("FLEETFORGE_ENV", "test")
 	t.Setenv("FLEETFORGE_RECONCILIATION_JOURNAL_PATH", t.TempDir()+"/journal.jsonl")

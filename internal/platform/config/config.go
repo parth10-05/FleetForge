@@ -79,6 +79,16 @@ type ExecutionWorker struct {
 	Credentials  map[string]syntheticcredentials.Credential
 }
 
+// PrecheckWorker can read target state and write fenced precheck outcomes. It
+// deliberately has no artifact-store root, which keeps firmware bytes and
+// submission authority out of the precheck process.
+type PrecheckWorker struct {
+	Common
+	Owner        string
+	AllowedCIDRs []netip.Prefix
+	Credentials  map[string]syntheticcredentials.Credential
+}
+
 // ReconciliationWorker can read retained simulator evidence but has neither
 // device credentials nor artifact-store access.
 type ReconciliationWorker struct {
@@ -212,6 +222,29 @@ func LoadExecutionWorker() (ExecutionWorker, error) {
 		return ExecutionWorker{}, err
 	}
 	return ExecutionWorker{Common: common, Root: root, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
+}
+
+// LoadPrecheckWorker grants only the synthetic target credentials and network
+// allowlist needed to inspect an enrolled target. It intentionally does not
+// require or expose the artifact-store root used by the submission worker.
+func LoadPrecheckWorker() (PrecheckWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return PrecheckWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_PRECHECK_WORKER_OWNER", "firmware-prechecker")
+	if len(owner) > 128 || strings.TrimSpace(owner) == "" {
+		return PrecheckWorker{}, &Error{Key: "FLEETFORGE_PRECHECK_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	allowedCIDRs, err := requiredCIDRs(os.LookupEnv, "FLEETFORGE_PRECHECK_ALLOWED_CIDRS")
+	if err != nil {
+		return PrecheckWorker{}, err
+	}
+	credentials, err := requiredSyntheticCredentials(os.LookupEnv, "FLEETFORGE_PRECHECK_CREDENTIALS_JSON")
+	if err != nil {
+		return PrecheckWorker{}, err
+	}
+	return PrecheckWorker{Common: common, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
 }
 
 // LoadReconciliationWorker grants the minimum configuration necessary to
