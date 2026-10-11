@@ -14,6 +14,17 @@ func TestVerifyIndependentJournalAcceptsOneMatchingOperation(t *testing.T) {
 	}
 }
 
+func TestVerifyIndependentJournalCombinesSeparateReceiveAndAcceptRecords(t *testing.T) {
+	attempt := OracleAttempt{AttemptID: "attempt-1", IntendedUpdateID: "update-1", RequestFingerprint: oracleDigest("a"), Resolution: "ACCEPTED"}
+	journal := AcceptanceJournal{RunID: "run-1", CheckpointHash: oracleDigest("b"), Entries: []AcceptanceEntry{
+		{AttemptID: attempt.AttemptID, RequestFingerprint: attempt.RequestFingerprint, Received: true, Sequence: 1},
+		{AttemptID: attempt.AttemptID, RequestFingerprint: attempt.RequestFingerprint, Accepted: true, Sequence: 2},
+	}}
+	if err := VerifyIndependentJournal([]OracleAttempt{attempt}, journal); err != nil {
+		t.Fatalf("separate receive and accept journal records must verify: %v", err)
+	}
+}
+
 func TestVerifyIndependentJournalRejectsDuplicateAcceptedOperation(t *testing.T) {
 	attempts := []OracleAttempt{{AttemptID: "attempt-1", IntendedUpdateID: "update-1", RequestFingerprint: oracleDigest("a")}, {AttemptID: "attempt-2", IntendedUpdateID: "update-1", RequestFingerprint: oracleDigest("b")}}
 	journal := AcceptanceJournal{RunID: "run-1", CheckpointHash: oracleDigest("c"), Entries: []AcceptanceEntry{{AttemptID: "attempt-1", RequestFingerprint: attempts[0].RequestFingerprint, Accepted: true, Sequence: 1}, {AttemptID: "attempt-2", RequestFingerprint: attempts[1].RequestFingerprint, Accepted: true, Sequence: 2}}}

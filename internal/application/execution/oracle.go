@@ -60,7 +60,7 @@ func VerifyIndependentJournal(attempts []OracleAttempt, journal AcceptanceJourna
 		byAttempt[attempt.AttemptID] = attempt
 	}
 	for _, entry := range journal.Entries {
-		if entry.Sequence < 1 || (!entry.Received && !entry.Accepted) || (entry.Accepted && !entry.Received) {
+		if entry.Sequence < 1 || (!entry.Received && !entry.Accepted) {
 			return fmt.Errorf("oracle journal entry is invalid")
 		}
 		attempt, found := byAttempt[entry.AttemptID]
@@ -74,6 +74,11 @@ func VerifyIndependentJournal(attempts []OracleAttempt, journal AcceptanceJourna
 			if acceptedByUpdate[attempt.IntendedUpdateID] > 1 {
 				return fmt.Errorf("oracle detected duplicate accepted operation for intended update")
 			}
+		}
+	}
+	for attemptID, accepted := range matchedAccepted {
+		if accepted && !matchedReceived[attemptID] {
+			return fmt.Errorf("oracle accepted operation is missing retained receive evidence")
 		}
 	}
 	for _, attempt := range attempts {
