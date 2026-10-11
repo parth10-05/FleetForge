@@ -60,7 +60,7 @@ func VerifyIndependentJournal(attempts []OracleAttempt, journal AcceptanceJourna
 		byAttempt[attempt.AttemptID] = attempt
 	}
 	for _, entry := range journal.Entries {
-		if entry.Sequence < 1 || (!entry.Received && !entry.Accepted) {
+		if entry.Sequence < 1 || (!entry.Received && !entry.Accepted) || (entry.Accepted && !entry.Received) {
 			return fmt.Errorf("oracle journal entry is invalid")
 		}
 		attempt, found := byAttempt[entry.AttemptID]
@@ -77,6 +77,9 @@ func VerifyIndependentJournal(attempts []OracleAttempt, journal AcceptanceJourna
 		}
 	}
 	for _, attempt := range attempts {
+		if attempt.Resolution == "ACCEPTED" && !matchedAccepted[attempt.AttemptID] {
+			return fmt.Errorf("oracle missing retained acceptance evidence for durable accepted attempt")
+		}
 		if attempt.Resolution == "PROVEN_ABSENT" {
 			if !attempt.LateCallerExcluded || matchedReceived[attempt.AttemptID] || matchedAccepted[attempt.AttemptID] {
 				return fmt.Errorf("oracle rejected false proven-absent resolution")
