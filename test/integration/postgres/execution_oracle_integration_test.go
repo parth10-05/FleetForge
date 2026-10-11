@@ -25,7 +25,7 @@ func TestPersistedOracleRejectsReceivedOperationClaimedProvenAbsent(t *testing.T
 		t.Fatal(err)
 	}
 	if _, err := adapter.ResolveAttention(ctx, execution.AdminResolutionCommand{
-		Principal:                 execution.VerifiedPrincipal{Subject: "admin", IssuerClass: "local-test", Verified: true},
+		Principal:                 execution.VerifiedPrincipal{Subject: "admin", IssuerClass: "local-test", Roles: []string{"firmware:resolve"}, Verified: true, AuthenticatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute)},
 		Work:                      execution.WorkFence{CommandID: "00000000-0000-0000-5104-000000000098", ExpectedRevision: 2},
 		AttemptID:                 req.FirmwareAttempt.AttemptID,
 		Action:                    "RETRY_PROVEN_ABSENT",

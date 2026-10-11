@@ -23,7 +23,7 @@ func (r *resolutionRepo) ResolveAttention(context.Context, AdminResolutionComman
 func TestResolveAttentionRequiresVerifiedRoleAndAbsenceProof(t *testing.T) {
 	now := time.Now().UTC()
 	verifier := verifierFunc(func(context.Context, string) (VerifiedPrincipal, error) {
-		return VerifiedPrincipal{Subject: "admin", Roles: []string{resolutionRole}, Verified: true, ExpiresAt: now.Add(time.Minute)}, nil
+		return VerifiedPrincipal{Subject: "admin", Roles: []string{resolutionRole}, Verified: true, AuthenticatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Minute)}, nil
 	})
 	repository := &resolutionRepo{}
 	command := AdminResolutionCommand{AttemptID: "attempt", Action: "RETRY_PROVEN_ABSENT", Reason: "verified", EvidenceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Now: now}
@@ -33,6 +33,17 @@ func TestResolveAttentionRequiresVerifiedRoleAndAbsenceProof(t *testing.T) {
 	command.JournalConfirmedAbsent, command.LateCallerExcluded, command.LateCallerExclusionMethod, command.ProofReference = true, true, "worker-lease-revoked", "proof-1"
 	if _, err := ResolveAttention(context.Background(), verifier, repository, "token", command); err != nil || repository.calls != 1 {
 		t.Fatalf("proven retry err=%v calls=%d", err, repository.calls)
+	}
+}
+
+func TestResolveAttentionRequiresRecentAuthentication(t *testing.T) {
+	now := time.Now().UTC()
+	verifier := verifierFunc(func(context.Context, string) (VerifiedPrincipal, error) {
+		return VerifiedPrincipal{Subject: "admin", Roles: []string{resolutionRole}, Verified: true, AuthenticatedAt: now.Add(-maxResolutionAuthenticationAge - time.Second), ExpiresAt: now.Add(time.Minute)}, nil
+	})
+	_, err := ResolveAttention(context.Background(), verifier, &resolutionRepo{}, "token", AdminResolutionCommand{AttemptID: "attempt", Action: "ADOPT", Reason: "verified", EvidenceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Now: now})
+	if err == nil {
+		t.Fatal("stale authentication was accepted for ambiguity resolution")
 	}
 }
 

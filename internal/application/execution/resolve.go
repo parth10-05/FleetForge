@@ -4,9 +4,15 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 )
 
 const resolutionRole = "firmware:resolve"
+
+// Resolution credentials are intentionally short lived: an ambiguity exit can
+// release quarantine or authorize later work, so a long-lived token alone is
+// insufficient administrative intent.
+const maxResolutionAuthenticationAge = 15 * time.Minute
 
 type AttentionResolver interface {
 	ResolveAttention(context.Context, AdminResolutionCommand) (ResolutionResult, error)
@@ -23,7 +29,7 @@ func ResolveAttention(ctx context.Context, verifier TokenVerifier, repository At
 	if err != nil {
 		return ResolutionResult{}, fmt.Errorf("verify resolution principal: %w", err)
 	}
-	if !principal.Verified || principal.Subject == "" || principal.ExpiresAt.IsZero() || !principal.ExpiresAt.After(command.Now) || !slices.Contains(principal.Roles, resolutionRole) {
+	if !principal.Verified || principal.Subject == "" || principal.AuthenticatedAt.IsZero() || principal.AuthenticatedAt.After(command.Now) || command.Now.Sub(principal.AuthenticatedAt) > maxResolutionAuthenticationAge || principal.ExpiresAt.IsZero() || !principal.ExpiresAt.After(command.Now) || !slices.Contains(principal.Roles, resolutionRole) {
 		return ResolutionResult{}, fmt.Errorf("principal is not authorized to resolve firmware ambiguity")
 	}
 	command.Principal = principal

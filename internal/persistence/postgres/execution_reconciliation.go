@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -88,7 +89,7 @@ func (adapter ExecutionAdapter) CommitReconciliation(ctx context.Context, work e
 // intentionally does not call a target or create SUBMIT work: a retry proof
 // only authorizes a later fresh admission with a child attempt.
 func (adapter ExecutionAdapter) ResolveAttention(ctx context.Context, command execution.AdminResolutionCommand) (execution.ResolutionResult, error) {
-	if adapter.Pool == nil || command.Principal.Subject == "" || !command.Principal.Verified || command.AttemptID == "" || command.Work.CommandID == "" || command.Work.ExpectedRevision < 0 || command.EvidenceFingerprint == "" || command.Now.IsZero() {
+	if adapter.Pool == nil || !validResolutionPrincipal(command.Principal, command.Now) || command.AttemptID == "" || command.Work.CommandID == "" || command.Work.ExpectedRevision < 0 || command.EvidenceFingerprint == "" || command.Now.IsZero() {
 		return execution.ResolutionResult{}, fmt.Errorf("invalid attention resolution")
 	}
 	tx, err := adapter.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
@@ -144,6 +145,10 @@ VALUES (md5($1)::uuid,md5($2)::uuid,'TARGET_UPDATE',$3::uuid,$4,1,$5,$6,$7)`, "f
 		return execution.ResolutionResult{}, classifyDueWorkError(err, "commit attention resolution")
 	}
 	return execution.ResolutionResult{TargetUpdateID: updateID}, nil
+}
+
+func validResolutionPrincipal(principal execution.VerifiedPrincipal, now time.Time) bool {
+	return principal.Verified && principal.Subject != "" && !principal.AuthenticatedAt.IsZero() && !principal.AuthenticatedAt.After(now) && now.Sub(principal.AuthenticatedAt) <= 15*time.Minute && !principal.ExpiresAt.IsZero() && principal.ExpiresAt.After(now) && slices.Contains(principal.Roles, "firmware:resolve")
 }
 
 func adminResolutionTransition(command execution.AdminResolutionCommand) (outcome, state, attemptStatus, work, resume string, err error) {
