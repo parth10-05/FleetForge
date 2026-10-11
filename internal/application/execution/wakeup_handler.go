@@ -18,6 +18,27 @@ type WakeupSubmitHandler struct {
 	ActionPath string
 }
 
+// PrecheckStartRepository is intentionally smaller than the execution
+// repository: consuming CANARY_START can only create bounded PRECHECK work.
+type PrecheckStartRepository interface {
+	StartFirmwarePrecheck(context.Context, WorkFence) error
+}
+
+// WakeupPrecheckStartHandler finalizes the fenced, side-effect-free
+// CANARY_START transition. It has neither artifact access nor a target port.
+type WakeupPrecheckStartHandler struct{ Repository PrecheckStartRepository }
+
+func (handler WakeupPrecheckStartHandler) Supports(envelope orchestration.Envelope) bool {
+	return envelope.QueueClass == orchestration.QueueUpdateStep && envelope.WorkType == "CANARY_START"
+}
+
+func (handler WakeupPrecheckStartHandler) HandleFinalized(ctx context.Context, work orchestration.ClaimedWork) error {
+	if handler.Repository == nil || work.WorkType != "CANARY_START" {
+		return fmt.Errorf("invalid precheck start wakeup")
+	}
+	return handler.Repository.StartFirmwarePrecheck(ctx, WorkFence{DueWorkID: work.DueWorkID, CommandID: work.CommandID, LeaseToken: work.LeaseToken, DeliveryGeneration: work.DeliveryGeneration, ExpectedRevision: work.ExpectedRevision, ExpectedCommandEpoch: work.ExpectedCommandEpoch})
+}
+
 func (handler WakeupSubmitHandler) Supports(envelope orchestration.Envelope) bool {
 	return envelope.QueueClass == orchestration.QueueUpdateStep && envelope.WorkType == "SUBMIT"
 }

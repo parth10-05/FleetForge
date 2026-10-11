@@ -32,8 +32,8 @@ type storeStub struct {
 	quarantineReason           string
 }
 
-func (s *storeStub) Claim(context.Context, Envelope) (ClaimedWork, ClaimDisposition, error) {
-	return ClaimedWork{DueWorkID: "work", LeaseToken: "lease"}, s.claim, nil
+func (s *storeStub) Claim(_ context.Context, envelope Envelope) (ClaimedWork, ClaimDisposition, error) {
+	return ClaimedWork{DueWorkID: envelope.DueWorkID, CommandID: envelope.CommandID, LeaseToken: "lease", WorkType: envelope.WorkType, QueueClass: envelope.QueueClass, DeliveryGeneration: envelope.DeliveryGeneration, ExpectedRevision: envelope.ExpectedRevision, ExpectedCommandEpoch: envelope.ExpectedCommandEpoch}, s.claim, nil
 }
 func (s *storeStub) Complete(context.Context, ClaimedWork) error { s.completed++; return s.completeErr }
 func (s *storeStub) Quarantine(_ context.Context, _ Receipt, reason string) error {
@@ -128,6 +128,57 @@ func TestWorkerRecordsFinalizedDurableCompletion(t *testing.T) {
 	}
 	if metrics.Snapshot()[MetricKey{Name: "durable_complete", Outcome: "success", Class: "control"}] != 1 {
 		t.Fatalf("missing finalized completion metric: %#v", metrics.Snapshot())
+	}
+}
+
+type typedOrdinaryHandler struct{ calls int }
+
+func (h *typedOrdinaryHandler) Supports(envelope Envelope) bool {
+	return envelope.QueueClass == QueueControl && envelope.WorkType == "SAFETY_PROBE"
+}
+func (h *typedOrdinaryHandler) Handle(context.Context, ClaimedWork) error { h.calls++; return nil }
+
+type typedFinalizingHandler struct{ calls int }
+
+func (h *typedFinalizingHandler) Supports(envelope Envelope) bool {
+	return envelope.QueueClass == QueueUpdateStep && envelope.WorkType == "CANARY_START"
+}
+func (h *typedFinalizingHandler) HandleFinalized(context.Context, ClaimedWork) error {
+	h.calls++
+	return nil
+}
+
+func TestMultiplexHandlerUsesExactlyOneCompletionOwner(t *testing.T) {
+	ordinary, finalizing := &typedOrdinaryHandler{}, &typedFinalizingHandler{}
+	handler, err := NewMultiplexHandler([]WorkHandler{ordinary}, []FinalizingWorkHandler{finalizing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name           string
+		envelope       Envelope
+		wantGeneric    int
+		wantFinal      int
+		wantCompletion int
+	}{
+		{"control", Envelope{QueueClass: QueueControl, WorkType: "SAFETY_PROBE"}, 1, 0, 1},
+		{"transition", Envelope{QueueClass: QueueUpdateStep, WorkType: "CANARY_START"}, 1, 1, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw, err := Encode(Envelope{SchemaVersion: WakeupSchemaV1, QueueClass: test.envelope.QueueClass, DueWorkID: "00000000-0000-4000-8000-000000000001", CommandID: "00000000-0000-4000-8000-000000000002", DeliveryGeneration: 0, WorkType: test.envelope.WorkType, SubjectType: "TARGET_UPDATE", SubjectID: "00000000-0000-4000-8000-000000000003", ExpectedRevision: 1, NotBefore: time.Now().UTC()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, acker := &storeStub{claim: ClaimOwned}, &ackerStub{}
+			worker, err := NewWorker(receiverStub{receipts: []Receipt{{Raw: raw}}}, acker, store, handler, WorkerConfig{ReceiveBatch: 1, Concurrency: 1, HandlerTimeout: time.Second})
+			runErr := worker.RunOnce(context.Background())
+			if err != nil || runErr != nil {
+				t.Fatalf("new=%v run=%v", err, runErr)
+			}
+			if ordinary.calls != test.wantGeneric || finalizing.calls != test.wantFinal || store.completed != test.wantCompletion || acker.count != 1 {
+				t.Fatalf("ordinary=%d final=%d completed=%d ack=%d", ordinary.calls, finalizing.calls, store.completed, acker.count)
+			}
+		})
 	}
 }
 

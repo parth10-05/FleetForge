@@ -42,3 +42,24 @@ func TestWakeupSubmitHandlerRejectsMismatchedClaim(t *testing.T) {
 		t.Fatal("non-submit work was accepted")
 	}
 }
+
+type precheckStartRepository struct{ calls int }
+
+func (r *precheckStartRepository) StartFirmwarePrecheck(context.Context, WorkFence) error {
+	r.calls++
+	return nil
+}
+
+func TestWakeupPrecheckStartHandlerCannotSubmitFirmware(t *testing.T) {
+	repository := &precheckStartRepository{}
+	handler := WakeupPrecheckStartHandler{Repository: repository}
+	if !handler.Supports(orchestration.Envelope{QueueClass: orchestration.QueueUpdateStep, WorkType: "CANARY_START"}) {
+		t.Fatal("canary start wakeup was not supported")
+	}
+	if handler.Supports(orchestration.Envelope{QueueClass: orchestration.QueueUpdateStep, WorkType: "SUBMIT"}) {
+		t.Fatal("submit wakeup must not have a precheck-start route")
+	}
+	if err := handler.HandleFinalized(context.Background(), orchestration.ClaimedWork{DueWorkID: "work", CommandID: "command", LeaseToken: "lease", WorkType: "CANARY_START"}); err != nil || repository.calls != 1 {
+		t.Fatalf("err=%v calls=%d", err, repository.calls)
+	}
+}

@@ -21,6 +21,7 @@ const (
 type ClaimedWork struct {
 	DueWorkID, CommandID, LeaseToken string
 	WorkType                         string
+	QueueClass                       QueueClass
 	DeliveryGeneration               int64
 	ExpectedRevision                 int64
 	ExpectedCommandEpoch             *int64
@@ -48,6 +49,15 @@ type WorkHandler interface {
 type FinalizingWorkHandler interface {
 	Supports(Envelope) bool
 	HandleFinalized(context.Context, ClaimedWork) error
+}
+
+// SelectiveFinalizingWorkHandler chooses finalization ownership per decoded
+// envelope. This permits safe no-op/control handlers and transactional
+// lifecycle handlers to share one queue without a generic completion racing a
+// domain transaction.
+type SelectiveFinalizingWorkHandler interface {
+	FinalizingWorkHandler
+	Finalizes(Envelope) bool
 }
 
 // RoutedWorkHandler declares whether a handler owns a decoded wakeup. It is
@@ -150,14 +160,25 @@ func (w *Worker) process(ctx context.Context, receipt Receipt) error {
 	w.record("claim", "success", string(envelope.QueueClass))
 	handlerContext, cancel := context.WithTimeout(ctx, w.config.HandlerTimeout)
 	finalized := false
-	switch handler := w.handler.(type) {
-	case FinalizingWorkHandler:
-		finalized = true
-		err = handler.HandleFinalized(handlerContext, claimed)
-	case WorkHandler:
-		err = handler.Handle(handlerContext, claimed)
-	default:
-		err = fmt.Errorf("wakeup handler has no execution contract")
+	if handler, selective := w.handler.(SelectiveFinalizingWorkHandler); selective {
+		if handler.Finalizes(envelope) {
+			finalized = true
+			err = handler.HandleFinalized(handlerContext, claimed)
+		} else if ordinary, ok := w.handler.(WorkHandler); ok {
+			err = ordinary.Handle(handlerContext, claimed)
+		} else {
+			err = fmt.Errorf("selective wakeup handler lacks an ordinary execution contract")
+		}
+	} else {
+		switch handler := w.handler.(type) {
+		case FinalizingWorkHandler:
+			finalized = true
+			err = handler.HandleFinalized(handlerContext, claimed)
+		case WorkHandler:
+			err = handler.Handle(handlerContext, claimed)
+		default:
+			err = fmt.Errorf("wakeup handler has no execution contract")
+		}
 	}
 	cancel()
 	if err != nil {
