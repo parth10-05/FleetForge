@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,11 +18,41 @@ import (
 type FirmwareSubmitClass string
 
 const (
-	FirmwareAccepted          FirmwareSubmitClass = "ACCEPTED"
-	FirmwareExplicitRejection FirmwareSubmitClass = "EXPLICIT_REJECTION"
-	FirmwarePossiblyAccepted  FirmwareSubmitClass = "POSSIBLY_ACCEPTED"
-	FirmwareUnsafeResponse    FirmwareSubmitClass = "UNSAFE_RESPONSE"
+	FirmwareAccepted              FirmwareSubmitClass = "ACCEPTED"
+	FirmwareExplicitRejection     FirmwareSubmitClass = "EXPLICIT_REJECTION"
+	FirmwareProvenPrewriteFailure FirmwareSubmitClass = "PROVEN_PREWRITE_FAILURE"
+	FirmwarePossiblyAccepted      FirmwareSubmitClass = "POSSIBLY_ACCEPTED"
+	FirmwareUnsafeResponse        FirmwareSubmitClass = "UNSAFE_RESPONSE"
 )
+
+// PrewriteFailure proves that a transport rejected a firmware request before
+// it wrote any request bytes. It is deliberately opt-in: ordinary network
+// errors are never enough to establish this property and therefore remain
+// possibly accepted.
+//
+// A transport implementation may wrap its error with MarkPrewriteFailure only
+// when it owns evidence for this exact request boundary. The stock Go HTTP
+// transport does not provide that proof, so its errors cannot enable a retry.
+type PrewriteFailure struct{ Err error }
+
+func (failure PrewriteFailure) Error() string {
+	if failure.Err == nil {
+		return "firmware request was proven not written"
+	}
+	return "firmware request was proven not written: " + failure.Err.Error()
+}
+
+func (failure PrewriteFailure) Unwrap() error { return failure.Err }
+
+// MarkPrewriteFailure supplies the explicit proof boundary used by a
+// transport that can distinguish connection setup failure from a request that
+// might have reached the target. It must not wrap an uncertain error.
+func MarkPrewriteFailure(err error) error {
+	if err == nil {
+		return PrewriteFailure{}
+	}
+	return PrewriteFailure{Err: err}
+}
 
 type FirmwareSubmitRequest struct {
 	ActionPath, ExpectedVersion, ArtifactSHA256, AttemptID string
@@ -65,6 +96,10 @@ func (client *Client) SubmitFirmwareAuthenticated(ctx context.Context, address T
 	response, err := client.httpClient.Do(httpRequest)
 	finished = time.Now().UTC()
 	if err != nil {
+		var prewrite PrewriteFailure
+		if errors.As(err, &prewrite) {
+			return FirmwareSubmitResult{Class: FirmwareProvenPrewriteFailure, FinishedAt: finished}
+		}
 		return FirmwareSubmitResult{Class: FirmwarePossiblyAccepted, FinishedAt: finished}
 	}
 	defer response.Body.Close()

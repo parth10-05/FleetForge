@@ -3,6 +3,7 @@ package redfish
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -14,6 +15,12 @@ type updateTestAuthenticator struct{}
 
 func (updateTestAuthenticator) Apply(request *http.Request) {
 	request.Header.Set("Authorization", "Bearer test")
+}
+
+type updateRoundTripper func(*http.Request) (*http.Response, error)
+
+func (roundTripper updateRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTripper(request)
 }
 
 func TestSubmitFirmwareAuthenticatedIssuesOnePushAndNormalizesTaskReference(t *testing.T) {
@@ -64,6 +71,26 @@ func TestSubmitFirmwareAuthenticatedTreatsLostResponseAsPossiblyAccepted(t *test
 	result := client.SubmitFirmwareAuthenticated(context.Background(), address, updateTestAuthenticator{}, FirmwareSubmitRequest{ActionPath: "UpdateService/update", ExpectedVersion: "2", ArtifactSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", AttemptID: "attempt-1", Body: bytes.NewReader([]byte("firmware"))})
 	if result.Class != FirmwarePossiblyAccepted {
 		t.Fatalf("class=%s, want possibly accepted", result.Class)
+	}
+}
+
+func TestSubmitFirmwareAuthenticatedClassifiesOnlyExplicitPrewriteProofAsRetryable(t *testing.T) {
+	address, err := ParseTargetAddress("http://127.0.0.1:8080", "rack-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := FirmwareSubmitRequest{ActionPath: "UpdateService/update", ExpectedVersion: "2", ArtifactSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", AttemptID: "attempt-1", Body: bytes.NewReader([]byte("firmware"))}
+	provenClient := NewClient(ClientConfig{HTTPClient: &http.Client{Transport: updateRoundTripper(func(*http.Request) (*http.Response, error) {
+		return nil, MarkPrewriteFailure(errors.New("dial rejected before write"))
+	})}, Total: time.Second, MaxBytes: 1024})
+	if result := provenClient.SubmitFirmwareAuthenticated(context.Background(), address, updateTestAuthenticator{}, request); result.Class != FirmwareProvenPrewriteFailure {
+		t.Fatalf("proven class=%s, want %s", result.Class, FirmwareProvenPrewriteFailure)
+	}
+	uncertainClient := NewClient(ClientConfig{HTTPClient: &http.Client{Transport: updateRoundTripper(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("transport reset")
+	})}, Total: time.Second, MaxBytes: 1024})
+	if result := uncertainClient.SubmitFirmwareAuthenticated(context.Background(), address, updateTestAuthenticator{}, request); result.Class != FirmwarePossiblyAccepted {
+		t.Fatalf("uncertain class=%s, want %s", result.Class, FirmwarePossiblyAccepted)
 	}
 }
 

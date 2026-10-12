@@ -217,6 +217,8 @@ func translateSubmitClass(class redfish.FirmwareSubmitClass) execution.SubmitCla
 		return execution.SubmitAccepted
 	case redfish.FirmwareExplicitRejection:
 		return execution.SubmitExplicitRejection
+	case redfish.FirmwareProvenPrewriteFailure:
+		return execution.SubmitProvenPrewriteFailure
 	case redfish.FirmwarePossiblyAccepted:
 		return execution.SubmitPossiblyAccepted
 	default:

@@ -19,6 +19,12 @@ func (loader targetLoader) LoadExecutionTarget(context.Context, string) (Target,
 	return loader.target, nil
 }
 
+func TestTranslateSubmitClassPreservesExplicitPrewriteProof(t *testing.T) {
+	if actual := translateSubmitClass(redfish.FirmwareProvenPrewriteFailure); actual != execution.SubmitProvenPrewriteFailure {
+		t.Fatalf("class=%s, want %s", actual, execution.SubmitProvenPrewriteFailure)
+	}
+}
+
 func TestAdapterSubmitsUsingResolvedTargetAndMapsAcceptedResult(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Authorization") == "" {
