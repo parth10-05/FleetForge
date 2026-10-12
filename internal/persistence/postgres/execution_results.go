@@ -41,7 +41,7 @@ AND d.work_type='SUBMIT' FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID
 		return fmt.Errorf("%w: stale firmware result", ErrLeaseConflict)
 	}
 	status, nextState, resume, nextWork := resultTransition(result.Class)
-	tag, err := tx.Exec(ctx, `UPDATE firmware_update_attempts SET status=$2,result_class=$3,remote_task_reference=$4,response_fingerprint=$5,transport_finished_at=$6,accepted_at=CASE WHEN $2='ACCEPTED' THEN $6 ELSE NULL END,resolved_at=CASE WHEN $2 IN ('REJECTED','PROVEN_ABSENT') THEN $6 ELSE NULL END WHERE id=$1::uuid AND status='ADMITTED'`, attemptID, status, result.Class, nullableExecutionString(result.RemoteTaskReference), nullableExecutionString(result.ResponseFingerprint), result.FinishedAt.UTC())
+	tag, err := tx.Exec(ctx, `UPDATE firmware_update_attempts SET status=$2::varchar,result_class=$3,remote_task_reference=$4,response_fingerprint=$5,transport_finished_at=$6::timestamptz,accepted_at=CASE WHEN $2::varchar='ACCEPTED'::varchar THEN $6::timestamptz ELSE NULL END,resolved_at=CASE WHEN $2::varchar IN ('REJECTED'::varchar,'PROVEN_ABSENT'::varchar) THEN $6::timestamptz ELSE NULL END WHERE id=$1::uuid AND status='ADMITTED'`, attemptID, status, result.Class, nullableExecutionString(result.RemoteTaskReference), nullableExecutionString(result.ResponseFingerprint), result.FinishedAt.UTC())
 	if err != nil {
 		return fmt.Errorf("record firmware result: %w", err)
 	}
