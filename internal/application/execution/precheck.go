@@ -10,6 +10,7 @@ import (
 type PrecheckRepository interface {
 	LoadPrecheck(context.Context, WorkFence) (PrecheckSnapshot, error)
 	AdmitSubmission(context.Context, AdmissionCommand) (AdmissionResult, error)
+	AdmitRetrySubmission(context.Context, AdmissionCommand) (AdmissionResult, error)
 	CompleteAlreadyCurrent(context.Context, AlreadyCurrentCommand) error
 }
 
@@ -56,7 +57,12 @@ func PrecheckAndAdmit(ctx context.Context, repository PrecheckRepository, target
 		return AdmissionResult{}, evidence, fmt.Errorf("target is ineligible for firmware admission")
 	}
 	command.Work, command.Snapshot, command.PrecheckEvidence = work, snapshot, evidence
-	result, err := repository.AdmitSubmission(ctx, command)
+	var result AdmissionResult
+	if command.RetryParentAttemptID == "" {
+		result, err = repository.AdmitSubmission(ctx, command)
+	} else {
+		result, err = repository.AdmitRetrySubmission(ctx, command)
+	}
 	if err != nil {
 		return AdmissionResult{}, evidence, fmt.Errorf("persist firmware admission: %w", err)
 	}

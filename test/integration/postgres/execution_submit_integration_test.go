@@ -82,6 +82,65 @@ WHERE a.id=$1::uuid`, req.FirmwareAttempt.AttemptID).Scan(&status, &state, &resu
 	}
 }
 
+func TestProvenPrewriteFailureCreatesExactlyOneFencedChildAttempt(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	initial := executionAdmissionRequest(fixture, "5111")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatal(err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	submit := claimExecutionSubmitWork(t, ctx, adapter, "00000000-0000-4000-8000-000000000111")
+	if err := adapter.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitProvenPrewriteFailure, FinishedAt: time.Now().UTC().Add(time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	retry, claimed, err := adapter.ClaimPrecheckWork(ctx, "retry-test", "00000000-0000-4000-8000-000000000112")
+	if err != nil || !claimed {
+		t.Fatalf("claim retry work=%+v claimed=%t err=%v", retry, claimed, err)
+	}
+	child := executionAdmissionRequest(fixture, "5112")
+	child.AdmissionID = initial.AdmissionID
+	child.CommandID = retry.CommandID
+	child.ExpectedTargetRevision = retry.ExpectedRevision
+	child.CapturedCommandEpoch = 7
+	child.ExpectedTargetState = "RETRY_WAIT"
+	child.NextTargetState = "SUBMITTING"
+	child.RetryParentAttemptID = initial.FirmwareAttempt.AttemptID
+	child.ClaimedWorkID, child.ClaimedLeaseToken, child.ClaimedDeliveryGeneration = retry.DueWorkID, retry.LeaseToken, retry.DeliveryGeneration
+	child.DueWorkID = "00000000-0000-0000-5112-000000000099"
+	child.FirmwareAttempt.AttemptID = "00000000-0000-0000-5112-000000000010"
+	child.StepAttemptID = "00000000-0000-0000-5112-000000000011"
+	if err := persistence.AdmitRetryOperation(ctx, pool, child); err != nil {
+		t.Fatalf("AdmitRetryOperation: %v", err)
+	}
+	var parent, active, state, delivery string
+	var children, reservations, submits int
+	if err := pool.QueryRow(ctx, `SELECT a.parent_attempt_id::text,s.active_attempt_id::text,tu.state
+FROM firmware_update_attempts a JOIN submission_admissions s ON s.id=a.submission_admission_id
+JOIN target_updates tu ON tu.id=a.target_update_id WHERE a.id=$1::uuid`, child.FirmwareAttempt.AttemptID).Scan(&parent, &active, &state); err != nil {
+		t.Fatal(err)
+	}
+	if parent != initial.FirmwareAttempt.AttemptID || active != child.FirmwareAttempt.AttemptID || state != "SUBMITTING" {
+		t.Fatalf("parent=%s active=%s state=%s", parent, active, state)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM firmware_update_attempts WHERE submission_admission_id=$1::uuid AND parent_attempt_id IS NOT NULL", initial.AdmissionID).Scan(&children); err != nil || children != 1 {
+		t.Fatalf("children=%d err=%v", children, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM operation_reservations WHERE admission_id=$1::uuid", initial.AdmissionID).Scan(&reservations); err != nil || reservations != 3 {
+		t.Fatalf("reservations=%d err=%v", reservations, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1::uuid", retry.DueWorkID).Scan(&delivery); err != nil || delivery != "COMPLETED" {
+		t.Fatalf("retry delivery=%s err=%v", delivery, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&submits); err != nil || submits != 1 {
+		t.Fatalf("pending submits=%d err=%v, want one child submit", submits, err)
+	}
+	if err := persistence.AdmitRetryOperation(ctx, pool, child); err == nil {
+		t.Fatal("duplicate child admission unexpectedly succeeded")
+	}
+}
+
 func TestExpiredSubmitBecomesReconciliationOnly(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)

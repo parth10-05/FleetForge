@@ -81,9 +81,13 @@ type AdmissionCommand struct {
 	Snapshot                                                  PrecheckSnapshot
 	Artifact                                                  ObjectIdentity
 	AttemptID, StepAttemptID, AdmissionID, RequestFingerprint string
-	PrecheckEvidence                                          PrecheckEvidence
-	Envelope                                                  AdmissionEnvelope
-	AlreadyCurrentEnvelope                                    CompletionEnvelope
+	// RetryParentAttemptID is set only for a proof-backed retry. It keeps the
+	// admission worker on the safe-read path while the persistence boundary
+	// creates a new child attempt under the existing semantic admission.
+	RetryParentAttemptID   string
+	PrecheckEvidence       PrecheckEvidence
+	Envelope               AdmissionEnvelope
+	AlreadyCurrentEnvelope CompletionEnvelope
 }
 type AdmissionResult struct {
 	AttemptID, SubmitWorkID, SubmitCommandID string
@@ -173,6 +177,7 @@ type ResolutionResult struct{ TargetUpdateID string }
 type ExecutionRepository interface {
 	LoadPrecheck(context.Context, WorkFence) (PrecheckSnapshot, error)
 	AdmitSubmission(context.Context, AdmissionCommand) (AdmissionResult, error)
+	AdmitRetrySubmission(context.Context, AdmissionCommand) (AdmissionResult, error)
 	CompleteAlreadyCurrent(context.Context, AlreadyCurrentCommand) error
 	LoadAttempt(context.Context, WorkFence) (AttemptSnapshot, error)
 	CommitSubmitResult(context.Context, WorkFence, SubmitResult) error

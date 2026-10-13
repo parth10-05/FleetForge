@@ -62,6 +62,22 @@ func (adapter ExecutionAdapter) AdmitSubmission(ctx context.Context, command exe
 	return execution.AdmissionResult{AttemptID: command.AttemptID, SubmitWorkID: command.Envelope.DueWorkID, SubmitCommandID: command.Work.CommandID}, nil
 }
 
+func (adapter ExecutionAdapter) AdmitRetrySubmission(ctx context.Context, command execution.AdmissionCommand) (execution.AdmissionResult, error) {
+	if adapter.Pool == nil || command.RetryParentAttemptID == "" {
+		return execution.AdmissionResult{}, fmt.Errorf("execution retry admission requires a pool and parent attempt")
+	}
+	request, err := admissionRequestFromExecution(command)
+	if err != nil {
+		return execution.AdmissionResult{}, err
+	}
+	request.RetryParentAttemptID = command.RetryParentAttemptID
+	request.ClaimedWorkID, request.ClaimedLeaseToken, request.ClaimedDeliveryGeneration = command.Work.DueWorkID, command.Work.LeaseToken, command.Work.DeliveryGeneration
+	if err := AdmitRetryOperation(ctx, adapter.Pool, request); err != nil {
+		return execution.AdmissionResult{}, fmt.Errorf("admit proof-backed retry: %w", err)
+	}
+	return execution.AdmissionResult{AttemptID: command.AttemptID, SubmitWorkID: command.Envelope.DueWorkID, SubmitCommandID: command.Work.CommandID}, nil
+}
+
 func admissionRequestFromExecution(command execution.AdmissionCommand) (AdmissionRequest, error) {
 	envelope := command.Envelope
 	snapshot := command.Snapshot
@@ -171,7 +187,8 @@ WHERE id=$1::uuid AND work_type='SUBMIT' AND delivery_state='PENDING'`, work.Due
 	return work, true, nil
 }
 
-// ClaimPrecheckWork claims the oldest bounded PRECHECK read. Keeping it
+// ClaimPrecheckWork claims the oldest bounded precheck read, including a
+// proof-backed retry precheck. Keeping it
 // separate from submission claims preserves role separation: this lease is
 // sufficient to collect evidence and persist a policy-approved result, never
 // to invoke the target update action.
@@ -190,7 +207,7 @@ func (adapter ExecutionAdapter) ClaimPrecheckWork(ctx context.Context, owner, le
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var work execution.WorkFence
 	err = tx.QueryRow(ctx, `SELECT id::text,command_id::text,delivery_generation,expected_revision,expected_command_epoch
-FROM due_work WHERE work_type='PRECHECK' AND delivery_state='PENDING' AND not_before <= $1
+FROM due_work WHERE work_type IN ('PRECHECK','RETRY_PRECHECK') AND delivery_state='PENDING' AND not_before <= $1
 ORDER BY not_before,created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, now).Scan(&work.DueWorkID, &work.CommandID, &work.DeliveryGeneration, &work.ExpectedRevision, &work.ExpectedCommandEpoch)
 	if err == pgx.ErrNoRows {
 		if err := tx.Commit(ctx); err != nil {
@@ -203,7 +220,7 @@ ORDER BY not_before,created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, now).Scan(&wo
 	}
 	work.LeaseToken = leaseToken
 	tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='CLAIMED',lease_token=$2::uuid,lease_owner=$3,lease_expires_at=$4,updated_at=$5
-WHERE id=$1::uuid AND work_type='PRECHECK' AND delivery_state='PENDING'`, work.DueWorkID, work.LeaseToken, owner, now.Add(time.Minute), now)
+WHERE id=$1::uuid AND work_type IN ('PRECHECK','RETRY_PRECHECK') AND delivery_state='PENDING'`, work.DueWorkID, work.LeaseToken, owner, now.Add(time.Minute), now)
 	if err != nil {
 		return execution.WorkFence{}, false, classifyDueWorkError(err, "claim firmware precheck work")
 	}

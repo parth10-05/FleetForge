@@ -22,6 +22,12 @@ func (s *precheckRepositoryStub) AdmitSubmission(_ context.Context, command Admi
 	s.command = command
 	return AdmissionResult{AttemptID: "attempt"}, nil
 }
+
+func (s *precheckRepositoryStub) AdmitRetrySubmission(_ context.Context, command AdmissionCommand) (AdmissionResult, error) {
+	s.admissions++
+	s.command = command
+	return AdmissionResult{AttemptID: "retry-attempt"}, nil
+}
 func (s *precheckRepositoryStub) CompleteAlreadyCurrent(_ context.Context, command AlreadyCurrentCommand) error {
 	s.completions++
 	s.completion = command

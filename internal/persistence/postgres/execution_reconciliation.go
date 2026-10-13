@@ -48,6 +48,13 @@ VALUES (md5($1)::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,'
 		return fmt.Errorf("persist ambiguity resolution: %w", err)
 	}
 	nextState, nextAttemptStatus, nextWork, resume := reconciliationTransition(decision.Outcome)
+	if decision.Outcome == "PROVEN_ABSENT" {
+		if _, err = tx.Exec(ctx, `UPDATE submission_admissions
+SET retry_authorizations=retry_authorizations+1
+WHERE id=(SELECT submission_admission_id FROM firmware_update_attempts WHERE id=$1::uuid)`, attemptID); err != nil {
+			return fmt.Errorf("authorize reconciled retry: %w", err)
+		}
+	}
 	if _, err = tx.Exec(ctx, `UPDATE firmware_update_attempts SET status=$2,resolved_at=$3 WHERE id=$1::uuid AND status='AMBIGUOUS'`, attemptID, nextAttemptStatus, now.UTC()); err != nil {
 		return fmt.Errorf("advance ambiguous attempt: %w", err)
 	}
@@ -169,7 +176,7 @@ func adminResolutionTransition(command execution.AdminResolutionCommand) (outcom
 		if !command.JournalConfirmedAbsent || !command.LateCallerExcluded || command.LateCallerExclusionMethod == "" || command.ProofReference == "" {
 			return "", "", "", "", "", fmt.Errorf("retry resolution lacks durable absence proof")
 		}
-		return "PROVEN_ABSENT", "RETRY_WAIT", "PROVEN_ABSENT", "", "SUBMIT_ADMISSION", nil
+		return "PROVEN_ABSENT", "RETRY_WAIT", "PROVEN_ABSENT", "RETRY_PRECHECK", "SUBMIT_ADMISSION", nil
 	default:
 		return "", "", "", "", "", fmt.Errorf("unsupported attention resolution action")
 	}
@@ -196,7 +203,7 @@ func reconciliationTransition(outcome string) (state, attemptStatus, work, resum
 	case "ADOPT":
 		return "UPDATE_ACCEPTED", "ADOPTED", "TASK_OBSERVE", ""
 	case "PROVEN_ABSENT":
-		return "RETRY_WAIT", "PROVEN_ABSENT", "", "SUBMIT_ADMISSION"
+		return "RETRY_WAIT", "PROVEN_ABSENT", "RETRY_PRECHECK", "SUBMIT_ADMISSION"
 	default:
 		return "NEEDS_ATTENTION", "NEEDS_ATTENTION", "", ""
 	}

@@ -19,6 +19,9 @@ func (r *submitRepo) LoadPrecheck(context.Context, WorkFence) (PrecheckSnapshot,
 func (r *submitRepo) AdmitSubmission(context.Context, AdmissionCommand) (AdmissionResult, error) {
 	panic("unused")
 }
+func (r *submitRepo) AdmitRetrySubmission(context.Context, AdmissionCommand) (AdmissionResult, error) {
+	panic("unused")
+}
 func (r *submitRepo) LoadAttempt(context.Context, WorkFence) (AttemptSnapshot, error) {
 	return r.attempt, nil
 }

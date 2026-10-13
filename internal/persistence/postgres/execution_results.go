@@ -48,6 +48,13 @@ AND d.work_type='SUBMIT' FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID
 	if tag.RowsAffected() != 1 {
 		return fmt.Errorf("%w: firmware attempt is no longer admitted", ErrLeaseConflict)
 	}
+	if result.Class == execution.SubmitProvenPrewriteFailure {
+		if _, err = tx.Exec(ctx, `UPDATE submission_admissions
+SET retry_authorizations=retry_authorizations+1
+WHERE id=(SELECT submission_admission_id FROM firmware_update_attempts WHERE id=$1::uuid)`, attemptID); err != nil {
+			return fmt.Errorf("authorize proven prewrite retry: %w", err)
+		}
+	}
 	tag, err = tx.Exec(ctx, `UPDATE target_updates SET state=$2,resume_step=$3,revision=revision+1,updated_at=$4 WHERE id=$1::uuid AND revision=$5 AND command_epoch=$6`, updateID, nextState, nullableExecutionString(resume), now.UTC(), revision, epoch)
 	if err != nil {
 		return fmt.Errorf("advance firmware target update: %w", err)
@@ -86,7 +93,7 @@ func resultTransition(class execution.SubmitClass) (status, state, resume, work 
 	case execution.SubmitExplicitRejection:
 		return "REJECTED", "FAILED_TERMINAL", "", ""
 	case execution.SubmitProvenPrewriteFailure:
-		return "PROVEN_ABSENT", "RETRY_WAIT", "SUBMIT_ADMISSION", ""
+		return "PROVEN_ABSENT", "RETRY_WAIT", "SUBMIT_ADMISSION", "RETRY_PRECHECK"
 	default:
 		// NEEDS_ATTENTION cannot carry a resume_step; reconciliation work owns
 		// the next decision and cannot create a new submit without proof.
