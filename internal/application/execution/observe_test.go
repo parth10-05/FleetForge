@@ -70,3 +70,21 @@ func TestObservationDecisionRoutesOnlyEvidenceLifecycleSteps(t *testing.T) {
 		})
 	}
 }
+
+func TestObservationFreshnessUsesFrozenPolicyAndTimestamps(t *testing.T) {
+	now := time.Date(2026, time.October, 14, 12, 0, 0, 0, time.UTC)
+	attempt := AttemptSnapshot{ObservationFreshnessSeconds: 60}
+	base := Observation{ObservedAt: now.Add(-60 * time.Second), ReceivedAt: now.Add(-30 * time.Second)}
+	if !observationIsFresh(attempt, base, now) {
+		t.Fatal("observation at the frozen policy boundary must be fresh")
+	}
+	if observationIsFresh(attempt, Observation{ObservedAt: now.Add(-61 * time.Second), ReceivedAt: now}, now) {
+		t.Fatal("observation older than frozen policy must be stale")
+	}
+	if observationIsFresh(AttemptSnapshot{}, base, now) {
+		t.Fatal("missing frozen policy must fail closed")
+	}
+	if observationIsFresh(attempt, Observation{ObservedAt: now, ReceivedAt: now.Add(-time.Second)}, now) {
+		t.Fatal("received-before-observed evidence must fail closed")
+	}
+}

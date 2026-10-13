@@ -323,17 +323,18 @@ func (adapter ExecutionAdapter) LoadAttempt(ctx context.Context, work execution.
 	}
 	var attempt execution.AttemptSnapshot
 	err := adapter.Pool.QueryRow(ctx, `SELECT a.id::text,COALESCE(a.parent_attempt_id::text,''),a.submission_admission_id::text,a.target_id::text,a.target_update_id::text,a.campaign_id::text,
-a.provider,a.container,a.object_key,a.object_version,a.object_size,a.sha256_digest,a.expected_version,'',a.request_fingerprint,COALESCE(a.remote_task_reference,''),a.captured_command_epoch,a.admitted_revision,a.started_at
+a.provider,a.container,a.object_key,a.object_version,a.object_size,a.sha256_digest,a.expected_version,'',a.request_fingerprint,COALESCE(a.remote_task_reference,''),a.captured_command_epoch,a.admitted_revision,(snapshot.policy_json->>'observation_freshness_seconds')::bigint,a.started_at
 FROM due_work d
 JOIN submission_admissions s ON s.target_update_id=d.subject_id
 JOIN firmware_update_attempts a ON a.id=s.active_attempt_id
+JOIN campaign_plan_snapshots snapshot ON snapshot.campaign_id=a.campaign_id
 WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED'
 AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6
 AND d.work_type IN ('SUBMIT','TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE','AMBIGUITY_RECONCILE')
 AND ((d.work_type='SUBMIT' AND a.status='ADMITTED') OR (d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status='ACCEPTED') OR (d.work_type='AMBIGUITY_RECONCILE' AND a.status='AMBIGUOUS'))`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(
 		&attempt.AttemptID, &attempt.ParentAttemptID, &attempt.AdmissionID, &attempt.TargetID, &attempt.TargetUpdateID, &attempt.CampaignID,
 		&attempt.Artifact.Provider, &attempt.Artifact.Container, &attempt.Artifact.ObjectKey, &attempt.Artifact.ObjectVersion, &attempt.Artifact.Size, &attempt.Artifact.SHA256,
-		&attempt.ExpectedVersion, &attempt.CredentialReference, &attempt.RequestFingerprint, &attempt.RemoteTaskReference, &attempt.CommandEpoch, &attempt.AdmittedRevision, &attempt.StartedAt,
+		&attempt.ExpectedVersion, &attempt.CredentialReference, &attempt.RequestFingerprint, &attempt.RemoteTaskReference, &attempt.CommandEpoch, &attempt.AdmittedRevision, &attempt.ObservationFreshnessSeconds, &attempt.StartedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return execution.AttemptSnapshot{}, fmt.Errorf("%w: no admitted attempt for claimed submit work", ErrLeaseConflict)

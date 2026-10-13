@@ -203,7 +203,7 @@ func (adapter Adapter) observation(kind execution.ObservationKind, attempt execu
 		// fail-closed behavior without retaining the raw target response.
 		normalized = nil
 	}
-	return execution.Observation{Kind: kind, TargetID: attempt.TargetID, TargetUpdateID: attempt.TargetUpdateID, AttemptID: attempt.AttemptID, ResourcePath: resource, EvidenceFingerprint: fingerprint(document), Data: normalized, ObservedAt: received, ReceivedAt: received, Fresh: true, ContradictsExpectedState: contradicts}
+	return execution.Observation{Kind: kind, TargetID: attempt.TargetID, TargetUpdateID: attempt.TargetUpdateID, AttemptID: attempt.AttemptID, ResourcePath: resource, EvidenceFingerprint: fingerprint(document), Data: normalized, ObservedAt: received, ReceivedAt: received, ContradictsExpectedState: contradicts}
 }
 
 // normalizeObservation keeps only the fields used by the execution reducer.

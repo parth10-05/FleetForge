@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 const retryObservationWork = "RETRY_OBSERVATION"
@@ -78,11 +79,22 @@ func ObserveOnce(ctx context.Context, repository ObservationRepository, target O
 	if observation.AttemptID != attempt.AttemptID || observation.TargetID != attempt.TargetID || observation.TargetUpdateID != attempt.TargetUpdateID || len(observation.Data) == 0 || observation.EvidenceFingerprint == "" || observation.ObservedAt.IsZero() || observation.ReceivedAt.IsZero() {
 		return fmt.Errorf("invalid observation evidence")
 	}
+	observation.Fresh = observationIsFresh(attempt, observation, time.Now().UTC())
 	decision, err := observationDecision(work, observation)
 	if err != nil {
 		return err
 	}
 	return repository.CommitObservation(ctx, work, decision)
+}
+
+// observationIsFresh applies the campaign's immutable policy at the decision
+// boundary. Transport adapters supply timestamps and normalized evidence, but
+// cannot declare their own evidence fresh.
+func observationIsFresh(attempt AttemptSnapshot, observation Observation, now time.Time) bool {
+	if attempt.ObservationFreshnessSeconds == 0 || observation.ObservedAt.IsZero() || observation.ReceivedAt.IsZero() || now.IsZero() || observation.ObservedAt.After(observation.ReceivedAt) || observation.ObservedAt.After(now) {
+		return false
+	}
+	return now.Sub(observation.ObservedAt) <= time.Duration(attempt.ObservationFreshnessSeconds)*time.Second
 }
 
 func observationDecision(work WorkFence, observation Observation) (ObservationDecision, error) {

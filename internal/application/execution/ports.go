@@ -104,6 +104,7 @@ type AttemptSnapshot struct {
 	Artifact                                                                      ObjectIdentity
 	ExpectedVersion, CredentialReference, RequestFingerprint, RemoteTaskReference string
 	CommandEpoch, AdmittedRevision                                                int64
+	ObservationFreshnessSeconds                                                   uint64
 	StartedAt                                                                     time.Time
 }
 type SubmitRequest struct {
