@@ -196,7 +196,64 @@ func (adapter Adapter) getDocument(ctx context.Context, targetID, resource strin
 }
 
 func (adapter Adapter) observation(kind execution.ObservationKind, attempt execution.AttemptSnapshot, resource string, document []byte, received time.Time, contradicts bool) execution.Observation {
-	return execution.Observation{Kind: kind, TargetID: attempt.TargetID, TargetUpdateID: attempt.TargetUpdateID, AttemptID: attempt.AttemptID, ResourcePath: resource, EvidenceFingerprint: fingerprint(document), Data: append([]byte(nil), document...), ObservedAt: received, ReceivedAt: received, Fresh: true, ContradictsExpectedState: contradicts}
+	normalized, err := normalizeObservation(kind, document)
+	if err != nil {
+		// Callers have already validated the narrow fields they consume. An
+		// empty projection is rejected by the application boundary, preserving
+		// fail-closed behavior without retaining the raw target response.
+		normalized = nil
+	}
+	return execution.Observation{Kind: kind, TargetID: attempt.TargetID, TargetUpdateID: attempt.TargetUpdateID, AttemptID: attempt.AttemptID, ResourcePath: resource, EvidenceFingerprint: fingerprint(document), Data: normalized, ObservedAt: received, ReceivedAt: received, Fresh: true, ContradictsExpectedState: contradicts}
+}
+
+// normalizeObservation keeps only the fields used by the execution reducer.
+// Raw Redfish documents can contain vendor extensions and high-cardinality
+// metadata, so they must not cross the durable evidence boundary.
+func normalizeObservation(kind execution.ObservationKind, document []byte) ([]byte, error) {
+	var source map[string]json.RawMessage
+	if err := json.Unmarshal(document, &source); err != nil {
+		return nil, err
+	}
+	projection := map[string]string{}
+	switch kind {
+	case execution.ObservationTask:
+		var taskState string
+		if err := json.Unmarshal(source["TaskState"], &taskState); err != nil || taskState == "" {
+			return nil, fmt.Errorf("missing task state")
+		}
+		projection["TaskState"] = taskState
+		if raw, ok := source["Reason"]; ok {
+			var reason string
+			if json.Unmarshal(raw, &reason) == nil && reason != "" {
+				projection["Reason"] = reason
+			}
+		}
+	case execution.ObservationInventory:
+		var version string
+		if err := json.Unmarshal(source["Version"], &version); err != nil || version == "" {
+			return nil, fmt.Errorf("missing inventory version")
+		}
+		projection["Version"] = version
+	case execution.ObservationHealth, execution.ObservationReboot:
+		var status struct {
+			Status struct{ Health, State string } `json:"Status"`
+		}
+		if err := json.Unmarshal(document, &status); err != nil {
+			return nil, err
+		}
+		if status.Status.Health != "" {
+			projection["Health"] = status.Status.Health
+		}
+		if status.Status.State != "" {
+			projection["State"] = status.Status.State
+		}
+		if len(projection) == 0 {
+			return nil, fmt.Errorf("missing manager status")
+		}
+	default:
+		return nil, fmt.Errorf("unknown observation kind")
+	}
+	return json.Marshal(projection)
 }
 
 func fingerprint(document []byte) string {

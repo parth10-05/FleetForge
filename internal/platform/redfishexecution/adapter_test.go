@@ -3,6 +3,7 @@ package redfishexecution
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -105,7 +106,19 @@ func TestAdapterTreatsMissingTaskAsInventoryOnlyEvidence(t *testing.T) {
 	adapter := Adapter{Loader: targetLoader{target: Target{Origin: server.URL, TargetKey: "node-a", CredentialReference: "synthetic-test:node-a"}}, Client: redfish.NewClient(redfish.ClientConfig{HTTPClient: server.Client(), Total: time.Second, MaxBytes: 1024}), Resolver: resolver}
 	attempt := execution.AttemptSnapshot{AttemptID: "attempt", TargetID: "target", TargetUpdateID: "update", ExpectedVersion: "2", RemoteTaskReference: "/redfish/v1/TaskService/Tasks/task-1"}
 	observation, err := adapter.ObserveTask(context.Background(), execution.TaskObservationRequest{Attempt: attempt})
-	if err != nil || observation.Kind != execution.ObservationTask || string(observation.Data) != `{"TaskState":"Missing","Reason":"not_found"}` || observation.ContradictsExpectedState {
+	var normalized map[string]string
+	_ = json.Unmarshal(observation.Data, &normalized)
+	if err != nil || observation.Kind != execution.ObservationTask || normalized["TaskState"] != "Missing" || normalized["Reason"] != "not_found" || observation.ContradictsExpectedState {
 		t.Fatalf("missing task observation=%+v err=%v", observation, err)
+	}
+}
+
+func TestAdapterNormalizesObservationWithoutRetainingVendorPayload(t *testing.T) {
+	data, err := normalizeObservation(execution.ObservationInventory, []byte(`{"Version":"2","Oem":{"secret":"must-not-persist"},"Huge":"ignored"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"Version":"2"}` {
+		t.Fatalf("normalized=%s", data)
 	}
 }
