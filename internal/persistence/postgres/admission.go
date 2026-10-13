@@ -132,7 +132,7 @@ VALUES ($1::uuid,'TARGET_UPDATE',$2::uuid,$3,$4,$5,$6::jsonb)`, req.OutboxEventI
 		return classifyAdmissionWrite(err, "complete retry precheck work")
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO due_work (id,command_id,subject_type,subject_id,work_type,schema_version,not_before,expected_revision,expected_command_epoch)
-VALUES ($1::uuid,$2::uuid,'TARGET_UPDATE',$3::uuid,'SUBMIT',1,$4,$5,$6)`, req.DueWorkID, req.CommandID, updateID, req.DueWorkNotBefore, newRevision, epoch); err != nil {
+VALUES ($1::uuid,md5($2::text || ':retry-submit')::uuid,'TARGET_UPDATE',$3::uuid,'SUBMIT',1,$4,$5,$6)`, req.DueWorkID, req.CommandID, updateID, req.DueWorkNotBefore, newRevision, epoch); err != nil {
 		return classifyAdmissionWrite(err, "schedule retry submit work")
 	}
 	if err = tx.Commit(ctx); err != nil {

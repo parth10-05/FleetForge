@@ -75,7 +75,7 @@ func (adapter ExecutionAdapter) AdmitRetrySubmission(ctx context.Context, comman
 	if err := AdmitRetryOperation(ctx, adapter.Pool, request); err != nil {
 		return execution.AdmissionResult{}, fmt.Errorf("admit proof-backed retry: %w", err)
 	}
-	return execution.AdmissionResult{AttemptID: command.AttemptID, SubmitWorkID: command.Envelope.DueWorkID, SubmitCommandID: command.Work.CommandID}, nil
+	return execution.AdmissionResult{AttemptID: command.AttemptID, SubmitWorkID: command.Envelope.DueWorkID, SubmitCommandID: deterministicExecutionUUID(command.Work.CommandID + ":retry-submit")}, nil
 }
 
 func admissionRequestFromExecution(command execution.AdmissionCommand) (AdmissionRequest, error) {

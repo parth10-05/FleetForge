@@ -114,7 +114,7 @@ func TestProvenPrewriteFailureCreatesExactlyOneFencedChildAttempt(t *testing.T) 
 	if err := persistence.AdmitRetryOperation(ctx, pool, child); err != nil {
 		t.Fatalf("AdmitRetryOperation: %v", err)
 	}
-	var parent, active, state, delivery string
+	var parent, active, state, delivery, submitCommandID string
 	var children, reservations, submits int
 	if err := pool.QueryRow(ctx, `SELECT a.parent_attempt_id::text,s.active_attempt_id::text,tu.state
 FROM firmware_update_attempts a JOIN submission_admissions s ON s.id=a.submission_admission_id
@@ -135,6 +135,9 @@ JOIN target_updates tu ON tu.id=a.target_update_id WHERE a.id=$1::uuid`, child.F
 	}
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&submits); err != nil || submits != 1 {
 		t.Fatalf("pending submits=%d err=%v, want one child submit", submits, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT command_id::text FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&submitCommandID); err != nil || submitCommandID == retry.CommandID {
+		t.Fatalf("child submit command=%s err=%v, want identity distinct from retry precheck command", submitCommandID, err)
 	}
 	if err := persistence.AdmitRetryOperation(ctx, pool, child); err == nil {
 		t.Fatal("duplicate child admission unexpectedly succeeded")
