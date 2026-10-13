@@ -65,6 +65,8 @@ func TestAdmissionPersistsInitialFirmwareAttemptAtomically(t *testing.T) {
 		AttemptID: base + "10", Provider: "local-versioned-v1", Container: "firmware", ObjectKey: "verified/firmware.bin", ObjectVersion: "v1", ObjectSize: 4096,
 		SHA256Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ExpectedVersion: "1.2.3", RequestFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	}
+	req.PrecheckObservedAt = time.Now().UTC()
+	req.PrecheckEvidence = json.RawMessage(`{"current_version":"1.0.0","capable":true,"healthy":true,"compatible":true,"evidence_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`)
 	if err := persistence.AdmitOperation(ctx, pool, req); err != nil {
 		t.Fatalf("AdmitOperation: %v", err)
 	}

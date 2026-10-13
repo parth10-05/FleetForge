@@ -60,7 +60,7 @@ VALUES ('TARGET_UPDATE',$1::uuid,$2,0,'system:precheck',$3::uuid,$3::uuid,$3::uu
 		return classifyDueWorkError(err, "append precheck audit")
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO outbox_events (event_id,aggregate_type,aggregate_id,aggregate_revision,event_type,schema_version,payload)
-VALUES (md5($1)::uuid,'TARGET_UPDATE',$2::uuid,$3,'target.precheck_started',1,jsonb_build_object('target_update_id',$2,'revision',$3))`, "fleetforge.precheck.outbox/v1:"+work.DueWorkID, updateID, newRevision); err != nil {
+VALUES (md5($1)::uuid,'TARGET_UPDATE',$2::uuid,$3::bigint,'target.precheck_started',1,jsonb_build_object('target_update_id',$2::uuid,'revision',$3::bigint))`, "fleetforge.precheck.outbox/v1:"+work.DueWorkID, updateID, newRevision); err != nil {
 		return classifyDueWorkError(err, "insert precheck outbox")
 	}
 	tag, err = tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$5 WHERE id=$1::uuid AND command_id=$2::uuid AND delivery_generation=$3 AND delivery_state='CLAIMED' AND lease_token=$4::uuid`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, now.UTC())
