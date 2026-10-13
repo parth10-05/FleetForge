@@ -32,7 +32,7 @@ sqlc-generate:
 	CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
 
 build:
-	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-sweeper ./cmd/wakeup-worker
+	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-sweeper ./cmd/wakeup-worker ./cmd/execution-worker ./cmd/precheck-worker ./cmd/observation-worker ./cmd/reconciliation-worker
 
 web-typecheck:
 	pnpm --dir web typecheck

@@ -113,7 +113,7 @@ func Append(path string, entry Entry) error {
 		return err
 	}
 	defer w.Close()
-	actual, err := w.Append(Record{LogicalTime: entry.LogicalTime, Kind: entry.Kind, TargetID: entry.TargetID, Payload: entry.Payload})
+	actual, err := w.Append(Record{LogicalTime: entry.LogicalTime, RecordedAt: entry.RecordedAt, Kind: entry.Kind, TargetID: entry.TargetID, Payload: entry.Payload})
 	if err != nil {
 		return err
 	}

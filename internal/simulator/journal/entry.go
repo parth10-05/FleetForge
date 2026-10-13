@@ -9,11 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/parth10-05/fleetforge/internal/simulator/clock"
 )
 
 const SchemaVersionV2 = "fleetforge.simulator.journal/v2"
+const SchemaVersionV3 = "fleetforge.simulator.journal/v3"
+const SchemaVersionCurrent = SchemaVersionV3
 const SchemaVersionV1 = SchemaVersionV2 // retained name prevents silent v1 callers.
 
 var (
@@ -62,6 +65,7 @@ type Entry struct {
 	RunID         string            `json:"run_id"`
 	Sequence      uint64            `json:"sequence"`
 	LogicalTime   clock.LogicalTime `json:"logical_time"`
+	RecordedAt    time.Time         `json:"recorded_at,omitempty"`
 	Kind          Kind              `json:"kind"`
 	TargetID      string            `json:"target_id,omitempty"`
 	Payload       Payload           `json:"payload,omitempty"`
@@ -70,16 +74,21 @@ type Entry struct {
 }
 type Record struct {
 	LogicalTime clock.LogicalTime
+	RecordedAt  time.Time
 	Kind        Kind
 	TargetID    string
 	Payload     Payload
 }
 
 func New(runID string, sequence uint64, logicalTime clock.LogicalTime, kind Kind, targetID, correlationID, requestDigest, previousHash string) (Entry, error) {
-	return newEntry(runID, sequence, Record{LogicalTime: logicalTime, Kind: kind, TargetID: targetID, Payload: Payload{CorrelationID: correlationID, Fingerprint: requestDigest}}, previousHash)
+	return newEntry(runID, sequence, Record{LogicalTime: logicalTime, RecordedAt: time.Now().UTC(), Kind: kind, TargetID: targetID, Payload: Payload{CorrelationID: correlationID, Fingerprint: requestDigest}}, previousHash)
 }
 func newEntry(runID string, sequence uint64, record Record, previous string) (Entry, error) {
-	e := Entry{SchemaVersion: SchemaVersionV2, RunID: runID, Sequence: sequence, LogicalTime: record.LogicalTime, Kind: record.Kind, TargetID: record.TargetID, Payload: record.Payload, PreviousHash: previous}
+	recordedAt := record.RecordedAt.UTC()
+	if recordedAt.IsZero() {
+		recordedAt = time.Now().UTC()
+	}
+	e := Entry{SchemaVersion: SchemaVersionCurrent, RunID: runID, Sequence: sequence, LogicalTime: record.LogicalTime, RecordedAt: recordedAt, Kind: record.Kind, TargetID: record.TargetID, Payload: record.Payload, PreviousHash: previous}
 	if err := e.validateFields(); err != nil {
 		return Entry{}, err
 	}
@@ -100,7 +109,10 @@ func (e Entry) computedHash() (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 func (e Entry) validateFields() error {
-	if e.SchemaVersion != SchemaVersionV2 || !e.Kind.valid() || e.RunID == "" || e.Sequence == 0 || unsafe(e.RunID, 128) || unsafe(e.TargetID, 128) || unsafe(e.Payload.CorrelationID, 128) || unsafe(e.Payload.Fingerprint, 128) || unsafe(e.Payload.Detail, 256) || unsafe(e.PreviousHash, 64) || strings.Contains(e.Payload.Fingerprint, "://") {
+	if (e.SchemaVersion != SchemaVersionV2 && e.SchemaVersion != SchemaVersionV3) || !e.Kind.valid() || e.RunID == "" || e.Sequence == 0 || unsafe(e.RunID, 128) || unsafe(e.TargetID, 128) || unsafe(e.Payload.CorrelationID, 128) || unsafe(e.Payload.Fingerprint, 128) || unsafe(e.Payload.Detail, 256) || unsafe(e.PreviousHash, 64) || strings.Contains(e.Payload.Fingerprint, "://") {
+		return ErrInvalidChain
+	}
+	if e.SchemaVersion == SchemaVersionV3 && e.RecordedAt.IsZero() {
 		return ErrInvalidChain
 	}
 	if e.Hash != "" && len(e.Hash) != 64 {

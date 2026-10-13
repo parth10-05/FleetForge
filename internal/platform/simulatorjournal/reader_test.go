@@ -44,3 +44,27 @@ func TestReaderRejectsRunMismatch(t *testing.T) {
 		t.Fatal("run mismatch was accepted")
 	}
 }
+
+func TestReaderFiltersAcceptanceOutsideAttemptWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.jsonl")
+	writer, err := journal.OpenWriter(path, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	for _, at := range []time.Time{now.Add(-time.Minute), now, now.Add(time.Minute)} {
+		if _, err := writer.Append(journal.Record{RecordedAt: at, Kind: journal.RequestReceived, TargetID: "node-a", Payload: journal.Payload{CorrelationID: "attempt-1", Fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := (Reader{Path: path}).ReadAcceptance(context.Background(), "run-1", "node-a", now, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Sequence != 2 {
+		t.Fatalf("bounded entries=%+v", result.Entries)
+	}
+}

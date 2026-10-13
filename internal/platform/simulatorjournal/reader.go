@@ -39,6 +39,16 @@ func (reader Reader) ReadAcceptance(ctx context.Context, runID, targetID string,
 		if entry.TargetID != targetID || (entry.Kind != journal.RequestReceived && entry.Kind != journal.UpdateAccepted) {
 			continue
 		}
+		// A bounded reconciliation may use only timestamped, hash-bound records
+		// from its attempt window. Legacy records remain readable but cannot
+		// establish acceptance or absence for a new reconciliation decision.
+		if entry.RecordedAt.IsZero() {
+			return execution.AcceptanceJournal{}, fmt.Errorf("acceptance journal entry lacks bounded timestamp")
+		}
+		recordedAt := entry.RecordedAt.UTC()
+		if recordedAt.Before(from.UTC()) || recordedAt.After(until.UTC()) {
+			continue
+		}
 		fingerprint := entry.Payload.Fingerprint
 		if fingerprint != "" {
 			fingerprint = "sha256:" + strings.TrimPrefix(fingerprint, "sha256:")
