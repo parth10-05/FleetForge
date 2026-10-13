@@ -99,7 +99,7 @@ VALUES (md5($1)::uuid,$2::uuid,$3::uuid,'FIRMWARE_PRECHECK',$4,$5,$6::jsonb)`, "
 		return classifyAdmissionWrite(err, "persist retry precheck evidence")
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO step_attempts (id,target_update_id,step,attempt_number,command_id)
-VALUES ($1::uuid,$2::uuid,$3,(SELECT COALESCE(max(attempt_number),0)+1 FROM step_attempts WHERE target_update_id=$2::uuid AND step=$3),$4::uuid)`, req.StepAttemptID, req.TargetUpdateID, req.Step, req.CommandID); err != nil {
+VALUES ($1::uuid,$2::uuid,$3::varchar,(SELECT COALESCE(max(attempt_number),0)+1 FROM step_attempts WHERE target_update_id=$2::uuid AND step=$3::varchar),$4::uuid)`, req.StepAttemptID, req.TargetUpdateID, req.Step, req.CommandID); err != nil {
 		return classifyAdmissionWrite(err, "insert retry step attempt")
 	}
 	a := req.FirmwareAttempt
