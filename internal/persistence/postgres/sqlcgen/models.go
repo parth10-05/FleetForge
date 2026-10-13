@@ -8,6 +8,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AmbiguityResolution struct {
+	ID                        pgtype.UUID        `json:"id"`
+	AttemptID                 pgtype.UUID        `json:"attempt_id"`
+	TargetUpdateRevision      int64              `json:"target_update_revision"`
+	Outcome                   string             `json:"outcome"`
+	EvidenceSummary           []byte             `json:"evidence_summary"`
+	EvidenceFingerprint       string             `json:"evidence_fingerprint"`
+	JournalRunID              pgtype.Text        `json:"journal_run_id"`
+	JournalCheckpointHash     pgtype.Text        `json:"journal_checkpoint_hash"`
+	JournalSequenceStart      pgtype.Int8        `json:"journal_sequence_start"`
+	JournalSequenceEnd        pgtype.Int8        `json:"journal_sequence_end"`
+	JournalConfirmedAbsent    bool               `json:"journal_confirmed_absent"`
+	LateCallerExcluded        bool               `json:"late_caller_excluded"`
+	LateCallerExclusionMethod pgtype.Text        `json:"late_caller_exclusion_method"`
+	ProofReference            pgtype.Text        `json:"proof_reference"`
+	ActorID                   string             `json:"actor_id"`
+	CommandID                 pgtype.UUID        `json:"command_id"`
+	ReasonCode                string             `json:"reason_code"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	SupersedesID              pgtype.UUID        `json:"supersedes_id"`
+}
+
 type ArtifactCleanupIntent struct {
 	ArtifactID              pgtype.UUID        `json:"artifact_id"`
 	GrantID                 string             `json:"grant_id"`
@@ -197,6 +219,36 @@ type FirmwareArtifact struct {
 	UploadGrantID   pgtype.Text        `json:"upload_grant_id"`
 }
 
+type FirmwareUpdateAttempt struct {
+	ID                    pgtype.UUID        `json:"id"`
+	StepAttemptID         pgtype.UUID        `json:"step_attempt_id"`
+	SubmissionAdmissionID pgtype.UUID        `json:"submission_admission_id"`
+	ParentAttemptID       pgtype.UUID        `json:"parent_attempt_id"`
+	TargetUpdateID        pgtype.UUID        `json:"target_update_id"`
+	CampaignID            pgtype.UUID        `json:"campaign_id"`
+	TargetID              pgtype.UUID        `json:"target_id"`
+	ArtifactID            pgtype.UUID        `json:"artifact_id"`
+	Provider              string             `json:"provider"`
+	Container             string             `json:"container"`
+	ObjectKey             string             `json:"object_key"`
+	ObjectVersion         string             `json:"object_version"`
+	ObjectSize            int64              `json:"object_size"`
+	Sha256Digest          string             `json:"sha256_digest"`
+	ExpectedVersion       string             `json:"expected_version"`
+	UpdateMechanism       string             `json:"update_mechanism"`
+	RequestFingerprint    string             `json:"request_fingerprint"`
+	CapturedCommandEpoch  int64              `json:"captured_command_epoch"`
+	AdmittedRevision      int64              `json:"admitted_revision"`
+	Status                string             `json:"status"`
+	ResultClass           pgtype.Text        `json:"result_class"`
+	RemoteTaskReference   pgtype.Text        `json:"remote_task_reference"`
+	ResponseFingerprint   pgtype.Text        `json:"response_fingerprint"`
+	StartedAt             pgtype.Timestamptz `json:"started_at"`
+	TransportFinishedAt   pgtype.Timestamptz `json:"transport_finished_at"`
+	AcceptedAt            pgtype.Timestamptz `json:"accepted_at"`
+	ResolvedAt            pgtype.Timestamptz `json:"resolved_at"`
+}
+
 type IdempotencyRecord struct {
 	ID                pgtype.UUID        `json:"id"`
 	ActorID           string             `json:"actor_id"`
@@ -308,6 +360,9 @@ type SubmissionAdmission struct {
 	AdmittedAt           pgtype.Timestamptz `json:"admitted_at"`
 	ResolvedAt           pgtype.Timestamptz `json:"resolved_at"`
 	ResolutionReason     pgtype.Text        `json:"resolution_reason"`
+	InitialAttemptID     pgtype.UUID        `json:"initial_attempt_id"`
+	ActiveAttemptID      pgtype.UUID        `json:"active_attempt_id"`
+	RetryAuthorizations  int64              `json:"retry_authorizations"`
 }
 
 type Target struct {
