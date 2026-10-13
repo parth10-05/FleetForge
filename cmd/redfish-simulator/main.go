@@ -69,7 +69,7 @@ func run() error {
 	targets := redfishsim.NewWithJournal(engine, []byte(cfg.Username), []byte(cfg.Password), cfg.ReadinessTimeout, int64(input.Limits.BodyBytes), writer)
 	targets.SetAfterMutation(func(ctx context.Context) error { return checkpoint(run, engine, ctx) })
 	targets.SetOpenConnectionLimit(input.Limits.OpenConnections)
-	dispatcher := redfishsim.NewCallbackDispatcher(input.Limits.CallbackWorkers, input.Limits.OpenConnections, cfg.ReadinessTimeout)
+	dispatcher := redfishsim.NewCallbackDispatcher(input.Limits.CallbackWorkers, input.Limits.OpenConnections, cfg.ReadinessTimeout, cfg.CallbackHMACKey)
 	defer dispatcher.Close()
 	targets.SetCallbackDispatcher(dispatcher)
 	realtimeContext, stopRealtime := context.WithCancel(context.Background())

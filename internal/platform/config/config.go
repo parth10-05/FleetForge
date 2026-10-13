@@ -26,6 +26,7 @@ const (
 	simulatorPasswordKey              = "FLEETFORGE_SIMULATOR_PASSWORD"
 	simulatorAdminAddressKey          = "FLEETFORGE_SIMULATOR_ADMIN_ADDR"
 	simulatorAdminSecretKey           = "FLEETFORGE_SIMULATOR_ADMIN_SECRET"
+	simulatorCallbackHMACSecretKey    = "FLEETFORGE_SIMULATOR_CALLBACK_HMAC_SECRET"
 	objectStoreAddressKey             = "FLEETFORGE_OBJECT_STORE_ADDR"
 	objectStoreRootKey                = "FLEETFORGE_OBJECT_STORE_ROOT"
 	objectStoreHMACSecretKey          = "FLEETFORGE_OBJECT_STORE_HMAC_SECRET"
@@ -109,6 +110,7 @@ type OrchestrationWorker struct {
 type Simulator struct {
 	Common
 	Address, RunRoot, ScenarioPath, Username, Password, AdminAddress, AdminSecret string
+	CallbackHMACKey                                                               []byte
 }
 type ObjectStore struct {
 	Common
@@ -363,7 +365,23 @@ func LoadSimulator() (Simulator, error) {
 	if adminSecret == "" {
 		return Simulator{}, &Error{Key: simulatorAdminSecretKey, Reason: "is required"}
 	}
-	return Simulator{Common: common, Address: address, RunRoot: runRoot, ScenarioPath: scenarioPath, Username: username, Password: password, AdminAddress: adminAddress, AdminSecret: adminSecret}, nil
+	callbackKey, err := optionalHMACKey(os.LookupEnv, simulatorCallbackHMACSecretKey)
+	if err != nil {
+		return Simulator{}, err
+	}
+	return Simulator{Common: common, Address: address, RunRoot: runRoot, ScenarioPath: scenarioPath, Username: username, Password: password, AdminAddress: adminAddress, AdminSecret: adminSecret, CallbackHMACKey: callbackKey}, nil
+}
+
+func optionalHMACKey(lookup lookupEnv, key string) ([]byte, error) {
+	encoded := optional(lookup, key, "")
+	if encoded == "" {
+		return nil, nil
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(encoded)
+	if err != nil || len(decoded) < 32 {
+		return nil, &Error{Key: key, Reason: "must be base64 and decode to at least 32 bytes"}
+	}
+	return decoded, nil
 }
 
 // LoadObjectStore configures the independent local data-plane listener. Its
