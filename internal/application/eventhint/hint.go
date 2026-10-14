@@ -2,11 +2,13 @@
 package eventhint
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"time"
 )
@@ -27,6 +29,9 @@ func Parse(secret []byte, signature string, body []byte, receivedAt time.Time) (
 	if len(secret) < 32 || len(body) == 0 || len(body) > 8192 || receivedAt.IsZero() || !validSignature(secret, signature, body) {
 		return Hint{}, ErrRejected
 	}
+	if err := validateUniqueJSON(body); err != nil {
+		return Hint{}, ErrRejected
+	}
 	var envelope struct {
 		Events []struct {
 			EventID string `json:"EventId"`
@@ -41,7 +46,7 @@ func Parse(secret []byte, signature string, body []byte, receivedAt time.Time) (
 			} `json:"Oem"`
 		} `json:"Events"`
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil || len(envelope.Events) != 1 {
 		return Hint{}, ErrRejected
@@ -53,6 +58,64 @@ func Parse(secret []byte, signature string, body []byte, receivedAt time.Time) (
 	}
 	digest := sha256.Sum256(body)
 	return Hint{Source: Source, EventID: event.EventID, TargetKey: event.OEM.FleetForge.Target, TaskID: event.OEM.FleetForge.Task, Kind: event.Kind, Sequence: event.OEM.FleetForge.Sequence, ObservedAt: observedAt.UTC(), ReceivedAt: receivedAt.UTC(), PayloadDigest: "sha256:" + hex.EncodeToString(digest[:])}, nil
+}
+
+// validateUniqueJSON accepts one complete JSON value and rejects duplicate
+// object members before struct decoding can silently retain only the final one.
+func validateUniqueJSON(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := consumeUniqueJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
+func consumeUniqueJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	switch delimiter, ok := token.(json.Delim); {
+	case !ok:
+		return nil
+	case delimiter == '{':
+		keys := make(map[string]struct{})
+		for decoder.More() {
+			key, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			name, ok := key.(string)
+			if !ok {
+				return errors.New("object key is not a string")
+			}
+			if _, exists := keys[name]; exists {
+				return errors.New("duplicate JSON object member")
+			}
+			keys[name] = struct{}{}
+			if err := consumeUniqueJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	case delimiter == '[':
+		for decoder.More() {
+			if err := consumeUniqueJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	default:
+		return errors.New("unexpected JSON delimiter")
+	}
 }
 
 func validSignature(secret []byte, signature string, body []byte) bool {
