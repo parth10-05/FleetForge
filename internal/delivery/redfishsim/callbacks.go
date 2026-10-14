@@ -86,7 +86,7 @@ func (d *CallbackDispatcher) Close()          { d.once.Do(func() { close(d.stop)
 func (d *CallbackDispatcher) Dropped() uint64 { return d.drops.Load() }
 
 func (d *CallbackDispatcher) Enqueue(subscriptions []core.SubscriptionState, event core.EventState) {
-	body, err := json.Marshal(map[string]any{"Events": []map[string]any{{"EventId": event.ID, "EventType": "StatusChange", "Message": event.Kind, "Oem": map[string]any{"FleetForge": map[string]any{"Sequence": event.Sequence, "Task": event.TaskID}}}}})
+	body, err := json.Marshal(map[string]any{"Events": []map[string]any{{"EventId": event.ID, "EventType": "StatusChange", "Message": event.Kind, "Oem": map[string]any{"FleetForge": map[string]any{"Target": event.TargetID, "Sequence": event.Sequence, "Task": event.TaskID, "ObservedAt": time.Now().UTC().Format(time.RFC3339Nano)}}}}})
 	if err != nil {
 		return
 	}

@@ -11,7 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/parth10-05/fleetforge/internal/delivery/eventhinthttp"
 	"github.com/parth10-05/fleetforge/internal/delivery/healthhttp"
+	"github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/buildinfo"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 )
@@ -28,9 +30,21 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	handler := healthhttp.NewHandler(healthhttp.FileProbe{Path: cfg.ReadinessFile}, cfg.ReadinessTimeout, buildinfo.Current())
-	handler.MarkStarted()
-	server := newServer(cfg.Address, handler.Routes())
+	settings, err := config.LoadPostgreSQL()
+	if err != nil {
+		return err
+	}
+	pool, err := postgres.OpenApplicationPool(context.Background(), settings)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	health := healthhttp.NewHandler(healthhttp.FileProbe{Path: cfg.ReadinessFile}, cfg.ReadinessTimeout, buildinfo.Current())
+	health.MarkStarted()
+	mux := http.NewServeMux()
+	mux.Handle("/", health.Routes())
+	mux.Handle("/v1/events/synthetic", eventhinthttp.New(cfg.EventHMACKey, postgres.EventHintStore{Pool: pool}, time.Now).Routes())
+	server := newServer(cfg.Address, mux)
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errorsChannel := make(chan error, 1)

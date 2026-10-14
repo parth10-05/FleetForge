@@ -19,6 +19,7 @@ import (
 
 const (
 	apiAddressKey                     = "FLEETFORGE_API_ADDR"
+	apiEventHMACSecretKey             = "FLEETFORGE_API_EVENT_HMAC_SECRET"
 	simulatorAddressKey               = "FLEETFORGE_SIMULATOR_ADDR"
 	simulatorRunRootKey               = "FLEETFORGE_SIMULATOR_RUN_ROOT"
 	simulatorScenarioPathKey          = "FLEETFORGE_SIMULATOR_SCENARIO_PATH"
@@ -58,7 +59,8 @@ type Common struct {
 
 type API struct {
 	Common
-	Address string
+	Address      string
+	EventHMACKey []byte
 }
 type Worker struct{ Common }
 type ArtifactWorker struct {
@@ -147,7 +149,11 @@ func LoadAPI() (API, error) {
 	if err != nil {
 		return API{}, err
 	}
-	return API{Common: common, Address: address}, nil
+	key, err := optionalHMACKey(os.LookupEnv, apiEventHMACSecretKey)
+	if err != nil {
+		return API{}, err
+	}
+	return API{Common: common, Address: address, EventHMACKey: key}, nil
 }
 
 func LoadWorker() (Worker, error) {
