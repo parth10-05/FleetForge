@@ -207,6 +207,36 @@ type DueWork struct {
 	DiscoveryAttempts    int32              `json:"discovery_attempts"`
 }
 
+type ExecutionEventHead struct {
+	TargetKey string             `json:"target_key"`
+	Sequence  int64              `json:"sequence"`
+	ReceiptID pgtype.UUID        `json:"receipt_id"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ExecutionEventQuarantine struct {
+	ID            pgtype.UUID        `json:"id"`
+	Source        string             `json:"source"`
+	PayloadDigest string             `json:"payload_digest"`
+	ReasonCode    string             `json:"reason_code"`
+	ReceivedAt    pgtype.Timestamptz `json:"received_at"`
+}
+
+type ExecutionEventReceipt struct {
+	ID             pgtype.UUID        `json:"id"`
+	Source         string             `json:"source"`
+	EventID        string             `json:"event_id"`
+	TargetKey      string             `json:"target_key"`
+	TaskID         string             `json:"task_id"`
+	Sequence       int64              `json:"sequence"`
+	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	PayloadDigest  string             `json:"payload_digest"`
+	Disposition    string             `json:"disposition"`
+	TargetUpdateID pgtype.UUID        `json:"target_update_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type FirmwareArtifact struct {
 	ID              pgtype.UUID        `json:"id"`
 	FirmwareVersion string             `json:"firmware_version"`
