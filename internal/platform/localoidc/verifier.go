@@ -1,4 +1,4 @@
-// Package localoidc verifies test-issuer Cognito-compatible access tokens.
+// Package localoidc verifies local synthetic HS256 access tokens.
 // It is deliberately explicit about every accepted claim; it never treats a
 // decoded JWT as authenticated merely because it has administrator-looking
 // fields.
@@ -74,7 +74,7 @@ func (verifier Verifier) VerifyAccessToken(ctx context.Context, token string) (e
 		return execution.VerifiedPrincipal{}, fmt.Errorf("access token claims are not authorized")
 	}
 	roles := normalizeRoles(claims.Groups)
-	return execution.VerifiedPrincipal{Subject: claims.Subject, IssuerClass: "local-cognito-compatible", Roles: roles, AuthenticatedAt: authenticated, ExpiresAt: expires, Verified: true}, nil
+	return execution.VerifiedPrincipal{Subject: claims.Subject, IssuerClass: "local-synthetic-hs256", Roles: roles, AuthenticatedAt: authenticated, ExpiresAt: expires, Verified: true}, nil
 }
 
 func decode(raw string, destination any) error {

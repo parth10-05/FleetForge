@@ -36,7 +36,7 @@ flowchart LR
 | One frozen synthetic target contract before route implementation. | External-device and vendor compatibility proof. |
 | Simulator scenarios for a small fleet, healthy campaign, lost event, post-accept disconnect, and canary stop. | 1,000-target load/soak and the full fault matrix. |
 | Target discovery/preflight, immutable synthetic artifact identity, deterministic plan, durable work, one supported update path, and reconciliation. | Full selector language, signature formats, vendor extensions, and all long-tail policy options. |
-| OIDC-compatible authenticated API and CLI demo using a local test issuer. | Live Cognito federation, browser console, SSE, and the complete Phase 10 authorization surface. |
+| Local synthetic HS256 identity adapter for the authenticated API and CLI demo. | Live Cognito federation, JWKS validation, browser console, SSE, and the complete Phase 10 authorization surface. |
 | Static, zero-resource IaC validation. | Terraform apply, AWS billing/IAM/runtime verification, promotion, and rollback rehearsal. |
 
 v1 must never take a retry shortcut after a possibly accepted update request.
