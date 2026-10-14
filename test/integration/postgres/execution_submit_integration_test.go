@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parth10-05/fleetforge/internal/application/execution"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
@@ -17,6 +18,7 @@ func TestFencedSubmitResultAcceptedSchedulesObservationExactlyOnce(t *testing.T)
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	seedExecutionPolicySnapshot(t, pool, ctx, fixture)
 	req := executionAdmissionRequest(fixture, "5101")
 	if err := persistence.AdmitOperation(ctx, pool, req); err != nil {
 		t.Fatal(err)
@@ -206,4 +208,15 @@ func executionAdmissionRequest(f ownershipFixture, suffix string) persistence.Ad
 
 func executionDigest(character string) string {
 	return "sha256:" + string([]byte(character)[0]) + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
+
+func seedExecutionPolicySnapshot(t *testing.T, pool *pgxpool.Pool, ctx context.Context, fixture ownershipFixture) {
+	t.Helper()
+	const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const snapshotHash = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	const planHash = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	const policy = `{"observation_freshness_seconds":60}`
+	mustExecute(t, pool, ctx, "INSERT INTO artifact_object_versions (artifact_id,provider,container,object_key,version_id,object_size,sha256_digest,verification_policy_version,declared_target_family) VALUES ('"+fixture.artifactID+"','local-versioned-v1','fixture','firmware-v1','version-1',1,'"+digest+"','synthetic-sha256-v1','synthetic')")
+	mustExecute(t, pool, ctx, "INSERT INTO preflight_candidates (id,artifact_id,artifact_version_id,selector_version,selector_json,snapshot_hash,state,report) VALUES ('"+fixture.candidateID+"','"+fixture.artifactID+"','version-1','selector-v1','{}','"+snapshotHash+"','PASSED','{}')")
+	mustExecute(t, pool, ctx, "INSERT INTO campaign_plan_snapshots (campaign_id,candidate_id,draft_revision,policy_json,effective_plan_json,seed,policy_version,algorithm_version,plan_version,artifact_version_id,artifact_digest,verification_policy_version,target_snapshot_hash,plan_hash) VALUES ('"+fixture.campaignID+"','"+fixture.candidateID+"',1,'"+policy+"','{}','seed','fleetforge.campaign-policy/v1','deterministic/v1','campaign-plan/v1','version-1','"+digest+"','synthetic-sha256-v1','"+snapshotHash+"','"+planHash+"')")
 }
