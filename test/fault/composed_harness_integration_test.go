@@ -5,7 +5,9 @@ package fault
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -69,6 +71,7 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 	if ready, ok := status["ready"].(bool); !ok || !ready {
 		t.Fatalf("simulator status=%v, want ready; simulator output=%s", status, output.String())
 	}
+	writeEvidence(t, harness.Schema, filepath.Join(root, "test", "fixtures", "simulator", "v1", "healthy.json"), status, journal)
 }
 
 func repositoryRoot(t *testing.T) string {
@@ -138,4 +141,45 @@ func min(left, right int) int {
 		return left
 	}
 	return right
+}
+
+// writeEvidence emits only redacted, machine-readable facts that can be
+// retained from hosted execution. It intentionally omits DSNs, secrets,
+// addresses, paths, headers, target credentials, and raw journal records.
+func writeEvidence(t *testing.T, schema, scenarioPath string, status, journal map[string]any) {
+	t.Helper()
+	directory := os.Getenv("FLEETFORGE_FAULT_EVIDENCE_DIR")
+	if directory == "" {
+		return
+	}
+	rawScenario, err := os.ReadFile(scenarioPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(rawScenario)
+	report := map[string]any{
+		"schema_version":    "fleetforge.p05-fault-evidence/v1",
+		"case_id":           "P05-HARNESS-START",
+		"schema":            schema,
+		"scenario_sha256":   fmt.Sprintf("sha256:%x", digest),
+		"simulator_run_id":  status["run_id"],
+		"journal_entries":   journal["entries"],
+		"journal_last_hash": journal["last_hash"],
+		"result":            "PASS",
+	}
+	encoded, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	temporary := filepath.Join(directory, "p05-harness-start.json.tmp")
+	final := filepath.Join(directory, "p05-harness-start.json")
+	if err := os.WriteFile(temporary, append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(temporary, final); err != nil {
+		t.Fatal(err)
+	}
 }
