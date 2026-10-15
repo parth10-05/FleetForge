@@ -43,6 +43,11 @@ func TestPersistedOracleRejectsReceivedOperationClaimedProvenAbsent(t *testing.T
 	if _, err := adapter.ResolveAttention(ctx, resolution); err != nil {
 		t.Fatalf("idempotent retry of administrator resolution: %v", err)
 	}
+	conflict := resolution
+	conflict.Reason = "test.conflicting_reason"
+	if _, err := adapter.ResolveAttention(ctx, conflict); err == nil {
+		t.Fatal("conflicting replay of administrator resolution unexpectedly succeeded")
+	}
 	journal := execution.AcceptanceJournal{RunID: "independent-run", CheckpointHash: executionDigest("f"), Entries: []execution.AcceptanceEntry{{
 		AttemptID:          req.FirmwareAttempt.AttemptID,
 		RequestFingerprint: req.FirmwareAttempt.RequestFingerprint,
@@ -122,6 +127,14 @@ func TestAdminProvenAbsentCreatesOneFencedChildAdmission(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM due_work WHERE subject_id=$1::uuid AND work_type='SUBMIT' AND delivery_state='PENDING'`, fixture.targetUpdateID).Scan(&pendingSubmits); err != nil || pendingSubmits != 1 {
 		t.Fatalf("pending child submits=%d err=%v, want one", pendingSubmits, err)
+	}
+	childSubmit := claimExecutionSubmitWork(t, ctx, adapter, "00000000-0000-4000-8000-000000000513")
+	childAttempt, err := adapter.LoadAttempt(ctx, childSubmit)
+	if err != nil {
+		t.Fatalf("load claimed child submit attempt: %v", err)
+	}
+	if childAttempt.AttemptID != child.FirmwareAttempt.AttemptID || childAttempt.ParentAttemptID != initial.FirmwareAttempt.AttemptID || childAttempt.AdmissionID != initial.AdmissionID {
+		t.Fatalf("claimed child attempt=%+v, want child=%s parent=%s admission=%s", childAttempt, child.FirmwareAttempt.AttemptID, initial.FirmwareAttempt.AttemptID, initial.AdmissionID)
 	}
 	if err := persistence.AdmitRetryOperation(ctx, pool, child); err == nil {
 		t.Fatal("duplicate admin-authorized child admission unexpectedly succeeded")

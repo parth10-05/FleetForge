@@ -116,9 +116,14 @@ WHERE a.id=$1::uuid FOR UPDATE OF a,tu`, command.AttemptID).Scan(&updateID, &adm
 		return execution.ResolutionResult{}, fmt.Errorf("lock attention attempt: %w", err)
 	}
 	if state != "NEEDS_ATTENTION" || (status != "AMBIGUOUS" && status != "NEEDS_ATTENTION") || revision != command.Work.ExpectedRevision || (command.Work.ExpectedCommandEpoch != nil && epoch != *command.Work.ExpectedCommandEpoch) {
-		var persistedFingerprint string
-		err = tx.QueryRow(ctx, `SELECT evidence_fingerprint FROM ambiguity_resolutions WHERE attempt_id=$1::uuid AND command_id=$2::uuid`, command.AttemptID, command.Work.CommandID).Scan(&persistedFingerprint)
-		if err == nil && persistedFingerprint == command.EvidenceFingerprint {
+		var persistedFingerprint, action, reason string
+		var journalConfirmedAbsent, lateCallerExcluded bool
+		var lateCallerExclusionMethod, proofReference *string
+		err = tx.QueryRow(ctx, `SELECT evidence_fingerprint,evidence_summary->>'action',reason_code,journal_confirmed_absent,late_caller_excluded,late_caller_exclusion_method,proof_reference
+FROM ambiguity_resolutions WHERE attempt_id=$1::uuid AND command_id=$2::uuid`, command.AttemptID, command.Work.CommandID).Scan(
+			&persistedFingerprint, &action, &reason, &journalConfirmedAbsent, &lateCallerExcluded, &lateCallerExclusionMethod, &proofReference,
+		)
+		if err == nil && persistedFingerprint == command.EvidenceFingerprint && action == command.Action && reason == command.Reason && journalConfirmedAbsent == command.JournalConfirmedAbsent && lateCallerExcluded == command.LateCallerExcluded && nullableStringEqual(lateCallerExclusionMethod, command.LateCallerExclusionMethod) && nullableStringEqual(proofReference, command.ProofReference) {
 			if err = tx.Commit(ctx); err != nil {
 				return execution.ResolutionResult{}, classifyDueWorkError(err, "commit idempotent attention resolution")
 			}
@@ -221,4 +226,11 @@ func nullableInt64(value int64) any {
 		return nil
 	}
 	return value
+}
+
+func nullableStringEqual(value *string, expected string) bool {
+	if value == nil {
+		return expected == ""
+	}
+	return *value == expected
 }
