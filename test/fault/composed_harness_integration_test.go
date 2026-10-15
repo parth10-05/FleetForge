@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +20,8 @@ import (
 
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
+	"github.com/parth10-05/fleetforge/internal/simulator/journal"
+	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 	testpostgres "github.com/parth10-05/fleetforge/test/support/postgres"
 )
 
@@ -45,7 +49,7 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 		"FLEETFORGE_SIMULATOR_ADDR="+address,
 		"FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress,
 		"FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot,
-		"FLEETFORGE_SIMULATOR_SCENARIO_PATH="+filepath.Join(root, "test", "fixtures", "simulator", "v1", "healthy.json"),
+		"FLEETFORGE_SIMULATOR_SCENARIO_PATH="+filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"),
 		"FLEETFORGE_SIMULATOR_USERNAME=fault-harness",
 		"FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password",
 		"FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret,
@@ -71,7 +75,77 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 	if ready, ok := status["ready"].(bool); !ok || !ready {
 		t.Fatalf("simulator status=%v, want ready; simulator output=%s", status, output.String())
 	}
-	writeEvidence(t, harness.Schema, filepath.Join(root, "test", "fixtures", "simulator", "v1", "healthy.json"), status, journal)
+	scenarioPath := filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json")
+	submitAcceptedUpdate(t, ctx, address, scenarioPath)
+	journal = waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	if entries, ok := journal["entries"].(float64); !ok || entries < 3 {
+		t.Fatalf("retained journal entries=%v, want request and acceptance evidence; simulator output=%s", journal["entries"], output.String())
+	}
+	assertRetainedAcceptance(t, runRoot)
+	writeEvidence(t, harness.Schema, scenarioPath, status, journal)
+}
+
+func submitAcceptedUpdate(t *testing.T, ctx context.Context, address, scenarioPath string) {
+	t.Helper()
+	rawScenario, err := os.ReadFile(scenarioPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := scenario.Decode(rawScenario)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("firmware-harness-artifact")
+	digest := sha256.Sum256(body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/UpdateService/update", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-FleetForge-Expected-Version", "1.1")
+	request.Header.Set("X-FleetForge-Artifact-SHA256", hex.EncodeToString(digest[:]))
+	request.Header.Set("X-FleetForge-Attempt", "harness-attempt-1")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, response.Body)
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("update status=%d, want %d", response.StatusCode, http.StatusAccepted)
+	}
+}
+
+func assertRetainedAcceptance(t *testing.T, runRoot string) {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(runRoot, "*", "journal.jsonl"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("retained journal paths=%v err=%v", paths, err)
+	}
+	entries, err := journal.Load(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	received, accepted := -1, -1
+	for index, entry := range entries {
+		if entry.Payload.CorrelationID != "harness-attempt-1" {
+			continue
+		}
+		if entry.Kind == journal.RequestReceived {
+			received = index
+		}
+		if entry.Kind == journal.UpdateAccepted {
+			accepted = index
+		}
+	}
+	if received < 0 || accepted < 0 || received >= accepted {
+		t.Fatalf("retained acceptance ordering received=%d accepted=%d", received, accepted)
+	}
 }
 
 func repositoryRoot(t *testing.T) string {
