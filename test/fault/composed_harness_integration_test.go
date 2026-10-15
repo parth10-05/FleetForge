@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parth10-05/fleetforge/internal/application/execution"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 	"github.com/parth10-05/fleetforge/internal/simulator/journal"
@@ -82,6 +83,8 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 		t.Fatalf("retained journal entries=%v, want request and acceptance evidence; simulator output=%s", journal["entries"], output.String())
 	}
 	assertRetainedAcceptance(t, runRoot)
+	submitAcceptedUpdate(t, ctx, address, scenarioPath)
+	assertDuplicateRequestControlFails(t, runRoot)
 	writeEvidence(t, harness.Schema, scenarioPath, status, journal)
 }
 
@@ -145,6 +148,49 @@ func assertRetainedAcceptance(t *testing.T, runRoot string) {
 	}
 	if received < 0 || accepted < 0 || received >= accepted {
 		t.Fatalf("retained acceptance ordering received=%d accepted=%d", received, accepted)
+	}
+}
+
+func assertDuplicateRequestControlFails(t *testing.T, runRoot string) {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(runRoot, "*", "journal.jsonl"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("retained journal paths=%v err=%v", paths, err)
+	}
+	entries, err := journal.Load(paths[0])
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("load retained duplicate-control journal entries=%d err=%v", len(entries), err)
+	}
+	acceptance := execution.AcceptanceJournal{RunID: entries[0].RunID, CheckpointHash: "sha256:" + entries[len(entries)-1].Hash}
+	requestFingerprint := ""
+	for _, entry := range entries {
+		if entry.Payload.CorrelationID != "harness-attempt-1" {
+			continue
+		}
+		if requestFingerprint == "" {
+			requestFingerprint = "sha256:" + entry.Payload.Fingerprint
+		}
+		if entry.Kind == journal.RequestReceived || entry.Kind == journal.UpdateAccepted {
+			acceptance.Entries = append(acceptance.Entries, execution.AcceptanceEntry{
+				AttemptID:          entry.Payload.CorrelationID,
+				RequestFingerprint: "sha256:" + entry.Payload.Fingerprint,
+				Received:           entry.Kind == journal.RequestReceived,
+				Accepted:           entry.Kind == journal.UpdateAccepted,
+				Sequence:           int64(entry.Sequence),
+			})
+		}
+	}
+	if requestFingerprint == "" {
+		t.Fatal("duplicate-control journal has no request fingerprint")
+	}
+	err = execution.VerifyIndependentJournal([]execution.OracleAttempt{{
+		AttemptID:          "harness-attempt-1",
+		IntendedUpdateID:   "harness-target-update-1",
+		RequestFingerprint: requestFingerprint,
+		Resolution:         "ACCEPTED",
+	}}, acceptance)
+	if err == nil {
+		t.Fatal("duplicate request negative control unexpectedly passed the independent journal oracle")
 	}
 }
 
@@ -232,14 +278,15 @@ func writeEvidence(t *testing.T, schema, scenarioPath string, status, journal ma
 	}
 	digest := sha256.Sum256(rawScenario)
 	report := map[string]any{
-		"schema_version":    "fleetforge.p05-fault-evidence/v1",
-		"case_id":           "P05-HARNESS-START",
-		"schema":            schema,
-		"scenario_sha256":   fmt.Sprintf("sha256:%x", digest),
-		"simulator_run_id":  status["run_id"],
-		"journal_entries":   journal["entries"],
-		"journal_last_hash": journal["last_hash"],
-		"result":            "PASS",
+		"schema_version":                    "fleetforge.p05-fault-evidence/v1",
+		"case_id":                           "P05-HARNESS-ACCEPTANCE-NEGATIVE-CONTROL",
+		"schema":                            schema,
+		"scenario_sha256":                   fmt.Sprintf("sha256:%x", digest),
+		"simulator_run_id":                  status["run_id"],
+		"journal_entries":                   journal["entries"],
+		"journal_last_hash":                 journal["last_hash"],
+		"duplicate_request_oracle_rejected": true,
+		"result":                            "PASS",
 	}
 	encoded, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
