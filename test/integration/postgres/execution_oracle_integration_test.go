@@ -83,7 +83,7 @@ func TestAdminProvenAbsentCreatesOneFencedChildAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	now := time.Now().UTC().Add(2 * time.Second)
+	now := time.Now().UTC()
 	if _, err := adapter.ResolveAttention(ctx, execution.AdminResolutionCommand{
 		Principal:                 execution.VerifiedPrincipal{Subject: "admin", IssuerClass: "local-test", Roles: []string{"firmware:resolve"}, Verified: true, AuthenticatedAt: now, ExpiresAt: now.Add(time.Minute)},
 		Work:                      execution.WorkFence{CommandID: "00000000-0000-0000-5105-000000000098", ExpectedRevision: 2},
