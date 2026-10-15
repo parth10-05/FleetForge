@@ -48,6 +48,11 @@ func TestPersistedOracleRejectsReceivedOperationClaimedProvenAbsent(t *testing.T
 	if _, err := adapter.ResolveAttention(ctx, conflict); err == nil {
 		t.Fatal("conflicting replay of administrator resolution unexpectedly succeeded")
 	}
+	conflict = resolution
+	conflict.Principal.Subject = "another-admin"
+	if _, err := adapter.ResolveAttention(ctx, conflict); err == nil {
+		t.Fatal("replay from a different administrator unexpectedly succeeded")
+	}
 	journal := execution.AcceptanceJournal{RunID: "independent-run", CheckpointHash: executionDigest("f"), Entries: []execution.AcceptanceEntry{{
 		AttemptID:          req.FirmwareAttempt.AttemptID,
 		RequestFingerprint: req.FirmwareAttempt.RequestFingerprint,
