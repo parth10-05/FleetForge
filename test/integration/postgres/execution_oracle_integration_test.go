@@ -68,6 +68,7 @@ func TestAdminProvenAbsentCreatesOneFencedChildAdmission(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	seedExecutionPolicySnapshot(t, pool, ctx, fixture)
 	initial := executionAdmissionRequest(fixture, "5105")
 	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
 		t.Fatal(err)
