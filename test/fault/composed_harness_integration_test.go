@@ -85,6 +85,7 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 	assertRetainedAcceptance(t, runRoot)
 	submitAcceptedUpdate(t, ctx, address, scenarioPath)
 	assertDuplicateRequestControlFails(t, runRoot)
+	journal = waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
 	writeEvidence(t, harness.Schema, scenarioPath, status, journal)
 }
 
