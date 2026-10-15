@@ -99,6 +99,7 @@ func submitAcceptedUpdate(t *testing.T, ctx context.Context, address, scenarioPa
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertAcceptanceFleet(t, input)
 	targetID, err := scenario.ID(input, "target", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +123,20 @@ func submitAcceptedUpdate(t *testing.T, ctx context.Context, address, scenarioPa
 	_, _ = io.Copy(io.Discard, response.Body)
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("update status=%d, want %d", response.StatusCode, http.StatusAccepted)
+	}
+}
+
+func assertAcceptanceFleet(t *testing.T, input scenario.Scenario) {
+	t.Helper()
+	if len(input.Targets) < 6 || len(input.Targets) > 10 {
+		t.Fatalf("acceptance scenario targets=%d, want 6 through 10", len(input.Targets))
+	}
+	racks := make(map[string]struct{}, len(input.Targets))
+	for _, target := range input.Targets {
+		racks[target.Rack] = struct{}{}
+	}
+	if len(racks) < 2 {
+		t.Fatalf("acceptance scenario racks=%d, want at least two", len(racks))
 	}
 }
 
