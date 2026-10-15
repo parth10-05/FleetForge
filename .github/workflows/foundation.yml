@@ -76,6 +76,12 @@ jobs:
           go test -json -tags=postgresintegration -count=1 ./test/integration/postgres/... | tee test-results/postgres-integration.json
         env:
           FLEETFORGE_TEST_POSTGRES_DSN: postgres://fleetforge_test:fleetforge_test@localhost:5432/fleetforge_test?sslmode=disable
+      - run: |
+          set -o pipefail
+          mkdir -p test-results
+          go test -json -tags=postgresintegration -count=1 ./test/fault/... | tee test-results/fault-harness.json
+        env:
+          FLEETFORGE_TEST_POSTGRES_DSN: postgres://fleetforge_test:fleetforge_test@localhost:5432/fleetforge_test?sslmode=disable
       - name: Confirm wrong PostgreSQL endpoint fails the integration gate
         run: |
           if FLEETFORGE_TEST_POSTGRES_DSN=postgres://fleetforge_test:fleetforge_test@localhost:1/fleetforge_test?sslmode=disable go test -tags=postgresintegration -count=1 ./test/integration/postgres/... -run TestDatabasePingUsesIsolatedSchema; then
