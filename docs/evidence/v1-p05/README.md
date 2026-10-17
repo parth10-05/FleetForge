@@ -22,6 +22,11 @@ Reports must never contain a DSN, credential, bearer token, callback body,
 target address, artifact bytes, or raw journal records. The hosted artifact is
 the execution record; committed files document its schema and retention rules.
 
+`fault-matrix.json` is the authoritative catalog of the 21 required case IDs.
+Its status values distinguish a completed composed report from an existing
+unit/integration proof that still needs composition; only the former can count
+toward closeout.
+
 ## Required closeout inventory
 
 Before closeout, the package must identify the exact final commit SHA and

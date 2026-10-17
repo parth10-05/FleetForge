@@ -1,0 +1,27 @@
+{
+  "schema_version": "fleetforge.p05-fault-matrix/v1",
+  "status": "NEEDS_ATTENTION",
+  "cases": [
+    {"id":"P05-F01","name":"healthy acceptance","boundary":"simulator+postgres","fixture":"accepted-harness.json","status":"PENDING_EXECUTION"},
+    {"id":"P05-F02","name":"prewrite transport loss","boundary":"simulator+postgres","fault":"RF-F06","status":"PENDING_EXECUTION"},
+    {"id":"P05-F03","name":"post-accept disconnect","boundary":"simulator+postgres","fixture":"post-accept-disconnect.json","fault":"RF-F07","status":"PENDING_EXECUTION"},
+    {"id":"P05-F04","name":"duplicate event delivery","boundary":"simulator+control-api","fault":"RF-F01","status":"PENDING_EXECUTION"},
+    {"id":"P05-F05","name":"late event delivery","boundary":"simulator+control-api","fault":"RF-F02","status":"PENDING_EXECUTION"},
+    {"id":"P05-F06","name":"lost event delivery","boundary":"simulator+control-api","fixture":"lost-event.json","fault":"RF-F03","status":"PENDING_EXECUTION"},
+    {"id":"P05-F07","name":"observation rate limit","boundary":"simulator+worker","fault":"RF-F04","status":"PENDING_EXECUTION"},
+    {"id":"P05-F08","name":"observation unavailable","boundary":"simulator+worker","fault":"RF-F05","status":"PENDING_EXECUTION"},
+    {"id":"P05-F09","name":"task disappearance","boundary":"simulator+worker","fixture":"task-disappearance.json","fault":"RF-F08","status":"PENDING_EXECUTION"},
+    {"id":"P05-F10","name":"version contradiction","boundary":"simulator+worker","fault":"RF-F10","status":"PENDING_EXECUTION"},
+    {"id":"P05-F11","name":"health contradiction","boundary":"simulator+worker","fixture":"canary-health-failure.json","fault":"RF-F11","status":"PENDING_EXECUTION"},
+    {"id":"P05-F12","name":"duplicate POST negative control","boundary":"simulator+journal oracle","status":"IMPLEMENTED_IN_HARNESS"},
+    {"id":"P05-F13","name":"false proven-absent negative control","boundary":"simulator+journal oracle","status":"IMPLEMENTED_IN_HARNESS"},
+    {"id":"P05-F14","name":"restore against newer simulator truth","boundary":"simulator retained state","status":"IMPLEMENTED_IN_HARNESS"},
+    {"id":"P05-F15","name":"prewrite child retry admission","boundary":"postgres durable retry","source_test":"execution_submit_integration_test.go","status":"PENDING_COMPOSED_EXECUTION"},
+    {"id":"P05-F16","name":"admin absence child retry admission","boundary":"postgres durable retry","source_test":"execution_oracle_integration_test.go","status":"PENDING_COMPOSED_EXECUTION"},
+    {"id":"P05-F17","name":"stale worker fence","boundary":"postgres durable work","status":"PENDING_EXECUTION"},
+    {"id":"P05-F18","name":"reservation and epoch conflict","boundary":"postgres admission","status":"PENDING_EXECUTION"},
+    {"id":"P05-F19","name":"pause after admission","boundary":"postgres command fence","status":"PENDING_EXECUTION"},
+    {"id":"P05-F20","name":"abort and reservation release","boundary":"postgres target update","status":"PENDING_EXECUTION"},
+    {"id":"P05-F21","name":"database uncertainty recovery","boundary":"postgres durable work","status":"PENDING_EXECUTION"}
+  ]
+}
