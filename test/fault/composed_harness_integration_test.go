@@ -54,10 +54,9 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build real simulator: %v: %s", err, buildOutput)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, simulatorPath)
-	command.Env = append(os.Environ(),
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer func() { cancel() }()
+	processEnv := append(os.Environ(),
 		"FLEETFORGE_ENV=test",
 		"FLEETFORGE_SIMULATOR_ADDR="+address,
 		"FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress,
@@ -68,15 +67,18 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 		"FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret,
 	)
 	var output limitedBuffer
-	command.Stdout, command.Stderr = &output, &output
-	if err := command.Start(); err != nil {
-		t.Fatalf("start real simulator: %v", err)
-	}
-	t.Cleanup(func() {
-		if command.Process != nil {
-			_ = command.Process.Signal(os.Interrupt)
+	start := func() *exec.Cmd {
+		command := exec.CommandContext(ctx, simulatorPath)
+		command.Env = processEnv
+		command.Stdout, command.Stderr = &output, &output
+		if err := command.Start(); err != nil {
+			t.Fatalf("start real simulator: %v", err)
 		}
-		_ = command.Wait()
+		return command
+	}
+	command := start()
+	t.Cleanup(func() {
+		stopSimulator(command)
 	})
 	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
 	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{adminSecret}}
@@ -95,22 +97,39 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 		t.Fatalf("retained journal entries=%v, want request and acceptance evidence; simulator output=%s", journal["entries"], output.String())
 	}
 	assertRetainedAcceptance(t, runRoot)
+	assertFirmwareVersion(t, ctx, address, scenarioPath, "1.1")
+	checkpoint := journal
+	stopSimulator(command)
+	cancel()
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	command = start()
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	restarted := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/status", headers)
+	if restarted["run_id"] != status["run_id"] {
+		t.Fatalf("restored simulator run_id=%v, want %v", restarted["run_id"], status["run_id"])
+	}
+	restoredJournal := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	if restoredJournal["last_hash"] != checkpoint["last_hash"] || restoredJournal["entries"] != checkpoint["entries"] {
+		t.Fatalf("restored journal=%v, want retained checkpoint=%v", restoredJournal, checkpoint)
+	}
+	assertFirmwareVersion(t, ctx, address, scenarioPath, "1.1")
 	submitAcceptedUpdate(t, ctx, address, scenarioPath)
 	assertDuplicateRequestControlFails(t, runRoot)
 	journal = waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
 	writeEvidence(t, harness.Schema, scenarioPath, status, journal)
 }
 
+func stopSimulator(command *exec.Cmd) {
+	if command == nil || command.Process == nil {
+		return
+	}
+	_ = command.Process.Signal(os.Interrupt)
+	_ = command.Wait()
+}
+
 func submitAcceptedUpdate(t *testing.T, ctx context.Context, address, scenarioPath string) {
 	t.Helper()
-	rawScenario, err := os.ReadFile(scenarioPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	input, err := scenario.Decode(rawScenario)
-	if err != nil {
-		t.Fatal(err)
-	}
+	input := readScenario(t, scenarioPath)
 	assertAcceptanceFleet(t, input)
 	targetID, err := scenario.ID(input, "target", 1)
 	if err != nil {
@@ -132,9 +151,53 @@ func submitAcceptedUpdate(t *testing.T, ctx context.Context, address, scenarioPa
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	_, _ = io.Copy(io.Discard, response.Body)
+	responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
 	if response.StatusCode != http.StatusAccepted {
-		t.Fatalf("update status=%d, want %d", response.StatusCode, http.StatusAccepted)
+		t.Fatalf("update status=%d, want %d: %s", response.StatusCode, http.StatusAccepted, responseBody)
+	}
+}
+
+func readScenario(t *testing.T, scenarioPath string) scenario.Scenario {
+	t.Helper()
+	rawScenario, err := os.ReadFile(scenarioPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := scenario.Decode(rawScenario)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return input
+}
+
+func assertFirmwareVersion(t *testing.T, ctx context.Context, address, scenarioPath, want string) {
+	t.Helper()
+	input := readScenario(t, scenarioPath)
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := "http://" + address + "/virtual-bmcs/" + targetID + "/redfish/v1/UpdateService/FirmwareInventory/BMC"
+	for {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.SetBasicAuth("fault-harness", "fault-harness-password")
+		response, err := http.DefaultClient.Do(request)
+		if err == nil {
+			var body map[string]any
+			decodeErr := json.NewDecoder(response.Body).Decode(&body)
+			response.Body.Close()
+			if decodeErr == nil && body["Version"] == want {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("wait for restored firmware version %q: %v", want, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
