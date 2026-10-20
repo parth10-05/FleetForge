@@ -19,11 +19,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parth10-05/fleetforge/internal/application/execution"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
+	"github.com/parth10-05/fleetforge/test/support/executionfixture"
 	testpostgres "github.com/parth10-05/fleetforge/test/support/postgres"
 )
 
@@ -120,6 +122,104 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 	writeEvidence(t, harness.Schema, scenarioPath, status, journal)
 }
 
+// TestComposedHarnessPrewriteLossCreatesFencedChildAttempt joins a real
+// simulator RF-F06 transport loss with the durable retry path. The simulator
+// journal must show that no request reached the target before the only
+// proof-backed child admission is allowed.
+func TestComposedHarnessPrewriteLossCreatesFencedChildAttempt(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate composed prewrite schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatalf("seed durable fixture: %v", err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatalf("prepare durable fixture: %v", err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatalf("seed durable policy snapshot: %v", err)
+	}
+
+	runRoot := t.TempDir()
+	scenarioPath := writePrewriteFailureScenario(t, runRoot, filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"))
+	address, adminAddress := freeAddress(t), freeAddress(t)
+	adminSecret := "fault-harness-prewrite-secret"
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build prewrite simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var output limitedBuffer
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(),
+		"FLEETFORGE_ENV=test",
+		"FLEETFORGE_SIMULATOR_ADDR="+address,
+		"FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress,
+		"FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot,
+		"FLEETFORGE_SIMULATOR_SCENARIO_PATH="+scenarioPath,
+		"FLEETFORGE_SIMULATOR_USERNAME=fault-harness",
+		"FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password",
+		"FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret,
+	)
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Start(); err != nil {
+		t.Fatalf("start prewrite simulator: %v", err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+
+	initial := executionfixture.AdmissionRequest(fixture, "5201")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatalf("admit initial attempt: %v", err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	submit, claimed, err := adapter.ClaimSubmitWork(ctx, "prewrite-harness", "00000000-0000-4000-8000-000000000201")
+	if err != nil || !claimed {
+		t.Fatalf("claim initial submit work=%+v claimed=%t err=%v", submit, claimed, err)
+	}
+	submitExpectedTransportLoss(t, ctx, address, scenarioPath, initial.FirmwareAttempt.AttemptID)
+	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{adminSecret}}
+	journalStatus := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	if entries, ok := journalStatus["entries"].(float64); !ok || entries != 0 {
+		t.Fatalf("prewrite journal entries=%v, want no target-side request evidence; simulator output=%s", journalStatus["entries"], output.String())
+	}
+	if err := adapter.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitProvenPrewriteFailure, FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("persist proven prewrite result: %v", err)
+	}
+	retry, claimed, err := adapter.ClaimPrecheckWork(ctx, "prewrite-harness", "00000000-0000-4000-8000-000000000202")
+	if err != nil || !claimed {
+		t.Fatalf("claim proof-backed retry work=%+v claimed=%t err=%v", retry, claimed, err)
+	}
+	child := executionfixture.AdmissionRequest(fixture, "5202")
+	child.AdmissionID = initial.AdmissionID
+	child.CommandID = retry.CommandID
+	child.ExpectedTargetRevision = retry.ExpectedRevision
+	child.CapturedCommandEpoch = 7
+	child.ExpectedTargetState, child.NextTargetState = "RETRY_WAIT", "SUBMITTING"
+	child.RetryParentAttemptID = initial.FirmwareAttempt.AttemptID
+	child.ClaimedWorkID, child.ClaimedLeaseToken, child.ClaimedDeliveryGeneration = retry.DueWorkID, retry.LeaseToken, retry.DeliveryGeneration
+	child.DueWorkID = "00000000-0000-0000-5202-000000000099"
+	child.FirmwareAttempt.AttemptID = "00000000-0000-0000-5202-000000000010"
+	child.StepAttemptID = "00000000-0000-0000-5202-000000000011"
+	if err := persistence.AdmitRetryOperation(ctx, pool, child); err != nil {
+		t.Fatalf("admit proof-backed child: %v", err)
+	}
+	assertExactlyOneChildAdmission(t, ctx, pool, initial.AdmissionID, initial.FirmwareAttempt.AttemptID, child.FirmwareAttempt.AttemptID, retry)
+}
+
 func stopSimulator(command *exec.Cmd) {
 	if command == nil || command.Process == nil {
 		return
@@ -155,6 +255,77 @@ func submitAcceptedUpdate(t *testing.T, ctx context.Context, address, scenarioPa
 	responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("update status=%d, want %d: %s", response.StatusCode, http.StatusAccepted, responseBody)
+	}
+}
+
+func submitExpectedTransportLoss(t *testing.T, ctx context.Context, address, scenarioPath, attemptID string) {
+	t.Helper()
+	input := readScenario(t, scenarioPath)
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("firmware-prewrite-artifact")
+	digest := sha256.Sum256(body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/UpdateService/update", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-FleetForge-Expected-Version", "1.1")
+	request.Header.Set("X-FleetForge-Artifact-SHA256", hex.EncodeToString(digest[:]))
+	request.Header.Set("X-FleetForge-Attempt", attemptID)
+	response, err := http.DefaultClient.Do(request)
+	if err == nil {
+		response.Body.Close()
+		t.Fatal("RF-F06 update unexpectedly returned a response")
+	}
+}
+
+func writePrewriteFailureScenario(t *testing.T, directory, source string) string {
+	t.Helper()
+	input := readScenario(t, source)
+	input.ScenarioID = "p05-prewrite-failure"
+	input.Seed = "5201"
+	input.Faults = append(input.Faults, scenario.Fault{FaultID: "prewrite-loss", Name: "RF-F06", Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "prewrite-failure.json")
+	if err := os.WriteFile(path, append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func assertExactlyOneChildAdmission(t *testing.T, ctx context.Context, pool *pgxpool.Pool, admissionID, parentAttemptID, childAttemptID string, retry execution.WorkFence) {
+	t.Helper()
+	var parent, active, state, delivery, submitCommandID string
+	var children, reservations, submits int
+	if err := pool.QueryRow(ctx, `SELECT a.parent_attempt_id::text,s.active_attempt_id::text,tu.state
+FROM firmware_update_attempts a JOIN submission_admissions s ON s.id=a.submission_admission_id
+JOIN target_updates tu ON tu.id=a.target_update_id WHERE a.id=$1::uuid`, childAttemptID).Scan(&parent, &active, &state); err != nil {
+		t.Fatal(err)
+	}
+	if parent != parentAttemptID || active != childAttemptID || state != "SUBMITTING" {
+		t.Fatalf("child parent=%s active=%s state=%s", parent, active, state)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM firmware_update_attempts WHERE submission_admission_id=$1::uuid AND parent_attempt_id IS NOT NULL", admissionID).Scan(&children); err != nil || children != 1 {
+		t.Fatalf("children=%d err=%v, want one", children, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM operation_reservations WHERE admission_id=$1::uuid", admissionID).Scan(&reservations); err != nil || reservations != 3 {
+		t.Fatalf("reservations=%d err=%v, want three retained", reservations, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1::uuid", retry.DueWorkID).Scan(&delivery); err != nil || delivery != "COMPLETED" {
+		t.Fatalf("retry delivery=%s err=%v, want completed", delivery, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&submits); err != nil || submits != 1 {
+		t.Fatalf("pending submits=%d err=%v, want one child", submits, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT command_id::text FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&submitCommandID); err != nil || submitCommandID == retry.CommandID {
+		t.Fatalf("child submit command=%s err=%v, want distinct retry identity", submitCommandID, err)
 	}
 }
 
