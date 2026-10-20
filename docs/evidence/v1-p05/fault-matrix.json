@@ -2,7 +2,7 @@
   "schema_version": "fleetforge.p05-fault-matrix/v1",
   "status": "NEEDS_ATTENTION",
   "cases": [
-    {"id":"P05-F01","name":"healthy acceptance","boundary":"simulator+postgres","fixture":"accepted-harness.json","status":"PENDING_EXECUTION"},
+    {"id":"P05-F01","name":"healthy acceptance","boundary":"simulator+postgres","fixture":"accepted-harness.json","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F02","name":"prewrite transport loss","boundary":"simulator+postgres","fault":"RF-F06","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F03","name":"post-accept disconnect","boundary":"simulator+postgres","fixture":"post-accept-disconnect.json","fault":"RF-F07","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F04","name":"duplicate event delivery","boundary":"simulator+control-api","fault":"RF-F01","status":"PENDING_EXECUTION"},
