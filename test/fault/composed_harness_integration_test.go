@@ -220,12 +220,123 @@ func TestComposedHarnessPrewriteLossCreatesFencedChildAttempt(t *testing.T) {
 	assertExactlyOneChildAdmission(t, ctx, pool, initial.AdmissionID, initial.FirmwareAttempt.AttemptID, child.FirmwareAttempt.AttemptID, retry)
 }
 
+// TestComposedHarnessAdminProvenAbsentCreatesFencedChildAttempt proves that
+// an administrator can authorize a replacement only after a retained real
+// simulator run has no matching request evidence. The durable retry still
+// carries the normal revision, lease, and reservation fences.
+func TestComposedHarnessAdminProvenAbsentCreatesFencedChildAttempt(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate composed admin-absence schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatalf("seed durable fixture: %v", err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatalf("prepare durable fixture: %v", err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatalf("seed durable policy snapshot: %v", err)
+	}
+
+	runRoot := t.TempDir()
+	address, adminAddress := freeAddress(t), freeAddress(t)
+	adminSecret := "fault-harness-admin-absence-secret"
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build admin-absence simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var output limitedBuffer
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(),
+		"FLEETFORGE_ENV=test",
+		"FLEETFORGE_SIMULATOR_ADDR="+address,
+		"FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress,
+		"FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot,
+		"FLEETFORGE_SIMULATOR_SCENARIO_PATH="+filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"),
+		"FLEETFORGE_SIMULATOR_USERNAME=fault-harness",
+		"FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password",
+		"FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret,
+	)
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Start(); err != nil {
+		t.Fatalf("start admin-absence simulator: %v", err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{adminSecret}}
+	journalStatus := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	if entries, ok := journalStatus["entries"].(float64); !ok || entries != 0 {
+		t.Fatalf("admin absence journal entries=%v, want no target request evidence; simulator output=%s", journalStatus["entries"], output.String())
+	}
+
+	initial := executionfixture.AdmissionRequest(fixture, "5203")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatalf("admit initial ambiguous attempt: %v", err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	submit, claimed, err := adapter.ClaimSubmitWork(ctx, "admin-absence-harness", "00000000-0000-4000-8000-000000000203")
+	if err != nil || !claimed {
+		t.Fatalf("claim initial submit work=%+v claimed=%t err=%v", submit, claimed, err)
+	}
+	if err := adapter.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitPossiblyAccepted, ResponseFingerprint: harnessDigest('d'), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("persist ambiguous result: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := adapter.ResolveAttention(ctx, execution.AdminResolutionCommand{
+		Principal: execution.VerifiedPrincipal{Subject: "admin", IssuerClass: "local-test", Roles: []string{"firmware:resolve"}, Verified: true, AuthenticatedAt: now, ExpiresAt: now.Add(time.Minute)},
+		Work:      execution.WorkFence{CommandID: "00000000-0000-0000-5203-000000000098", ExpectedRevision: 2}, AttemptID: initial.FirmwareAttempt.AttemptID,
+		Action: "RETRY_PROVEN_ABSENT", Reason: "harness.proven_absent", EvidenceFingerprint: harnessDigest('e'), JournalConfirmedAbsent: true, LateCallerExcluded: true,
+		LateCallerExclusionMethod: "retained-journal-empty", ProofReference: "simulator://retained-empty-journal", Now: now,
+	}); err != nil {
+		t.Fatalf("persist administrator proven-absent resolution: %v", err)
+	}
+	retry, claimed, err := adapter.ClaimPrecheckWork(ctx, "admin-absence-harness", "00000000-0000-4000-8000-000000000204")
+	if err != nil || !claimed {
+		t.Fatalf("claim administrator retry work=%+v claimed=%t err=%v", retry, claimed, err)
+	}
+	child := executionfixture.AdmissionRequest(fixture, "5204")
+	child.AdmissionID, child.CommandID, child.ExpectedTargetRevision, child.CapturedCommandEpoch = initial.AdmissionID, retry.CommandID, retry.ExpectedRevision, 7
+	child.ExpectedTargetState, child.NextTargetState, child.RetryParentAttemptID = "RETRY_WAIT", "SUBMITTING", initial.FirmwareAttempt.AttemptID
+	child.ClaimedWorkID, child.ClaimedLeaseToken, child.ClaimedDeliveryGeneration = retry.DueWorkID, retry.LeaseToken, retry.DeliveryGeneration
+	child.DueWorkID, child.FirmwareAttempt.AttemptID, child.StepAttemptID = "00000000-0000-0000-5204-000000000099", "00000000-0000-0000-5204-000000000010", "00000000-0000-0000-5204-000000000011"
+	if err := persistence.AdmitRetryOperation(ctx, pool, child); err != nil {
+		t.Fatalf("admit administrator-authorized child: %v", err)
+	}
+	assertExactlyOneChildAdmission(t, ctx, pool, initial.AdmissionID, initial.FirmwareAttempt.AttemptID, child.FirmwareAttempt.AttemptID, retry)
+	childSubmit, claimed, err := adapter.ClaimSubmitWork(ctx, "admin-absence-harness", "00000000-0000-4000-8000-000000000205")
+	if err != nil || !claimed {
+		t.Fatalf("claim child submit work=%+v claimed=%t err=%v", childSubmit, claimed, err)
+	}
+	loaded, err := adapter.LoadAttempt(ctx, childSubmit)
+	if err != nil || loaded.AttemptID != child.FirmwareAttempt.AttemptID || loaded.ParentAttemptID != initial.FirmwareAttempt.AttemptID {
+		t.Fatalf("loaded child attempt=%+v err=%v", loaded, err)
+	}
+}
+
 func stopSimulator(command *exec.Cmd) {
 	if command == nil || command.Process == nil {
 		return
 	}
 	_ = command.Process.Signal(os.Interrupt)
 	_ = command.Wait()
+}
+
+func harnessDigest(character byte) string {
+	return "sha256:" + string(bytes.Repeat([]byte{character}, 64))
 }
 
 func submitAcceptedUpdate(t *testing.T, ctx context.Context, address, scenarioPath string) {

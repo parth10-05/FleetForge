@@ -17,7 +17,7 @@
     {"id":"P05-F13","name":"false proven-absent negative control","boundary":"simulator+journal oracle","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F14","name":"restore against newer simulator truth","boundary":"simulator retained state","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F15","name":"prewrite child retry admission","boundary":"simulator+postgres durable retry","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
-    {"id":"P05-F16","name":"admin absence child retry admission","boundary":"postgres durable retry","source_test":"execution_oracle_integration_test.go","status":"PENDING_COMPOSED_EXECUTION"},
+    {"id":"P05-F16","name":"admin absence child retry admission","boundary":"simulator+postgres durable retry","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F17","name":"stale worker fence","boundary":"postgres durable work","status":"PENDING_EXECUTION"},
     {"id":"P05-F18","name":"reservation and epoch conflict","boundary":"postgres admission","status":"PENDING_EXECUTION"},
     {"id":"P05-F19","name":"pause after admission","boundary":"postgres command fence","status":"PENDING_EXECUTION"},
