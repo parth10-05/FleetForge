@@ -119,7 +119,8 @@ func (adapter ExecutionAdapter) LoadOracleAttempts(ctx context.Context) ([]execu
 		return nil, fmt.Errorf("execution oracle requires a database pool")
 	}
 	rows, err := adapter.Pool.Query(ctx, `SELECT a.id::text,a.target_update_id::text,a.request_fingerprint,
-CASE WHEN a.status IN ('ACCEPTED','PROVEN_ABSENT') THEN a.status ELSE '' END,
+CASE WHEN a.status IN ('ACCEPTED','ADOPTED') THEN 'ACCEPTED'
+     WHEN a.status='PROVEN_ABSENT' THEN a.status ELSE '' END,
 COALESCE((SELECT r.late_caller_excluded FROM ambiguity_resolutions r
           WHERE r.attempt_id=a.id AND r.outcome='PROVEN_ABSENT'
           ORDER BY r.created_at DESC,r.id DESC LIMIT 1),false)

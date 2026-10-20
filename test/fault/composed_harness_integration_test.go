@@ -220,6 +220,109 @@ func TestComposedHarnessPrewriteLossCreatesFencedChildAttempt(t *testing.T) {
 	assertExactlyOneChildAdmission(t, ctx, pool, initial.AdmissionID, initial.FirmwareAttempt.AttemptID, child.FirmwareAttempt.AttemptID, retry)
 }
 
+// TestComposedHarnessPostAcceptLossAdoptsRetainedAcceptance proves that the
+// RF-F07 response-loss boundary is resolved from the simulator's independent
+// journal. The reconciler must schedule observation for the original attempt;
+// it must not issue a second submission.
+func TestComposedHarnessPostAcceptLossAdoptsRetainedAcceptance(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate composed post-accept schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatalf("seed durable fixture: %v", err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatalf("prepare durable fixture: %v", err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatalf("seed durable policy snapshot: %v", err)
+	}
+
+	runRoot := t.TempDir()
+	address, adminAddress := freeAddress(t), freeAddress(t)
+	adminSecret := "fault-harness-post-accept-secret"
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build post-accept simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var output limitedBuffer
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(),
+		"FLEETFORGE_ENV=test",
+		"FLEETFORGE_SIMULATOR_ADDR="+address,
+		"FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress,
+		"FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot,
+		"FLEETFORGE_SIMULATOR_SCENARIO_PATH="+filepath.Join(root, "test", "fixtures", "simulator", "v1", "post-accept-disconnect.json"),
+		"FLEETFORGE_SIMULATOR_USERNAME=fault-harness",
+		"FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password",
+		"FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret,
+	)
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Start(); err != nil {
+		t.Fatalf("start post-accept simulator: %v", err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+
+	body := []byte("firmware-postaccept-artifact")
+	digest := sha256.Sum256(body)
+	initial := executionfixture.AdmissionRequest(fixture, "5205")
+	initial.FirmwareAttempt.RequestFingerprint = "sha256:" + hex.EncodeToString(digest[:])
+	initial.FirmwareAttempt.ExpectedVersion = "1.1"
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatalf("admit initial attempt: %v", err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	submit, claimed, err := adapter.ClaimSubmitWork(ctx, "post-accept-harness", "00000000-0000-4000-8000-000000000205")
+	if err != nil || !claimed {
+		t.Fatalf("claim initial submit work=%+v claimed=%t err=%v", submit, claimed, err)
+	}
+	submitExpectedPostAcceptTransportLoss(t, ctx, address, filepath.Join(root, "test", "fixtures", "simulator", "v1", "post-accept-disconnect.json"), initial.FirmwareAttempt.AttemptID, body)
+	acceptance := retainedAcceptanceForAttempt(t, runRoot, initial.FirmwareAttempt.AttemptID)
+	if len(acceptance.Entries) != 2 || !acceptance.Entries[0].Received || !acceptance.Entries[1].Accepted {
+		t.Fatalf("RF-F07 journal entries=%+v, want exactly ordered receive and acceptance evidence", acceptance.Entries)
+	}
+	if err := adapter.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitPossiblyAccepted, ResponseFingerprint: harnessDigest('f'), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("persist response-loss ambiguity: %v", err)
+	}
+	worker := execution.ReconciliationWorker{Claimer: adapter, Repository: adapter, Journal: retainedJournalReader{journal: acceptance}, RunID: acceptance.RunID, Now: func() time.Time { return time.Now().UTC() }}
+	processed, err := worker.RunOnce(ctx, "post-accept-harness", "00000000-0000-4000-8000-000000000206")
+	if err != nil || !processed {
+		t.Fatalf("reconcile retained acceptance processed=%t err=%v", processed, err)
+	}
+	if err := execution.VerifyPersistedJournal(ctx, adapter, acceptance); err != nil {
+		t.Fatalf("verify adopted durable attempt against retained journal: %v", err)
+	}
+	var attemptStatus, updateState string
+	var pendingSubmits, pendingObservations int
+	if err := pool.QueryRow(ctx, `SELECT a.status,tu.state FROM firmware_update_attempts a JOIN target_updates tu ON tu.id=a.target_update_id WHERE a.id=$1::uuid`, initial.FirmwareAttempt.AttemptID).Scan(&attemptStatus, &updateState); err != nil {
+		t.Fatal(err)
+	}
+	if attemptStatus != "ADOPTED" || updateState != "UPDATE_ACCEPTED" {
+		t.Fatalf("adopted lifecycle attempt=%s update=%s", attemptStatus, updateState)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&pendingSubmits); err != nil || pendingSubmits != 0 {
+		t.Fatalf("pending submits=%d err=%v, want no second target request", pendingSubmits, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pendingObservations); err != nil || pendingObservations != 1 {
+		t.Fatalf("pending task observations=%d err=%v, want one adopted observation", pendingObservations, err)
+	}
+}
+
 // TestComposedHarnessAdminProvenAbsentCreatesFencedChildAttempt proves that
 // an administrator can authorize a replacement only after a retained real
 // simulator run has no matching request evidence. The durable retry still
@@ -394,6 +497,30 @@ func submitExpectedTransportLoss(t *testing.T, ctx context.Context, address, sce
 	}
 }
 
+func submitExpectedPostAcceptTransportLoss(t *testing.T, ctx context.Context, address, scenarioPath, attemptID string, body []byte) {
+	t.Helper()
+	input := readScenario(t, scenarioPath)
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/UpdateService/update", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-FleetForge-Expected-Version", "1.1")
+	request.Header.Set("X-FleetForge-Artifact-SHA256", hex.EncodeToString(digest[:]))
+	request.Header.Set("X-FleetForge-Attempt", attemptID)
+	response, err := http.DefaultClient.Do(request)
+	if err == nil {
+		response.Body.Close()
+		t.Fatal("RF-F07 update unexpectedly returned a response")
+	}
+}
+
 func writePrewriteFailureScenario(t *testing.T, directory, source string) string {
 	t.Helper()
 	input := readScenario(t, source)
@@ -523,6 +650,38 @@ func assertRetainedAcceptance(t *testing.T, runRoot string) {
 	if received < 0 || accepted < 0 || received >= accepted {
 		t.Fatalf("retained acceptance ordering received=%d accepted=%d", received, accepted)
 	}
+}
+
+func retainedAcceptanceForAttempt(t *testing.T, runRoot, attemptID string) execution.AcceptanceJournal {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(runRoot, "*", "journal.jsonl"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("retained journal paths=%v err=%v", paths, err)
+	}
+	entries, err := journal.Load(paths[0])
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("load retained RF-F07 journal entries=%d err=%v", len(entries), err)
+	}
+	acceptance := execution.AcceptanceJournal{RunID: entries[0].RunID, CheckpointHash: "sha256:" + entries[len(entries)-1].Hash}
+	for _, entry := range entries {
+		if entry.Payload.CorrelationID != attemptID || (entry.Kind != journal.RequestReceived && entry.Kind != journal.UpdateAccepted) {
+			continue
+		}
+		acceptance.Entries = append(acceptance.Entries, execution.AcceptanceEntry{AttemptID: attemptID, RequestFingerprint: "sha256:" + entry.Payload.Fingerprint, Received: entry.Kind == journal.RequestReceived, Accepted: entry.Kind == journal.UpdateAccepted, Sequence: int64(entry.Sequence)})
+	}
+	if len(acceptance.Entries) == 0 {
+		t.Fatalf("retained RF-F07 journal has no evidence for attempt %s", attemptID)
+	}
+	return acceptance
+}
+
+type retainedJournalReader struct{ journal execution.AcceptanceJournal }
+
+func (reader retainedJournalReader) ReadAcceptance(_ context.Context, runID, _ string, _, _ time.Time) (execution.AcceptanceJournal, error) {
+	if runID != reader.journal.RunID {
+		return execution.AcceptanceJournal{}, fmt.Errorf("unexpected simulator run %q", runID)
+	}
+	return reader.journal, nil
 }
 
 func assertDuplicateRequestControlFails(t *testing.T, runRoot string) {
