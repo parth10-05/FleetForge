@@ -6,21 +6,27 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parth10-05/fleetforge/internal/application/eventhint"
 	"github.com/parth10-05/fleetforge/internal/application/execution"
+	"github.com/parth10-05/fleetforge/internal/delivery/eventhinthttp"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
 	"github.com/parth10-05/fleetforge/internal/simulator/journal"
@@ -323,6 +329,165 @@ func TestComposedHarnessPostAcceptLossAdoptsRetainedAcceptance(t *testing.T) {
 	}
 }
 
+// TestComposedHarnessDuplicateCallbackIsDeduplicated drives a real simulator
+// EventService subscription through the signed HTTP ingress and confirms that
+// RF-F01's duplicate delivery remains only an advisory, durable single receipt.
+func TestComposedHarnessDuplicateCallbackIsDeduplicated(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate callback schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatal(err)
+	}
+	callbackKey := bytes.Repeat([]byte("c"), 32)
+	var callbackAttempts atomic.Int64
+	var callbackStatus atomic.Int64
+	callbackStore := &callbackStoreRecorder{store: persistence.EventHintStore{Pool: pool}}
+	callbackRoutes := eventhinthttp.New(callbackKey, callbackStore, time.Now).Routes()
+	callback := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		callbackAttempts.Add(1)
+		callbackRoutes.ServeHTTP(&callbackStatusRecorder{ResponseWriter: writer, status: &callbackStatus}, request)
+	}))
+	defer callback.Close()
+	runRoot, address, adminAddress := t.TempDir(), freeAddress(t), freeAddress(t)
+	scenarioPath := filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json")
+	input := readScenario(t, scenarioPath)
+	input.ScenarioID = "duplicate-callback-six-targets"
+	// Give the durable accepted-result transaction time to commit before the
+	// first advisory callback fires. The production invariant is that callbacks
+	// may accelerate observation only after a durable attempt exists.
+	input.Timing.UploadMS = 100
+	input.Timing.TaskStepMS = 100
+	input.Timing.RebootMS = 100
+	input.Timing.InventoryVisibilityMS = 100
+	input.Timing.EventMS = 100
+	input.Faults = append(input.Faults, scenario.Fault{FaultID: "duplicate-callback", Name: "RF-F01", Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	casePath := filepath.Join(runRoot, "duplicate-callback.json")
+	if err := os.WriteFile(casePath, append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(setupCtx, "UPDATE targets SET target_key=$1 WHERE id=$2::uuid", targetID, fixture.TargetID); err != nil {
+		t.Fatal(err)
+	}
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build callback simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(), "FLEETFORGE_ENV=test", "FLEETFORGE_READINESS_TIMEOUT=5s", "FLEETFORGE_SIMULATOR_ADDR="+address, "FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress, "FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot, "FLEETFORGE_SIMULATOR_SCENARIO_PATH="+casePath, "FLEETFORGE_SIMULATOR_USERNAME=fault-harness", "FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password", "FLEETFORGE_SIMULATOR_ADMIN_SECRET=callback-admin-secret", "FLEETFORGE_SIMULATOR_CALLBACK_HMAC_SECRET="+base64.RawStdEncoding.EncodeToString(callbackKey))
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	subscribeCallback(t, ctx, address, targetID, callback.URL+"/v1/events/synthetic")
+	initial := executionfixture.AdmissionRequest(fixture, "5206")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatal(err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	work, claimed, err := adapter.ClaimSubmitWork(ctx, "callback-harness", "00000000-0000-4000-8000-000000000206")
+	if err != nil || !claimed {
+		t.Fatalf("claim submit=%+v claimed=%t err=%v", work, claimed, err)
+	}
+	remoteTask := submitAcceptedUpdateForAttempt(t, ctx, address, input, initial.FirmwareAttempt.AttemptID)
+	if err := adapter.CommitSubmitResult(ctx, work, execution.SubmitResult{Class: execution.SubmitAccepted, RemoteTaskReference: remoteTask, ResponseFingerprint: harnessDigest('c'), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		var receipts int
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_event_receipts").Scan(&receipts); err == nil && receipts == 1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			var quarantined int
+			_ = pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM execution_event_quarantine").Scan(&quarantined)
+			t.Fatalf("timed out waiting for signed callback receipt: callback_attempts=%d last_status=%d quarantined=%d record_error=%q", callbackAttempts.Load(), callbackStatus.Load(), quarantined, callbackStore.LastError())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	var receipts, sequence, observations int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_event_receipts").Scan(&receipts); err != nil || receipts != 1 {
+		t.Fatalf("receipts=%d err=%v, want one deduplicated receipt", receipts, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT sequence FROM execution_event_heads WHERE target_key=$1", targetID).Scan(&sequence); err != nil || sequence < 1 {
+		t.Fatalf("sequence=%d err=%v", sequence, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&observations); err != nil || observations < 1 {
+		t.Fatalf("task observations=%d err=%v", observations, err)
+	}
+}
+
+type callbackStatusRecorder struct {
+	http.ResponseWriter
+	status *atomic.Int64
+}
+
+type callbackStoreRecorder struct {
+	store   eventhinthttp.Store
+	lastErr atomic.Value
+}
+
+func (store *callbackStoreRecorder) RecordEventHint(ctx context.Context, hint eventhint.Hint) (string, error) {
+	disposition, err := store.store.RecordEventHint(ctx, hint)
+	if err != nil {
+		store.lastErr.Store(err.Error())
+	}
+	return disposition, err
+}
+
+func (store *callbackStoreRecorder) QuarantineEventHint(ctx context.Context, body []byte, reason string, receivedAt time.Time) error {
+	return store.store.QuarantineEventHint(ctx, body, reason, receivedAt)
+}
+
+func (store *callbackStoreRecorder) LastError() string {
+	if value := store.lastErr.Load(); value != nil {
+		return value.(string)
+	}
+	return ""
+}
+
+func (writer *callbackStatusRecorder) WriteHeader(status int) {
+	writer.status.Store(int64(status))
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *callbackStatusRecorder) Write(body []byte) (int, error) {
+	if writer.status.Load() == 0 {
+		writer.status.Store(http.StatusOK)
+	}
+	return writer.ResponseWriter.Write(body)
+}
+
 // TestComposedHarnessAdminProvenAbsentCreatesFencedChildAttempt proves that
 // an administrator can authorize a replacement only after a retained real
 // simulator run has no matching request evidence. The durable retry still
@@ -470,6 +635,61 @@ func submitAcceptedUpdate(t *testing.T, ctx context.Context, address, scenarioPa
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("update status=%d, want %d: %s", response.StatusCode, http.StatusAccepted, responseBody)
 	}
+}
+
+func subscribeCallback(t *testing.T, ctx context.Context, address, targetID, destination string) {
+	t.Helper()
+	body := []byte(`{"Destination":"` + destination + `","Protocol":"Redfish","SubscriptionType":"RedfishEvent"}`)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/EventService/Subscriptions", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("subscribe status=%d", response.StatusCode)
+	}
+}
+
+func submitAcceptedUpdateForAttempt(t *testing.T, ctx context.Context, address string, input scenario.Scenario, attemptID string) string {
+	t.Helper()
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("firmware-callback-artifact")
+	digest := sha256.Sum256(body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/UpdateService/update", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-FleetForge-Expected-Version", "1.1")
+	request.Header.Set("X-FleetForge-Artifact-SHA256", hex.EncodeToString(digest[:]))
+	request.Header.Set("X-FleetForge-Attempt", attemptID)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("update status=%d", response.StatusCode)
+	}
+	if location := response.Header.Get("Location"); location != "" {
+		prefix := "/virtual-bmcs/" + targetID
+		if strings.HasPrefix(location, prefix) {
+			return strings.TrimPrefix(location, prefix)
+		}
+		t.Fatalf("accepted update location=%q, want virtual BMC task URI", location)
+	}
+	t.Fatal("accepted update omitted task Location")
+	return ""
 }
 
 func submitExpectedTransportLoss(t *testing.T, ctx context.Context, address, scenarioPath, attemptID string) {

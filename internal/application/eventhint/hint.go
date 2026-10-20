@@ -34,9 +34,10 @@ func Parse(secret []byte, signature string, body []byte, receivedAt time.Time) (
 	}
 	var envelope struct {
 		Events []struct {
-			EventID string `json:"EventId"`
-			Kind    string `json:"Message"`
-			OEM     struct {
+			EventID   string `json:"EventId"`
+			EventType string `json:"EventType"`
+			Kind      string `json:"Message"`
+			OEM       struct {
 				FleetForge struct {
 					Target     string `json:"Target"`
 					Task       string `json:"Task"`
@@ -53,7 +54,7 @@ func Parse(secret []byte, signature string, body []byte, receivedAt time.Time) (
 	}
 	event := envelope.Events[0]
 	observedAt, err := time.Parse(time.RFC3339Nano, event.OEM.FleetForge.ObservedAt)
-	if err != nil || !bounded(event.EventID, 128) || !bounded(event.Kind, 128) || !bounded(event.OEM.FleetForge.Target, 128) || !bounded(event.OEM.FleetForge.Task, 256) || event.OEM.FleetForge.Sequence <= 0 || observedAt.After(receivedAt.UTC()) {
+	if err != nil || !bounded(event.EventID, 128) || event.EventType != "StatusChange" || !bounded(event.Kind, 128) || !bounded(event.OEM.FleetForge.Target, 128) || !bounded(event.OEM.FleetForge.Task, 256) || event.OEM.FleetForge.Sequence <= 0 || observedAt.After(receivedAt.UTC()) {
 		return Hint{}, ErrRejected
 	}
 	digest := sha256.Sum256(body)
