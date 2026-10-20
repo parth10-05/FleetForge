@@ -38,7 +38,7 @@ func TestReceiverAcceptsOnlyAuthenticatedBoundedHint(t *testing.T) {
 	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	secret := []byte("01234567890123456789012345678901")
 	store := &recordingStore{}
-	body := []byte(`{"Events":[{"EventId":"event-1","Message":"TaskCompleted","Oem":{"FleetForge":{"Target":"target-1","Task":"task-1","Sequence":1,"ObservedAt":"2026-01-02T03:04:04Z"}}}]}`)
+	body := []byte(`{"Events":[{"EventId":"event-1","EventType":"StatusChange","Message":"TaskCompleted","Oem":{"FleetForge":{"Target":"target-1","Task":"task-1","Sequence":1,"ObservedAt":"2026-01-02T03:04:04Z"}}}]}`)
 	request := httptest.NewRequest(http.MethodPost, "/v1/events/synthetic", strings.NewReader(string(body)))
 	request.Header.Set(SignatureHeader, signature(secret, body))
 	response := httptest.NewRecorder()
