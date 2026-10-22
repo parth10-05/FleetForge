@@ -169,6 +169,7 @@ type AdminResolutionCommand struct {
 	Principal                                      VerifiedPrincipal
 	Work                                           WorkFence
 	AttemptID, Action, Reason, EvidenceFingerprint string
+	ReservationDisposition                         string
 	JournalConfirmedAbsent, LateCallerExcluded     bool
 	LateCallerExclusionMethod, ProofReference      string
 	Now                                            time.Time

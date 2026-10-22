@@ -99,6 +99,9 @@ func (adapter ExecutionAdapter) ResolveAttention(ctx context.Context, command ex
 	if adapter.Pool == nil || !validResolutionPrincipal(command.Principal, command.Now) || command.AttemptID == "" || command.Work.CommandID == "" || command.Work.ExpectedRevision < 0 || command.EvidenceFingerprint == "" || command.Now.IsZero() {
 		return execution.ResolutionResult{}, fmt.Errorf("invalid attention resolution")
 	}
+	if err := validReservationDisposition(command); err != nil {
+		return execution.ResolutionResult{}, err
+	}
 	tx, err := adapter.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return execution.ResolutionResult{}, fmt.Errorf("begin attention resolution: %w", err)
@@ -118,12 +121,12 @@ WHERE a.id=$1::uuid FOR UPDATE OF a,tu`, command.AttemptID).Scan(&updateID, &adm
 	if state != "NEEDS_ATTENTION" || (status != "AMBIGUOUS" && status != "NEEDS_ATTENTION") || revision != command.Work.ExpectedRevision || (command.Work.ExpectedCommandEpoch != nil && epoch != *command.Work.ExpectedCommandEpoch) {
 		var persistedFingerprint, action, reason, principal, issuerClass string
 		var journalConfirmedAbsent, lateCallerExcluded bool
-		var lateCallerExclusionMethod, proofReference *string
-		err = tx.QueryRow(ctx, `SELECT evidence_fingerprint,evidence_summary->>'action',reason_code,evidence_summary->>'principal',evidence_summary->>'issuer_class',journal_confirmed_absent,late_caller_excluded,late_caller_exclusion_method,proof_reference
+		var lateCallerExclusionMethod, proofReference, reservationDisposition *string
+		err = tx.QueryRow(ctx, `SELECT evidence_fingerprint,evidence_summary->>'action',reason_code,evidence_summary->>'principal',evidence_summary->>'issuer_class',journal_confirmed_absent,late_caller_excluded,late_caller_exclusion_method,proof_reference,evidence_summary->>'reservation_disposition'
 FROM ambiguity_resolutions WHERE attempt_id=$1::uuid AND command_id=$2::uuid`, command.AttemptID, command.Work.CommandID).Scan(
-			&persistedFingerprint, &action, &reason, &principal, &issuerClass, &journalConfirmedAbsent, &lateCallerExcluded, &lateCallerExclusionMethod, &proofReference,
+			&persistedFingerprint, &action, &reason, &principal, &issuerClass, &journalConfirmedAbsent, &lateCallerExcluded, &lateCallerExclusionMethod, &proofReference, &reservationDisposition,
 		)
-		if err == nil && persistedFingerprint == command.EvidenceFingerprint && action == command.Action && reason == command.Reason && principal == command.Principal.Subject && issuerClass == command.Principal.IssuerClass && journalConfirmedAbsent == command.JournalConfirmedAbsent && lateCallerExcluded == command.LateCallerExcluded && nullableStringEqual(lateCallerExclusionMethod, command.LateCallerExclusionMethod) && nullableStringEqual(proofReference, command.ProofReference) {
+		if err == nil && persistedFingerprint == command.EvidenceFingerprint && action == command.Action && reason == command.Reason && principal == command.Principal.Subject && issuerClass == command.Principal.IssuerClass && journalConfirmedAbsent == command.JournalConfirmedAbsent && lateCallerExcluded == command.LateCallerExcluded && nullableStringEqual(lateCallerExclusionMethod, command.LateCallerExclusionMethod) && nullableStringEqual(proofReference, command.ProofReference) && nullableStringEqual(reservationDisposition, command.ReservationDisposition) {
 			if err = tx.Commit(ctx); err != nil {
 				return execution.ResolutionResult{}, classifyDueWorkError(err, "commit idempotent attention resolution")
 			}
@@ -135,7 +138,7 @@ FROM ambiguity_resolutions WHERE attempt_id=$1::uuid AND command_id=$2::uuid`, c
 	if err != nil {
 		return execution.ResolutionResult{}, err
 	}
-	evidence, _ := json.Marshal(map[string]any{"action": command.Action, "reason": command.Reason, "principal": command.Principal.Subject, "issuer_class": command.Principal.IssuerClass, "proof_reference": command.ProofReference, "late_caller_exclusion_method": command.LateCallerExclusionMethod})
+	evidence, _ := json.Marshal(map[string]any{"action": command.Action, "reason": command.Reason, "principal": command.Principal.Subject, "issuer_class": command.Principal.IssuerClass, "proof_reference": command.ProofReference, "late_caller_exclusion_method": command.LateCallerExclusionMethod, "reservation_disposition": command.ReservationDisposition})
 	if _, err = tx.Exec(ctx, `INSERT INTO ambiguity_resolutions (id,attempt_id,target_update_revision,outcome,evidence_summary,evidence_fingerprint,journal_confirmed_absent,late_caller_excluded,late_caller_exclusion_method,proof_reference,actor_id,command_id,reason_code)
 VALUES (md5($1)::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::uuid,$13)`, "fleetforge.admin-resolution/v1:"+command.AttemptID+":"+command.Work.CommandID, command.AttemptID, revision, outcome, evidence, command.EvidenceFingerprint, command.JournalConfirmedAbsent, command.LateCallerExcluded, nullableExecutionString(command.LateCallerExclusionMethod), nullableExecutionString(command.ProofReference), command.Principal.Subject, command.Work.CommandID, command.Reason); err != nil {
 		return execution.ResolutionResult{}, fmt.Errorf("persist administrator resolution: %w", err)
@@ -149,6 +152,9 @@ VALUES (md5($1)::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::uuid,$13
 	}
 	if tag.RowsAffected() != 1 {
 		return execution.ResolutionResult{}, fmt.Errorf("%w: target update fence changed", ErrLeaseConflict)
+	}
+	if err := applyTerminalReservationDisposition(ctx, tx, admissionID, command); err != nil {
+		return execution.ResolutionResult{}, err
 	}
 	if command.Action == "RETRY_PROVEN_ABSENT" {
 		if _, err = tx.Exec(ctx, `UPDATE submission_admissions SET retry_authorizations=retry_authorizations+1 WHERE id=$1::uuid`, admissionID); err != nil {
@@ -169,6 +175,82 @@ VALUES (md5($1)::uuid,md5($2)::uuid,'TARGET_UPDATE',$3::uuid,$4,1,$5,$6,$7)`, "f
 
 func validResolutionPrincipal(principal execution.VerifiedPrincipal, now time.Time) bool {
 	return principal.Verified && principal.Subject != "" && !principal.AuthenticatedAt.IsZero() && !principal.AuthenticatedAt.After(now) && now.Sub(principal.AuthenticatedAt) <= 15*time.Minute && !principal.ExpiresAt.IsZero() && principal.ExpiresAt.After(now) && slices.Contains(principal.Roles, "firmware:resolve")
+}
+
+func validReservationDisposition(command execution.AdminResolutionCommand) error {
+	if command.Action != "TERMINAL" {
+		if command.ReservationDisposition != "" {
+			return fmt.Errorf("non-terminal attention resolution cannot change reservations")
+		}
+		return nil
+	}
+	switch command.ReservationDisposition {
+	case "QUARANTINE":
+		return nil
+	case "RELEASE":
+		if command.ProofReference == "" {
+			return fmt.Errorf("reservation release requires safe disposition proof")
+		}
+		return nil
+	default:
+		return fmt.Errorf("terminal attention resolution requires explicit reservation disposition")
+	}
+}
+
+// applyTerminalReservationDisposition preserves the three-scope reservation
+// invariant. QUARANTINE retains capacity; RELEASE requires a separate proof and
+// atomically decrements each durable scope counter.
+func applyTerminalReservationDisposition(ctx context.Context, tx pgx.Tx, admissionID string, command execution.AdminResolutionCommand) error {
+	if command.Action != "TERMINAL" {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT scope_level,scope_key
+FROM operation_reservations
+WHERE admission_id=$1::uuid AND state IN ('ACTIVE','QUARANTINED')
+ORDER BY CASE scope_level WHEN 'GLOBAL' THEN 1 WHEN 'SITE' THEN 2 WHEN 'RACK' THEN 3 ELSE 4 END,scope_key
+FOR UPDATE`, admissionID)
+	if err != nil {
+		return fmt.Errorf("lock terminal reservations: %w", err)
+	}
+	type scope struct{ level, key string }
+	scopes := make([]scope, 0, 3)
+	for rows.Next() {
+		var item scope
+		if err := rows.Scan(&item.level, &item.key); err != nil {
+			return fmt.Errorf("scan terminal reservation: %w", err)
+		}
+		scopes = append(scopes, item)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate terminal reservations: %w", err)
+	}
+	rows.Close()
+	if len(scopes) != 3 || scopes[0].level != "GLOBAL" || scopes[1].level != "SITE" || scopes[2].level != "RACK" {
+		return fmt.Errorf("terminal reservation invariant violated")
+	}
+	if command.ReservationDisposition == "QUARANTINE" {
+		if _, err := tx.Exec(ctx, `UPDATE operation_reservations SET state='QUARANTINED' WHERE admission_id=$1::uuid AND state='ACTIVE'`, admissionID); err != nil {
+			return fmt.Errorf("quarantine terminal reservations: %w", err)
+		}
+		return nil
+	}
+	for _, item := range scopes {
+		tag, err := tx.Exec(ctx, `UPDATE scope_capacities
+SET active_reservation_count=active_reservation_count-1,updated_at=$3
+WHERE scope_level=$1 AND scope_key=$2 AND active_reservation_count > 0`, item.level, item.key, command.Now.UTC())
+		if err != nil {
+			return fmt.Errorf("release terminal capacity: %w", err)
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("terminal capacity invariant violated")
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE operation_reservations
+SET state='RELEASED',released_at=$2,release_reason='ADMIN_TERMINAL_RELEASE'
+WHERE admission_id=$1::uuid AND state IN ('ACTIVE','QUARANTINED')`, admissionID, command.Now.UTC()); err != nil {
+		return fmt.Errorf("release terminal reservations: %w", err)
+	}
+	return nil
 }
 
 func adminResolutionTransition(command execution.AdminResolutionCommand) (outcome, state, attemptStatus, work, resume string, err error) {

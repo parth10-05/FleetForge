@@ -64,6 +64,76 @@ func TestPersistedOracleRejectsReceivedOperationClaimedProvenAbsent(t *testing.T
 	}
 }
 
+func TestAdminTerminalDispositionPreservesOrReleasesThreeScopeCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name, disposition, proof                    string
+		wantQuarantined, wantReleased, wantCapacity int
+	}{
+		{name: "quarantine retains exposure", disposition: "QUARANTINE", wantQuarantined: 3, wantCapacity: 3},
+		{name: "proofed release frees exposure", disposition: "RELEASE", proof: "test://safe-terminal-disposition", wantReleased: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pool, ctx := migratedHarness(t)
+			fixture := seedOwnershipFixture(t, pool, ctx)
+			prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+			req := executionAdmissionRequest(fixture, "5201")
+			if err := persistence.AdmitOperation(ctx, pool, req); err != nil {
+				t.Fatal(err)
+			}
+			adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+			submit := claimExecutionSubmitWork(t, ctx, adapter, "00000000-0000-0000-5201-000000000099")
+			if err := adapter.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitPossiblyAccepted, ResponseFingerprint: executionDigest("d"), FinishedAt: time.Now().UTC().Add(time.Second)}); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().UTC().Add(2 * time.Second)
+			resolution := execution.AdminResolutionCommand{
+				Principal:              execution.VerifiedPrincipal{Subject: "admin", IssuerClass: "local-test", Roles: []string{"firmware:resolve"}, Verified: true, AuthenticatedAt: now, ExpiresAt: now.Add(time.Minute)},
+				Work:                   execution.WorkFence{CommandID: "00000000-0000-0000-5201-000000000098", ExpectedRevision: 2},
+				AttemptID:              req.FirmwareAttempt.AttemptID,
+				Action:                 "TERMINAL",
+				Reason:                 "test.terminal_disposition",
+				EvidenceFingerprint:    executionDigest("e"),
+				ReservationDisposition: tc.disposition,
+				ProofReference:         tc.proof,
+				Now:                    now,
+			}
+			if _, err := adapter.ResolveAttention(ctx, resolution); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adapter.ResolveAttention(ctx, resolution); err != nil {
+				t.Fatalf("idempotent terminal resolution: %v", err)
+			}
+
+			var quarantined, released, capacity, terminal int
+			var persistedDisposition string
+			if err := pool.QueryRow(ctx, `SELECT COUNT(*) FILTER (WHERE state='QUARANTINED'),COUNT(*) FILTER (WHERE state='RELEASED') FROM operation_reservations WHERE admission_id=$1::uuid`, req.AdmissionID).Scan(&quarantined, &released); err != nil {
+				t.Fatal(err)
+			}
+			if err := pool.QueryRow(ctx, `SELECT COALESCE(SUM(active_reservation_count),0) FROM scope_capacities`).Scan(&capacity); err != nil {
+				t.Fatal(err)
+			}
+			if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM target_updates WHERE id=$1::uuid AND state='FAILED_TERMINAL'`, fixture.targetUpdateID).Scan(&terminal); err != nil {
+				t.Fatal(err)
+			}
+			if err := pool.QueryRow(ctx, `SELECT evidence_summary->>'reservation_disposition' FROM ambiguity_resolutions WHERE attempt_id=$1::uuid`, req.FirmwareAttempt.AttemptID).Scan(&persistedDisposition); err != nil {
+				t.Fatal(err)
+			}
+			if quarantined != tc.wantQuarantined || released != tc.wantReleased || capacity != tc.wantCapacity || terminal != 1 || persistedDisposition != tc.disposition {
+				t.Fatalf("quarantined=%d released=%d capacity=%d terminal=%d disposition=%q", quarantined, released, capacity, terminal, persistedDisposition)
+			}
+			conflict := resolution
+			if tc.disposition == "QUARANTINE" {
+				conflict.ReservationDisposition, conflict.ProofReference = "RELEASE", "test://different-proof"
+			} else {
+				conflict.ReservationDisposition, conflict.ProofReference = "QUARANTINE", ""
+			}
+			if _, err := adapter.ResolveAttention(ctx, conflict); err == nil {
+				t.Fatal("resolution replay with a different reservation disposition unexpectedly succeeded")
+			}
+		})
+	}
+}
+
 func TestAdminProvenAbsentCreatesOneFencedChildAdmission(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)

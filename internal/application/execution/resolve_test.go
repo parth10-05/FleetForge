@@ -56,3 +56,23 @@ func TestResolveAttentionRejectsUnverifiedPrincipal(t *testing.T) {
 		t.Fatal("unverified principal was accepted")
 	}
 }
+
+func TestResolveAttentionRequiresExplicitTerminalReservationDisposition(t *testing.T) {
+	now := time.Now().UTC()
+	verifier := verifierFunc(func(context.Context, string) (VerifiedPrincipal, error) {
+		return VerifiedPrincipal{Subject: "admin", Roles: []string{resolutionRole}, Verified: true, AuthenticatedAt: now, ExpiresAt: now.Add(time.Minute)}, nil
+	})
+	repository := &resolutionRepo{}
+	command := AdminResolutionCommand{AttemptID: "attempt", Action: "TERMINAL", Reason: "verified", EvidenceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Now: now}
+	if _, err := ResolveAttention(context.Background(), verifier, repository, "token", command); err == nil || repository.calls != 0 {
+		t.Fatalf("terminal resolution without disposition err=%v calls=%d", err, repository.calls)
+	}
+	command.ReservationDisposition = "RELEASE"
+	if _, err := ResolveAttention(context.Background(), verifier, repository, "token", command); err == nil || repository.calls != 0 {
+		t.Fatalf("reservation release without proof err=%v calls=%d", err, repository.calls)
+	}
+	command.ReservationDisposition, command.ProofReference = "QUARANTINE", ""
+	if _, err := ResolveAttention(context.Background(), verifier, repository, "token", command); err != nil || repository.calls != 1 {
+		t.Fatalf("terminal quarantine err=%v calls=%d", err, repository.calls)
+	}
+}

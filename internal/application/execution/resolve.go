@@ -39,5 +39,14 @@ func ResolveAttention(ctx context.Context, verifier TokenVerifier, repository At
 	if command.Action != "ADOPT" && command.Action != "RETRY_PROVEN_ABSENT" && command.Action != "TERMINAL" {
 		return ResolutionResult{}, fmt.Errorf("unsupported attention resolution action")
 	}
+	if command.Action == "TERMINAL" && command.ReservationDisposition != "QUARANTINE" && command.ReservationDisposition != "RELEASE" {
+		return ResolutionResult{}, fmt.Errorf("terminal attention resolution requires explicit reservation disposition")
+	}
+	if command.Action != "TERMINAL" && command.ReservationDisposition != "" {
+		return ResolutionResult{}, fmt.Errorf("non-terminal attention resolution cannot change reservations")
+	}
+	if command.ReservationDisposition == "RELEASE" && command.ProofReference == "" {
+		return ResolutionResult{}, fmt.Errorf("reservation release requires safe disposition proof")
+	}
 	return repository.ResolveAttention(ctx, command)
 }
