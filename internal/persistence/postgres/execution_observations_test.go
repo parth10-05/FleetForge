@@ -24,6 +24,12 @@ func TestObservationRoutesRespectSeparatedRebootAndVersionStages(t *testing.T) {
 	}
 }
 
+func TestTaskMissingAdvancesToInventoryVerification(t *testing.T) {
+	if got := observationNextState("TASK_OBSERVE", "INVENTORY_OBSERVE"); got != "VERIFYING" {
+		t.Fatalf("task-missing next state=%q, want VERIFYING", got)
+	}
+}
+
 func TestObservationDelayIsStableAndBounded(t *testing.T) {
 	first := observationDelay("attempt-a:TASK_OBSERVE", 2)
 	if again := observationDelay("attempt-a:TASK_OBSERVE", 2); again != first {

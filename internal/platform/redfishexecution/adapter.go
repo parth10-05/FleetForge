@@ -190,7 +190,7 @@ func (adapter Adapter) getDocument(ctx context.Context, targetID, resource strin
 	resource = strings.TrimPrefix(resource, "/redfish/v1/")
 	document, err := adapter.Client.GetDocumentAuthenticated(ctx, address, resource, credential)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, time.Time{}, fmt.Errorf("get execution resource %q for target key %q: %w", resource, target.TargetKey, err)
 	}
 	return document, adapter.now(), nil
 }

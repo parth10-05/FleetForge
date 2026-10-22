@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -673,17 +674,21 @@ func TestComposedHarnessLostCallbackLeavesPollingAuthoritative(t *testing.T) {
 // observation worker has no submission capability; repair returns the same
 // claimed observation to PENDING without inventing a firmware retry.
 func TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair(t *testing.T) {
-	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F04")
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F04", false)
 }
 
 // TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair proves
 // that a real 503 observation failure has the same safe lease-repair
 // semantics as a rate-limited read: no evidence or submission is fabricated.
 func TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T) {
-	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F05")
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F05", false)
 }
 
-func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T, fault string) {
+func TestComposedHarnessMissingTaskSchedulesInventoryVerification(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F08", true)
+}
+
+func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T, fault string, expectMissingTask bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -756,6 +761,23 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 	if err := store.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitAccepted, RemoteTaskReference: remoteTask, ResponseFingerprint: harnessDigest('a'), FinishedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	if expectMissingTask {
+		for index := 0; index < 5; index++ {
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+address+"/virtual-bmcs/"+targetKey+"/redfish/v1/", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.SetBasicAuth("fault-harness", "fault-harness-password")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("advance simulator status=%d", response.StatusCode)
+			}
+		}
+	}
 	var observationsBefore int
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM device_observations").Scan(&observationsBefore); err != nil {
 		t.Fatal(err)
@@ -769,9 +791,37 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := redfishexecution.Adapter{Loader: redfishexecution.PostgresTargetLoader{Pool: pool}, Client: redfish.NewClient(redfish.ClientConfig{AllowedCIDRs: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}), Resolver: resolver, Now: func() time.Time { return now }}
+	target := redfishexecution.Adapter{Loader: redfishexecution.PostgresTargetLoader{Pool: pool}, Client: redfish.NewClient(redfish.ClientConfig{AllowedCIDRs: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, ResolveIP: func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+	}}), Resolver: resolver, Now: func() time.Time { return now }}
 	worker := execution.ObservationWorker{Claimer: store, Repository: store, Target: target}
+	var workBefore string
+	if err := pool.QueryRow(ctx, "SELECT COALESCE(string_agg(work_type || ':' || delivery_state, ',' ORDER BY created_at),'') FROM due_work").Scan(&workBefore); err != nil {
+		t.Fatal(err)
+	}
 	processed, observeErr := worker.RunOnce(ctx, "rate-limit-observer", "00000000-0000-4000-8000-000000000211")
+	if expectMissingTask {
+		if !processed || observeErr != nil {
+			t.Fatalf("missing-task worker processed=%t task_reference=%q err=%v forbidden=%t unexpected-status=%t unexpected-media=%t, want normalized task-missing evidence", processed, remoteTask, observeErr, errors.Is(observeErr, redfish.ErrForbiddenAddress), errors.Is(observeErr, redfish.ErrUnexpectedStatus), errors.Is(observeErr, redfish.ErrUnexpectedMediaType))
+		}
+		var state, taskState, taskDelivery, inventoryDelivery string
+		var workAfter, observationKind string
+		_ = pool.QueryRow(ctx, "SELECT COALESCE(string_agg(work_type || ':' || delivery_state, ',' ORDER BY created_at),'') FROM due_work").Scan(&workAfter)
+		_ = pool.QueryRow(ctx, "SELECT COALESCE(kind,'') FROM device_observations WHERE target_update_id=$1::uuid ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&observationKind)
+		if err := pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.TargetUpdateID).Scan(&state); err != nil || state != "VERIFYING" {
+			t.Fatalf("target update state=%s err=%v, want VERIFYING; work before=%q after=%q observation kind=%q", state, err, workBefore, workAfter, observationKind)
+		}
+		if err := pool.QueryRow(ctx, "SELECT normalized_data->>'TaskState' FROM device_observations WHERE target_update_id=$1::uuid ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&taskState); err != nil || taskState != "Missing" {
+			t.Fatalf("task observation state=%s err=%v, want Missing", taskState, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE work_type='TASK_OBSERVE' ORDER BY created_at LIMIT 1").Scan(&taskDelivery); err != nil || taskDelivery != "COMPLETED" {
+			t.Fatalf("task delivery=%s err=%v, want completed", taskDelivery, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE work_type='INVENTORY_OBSERVE' ORDER BY created_at LIMIT 1").Scan(&inventoryDelivery); err != nil || inventoryDelivery != "PENDING" {
+			t.Fatalf("inventory delivery=%s err=%v, want pending verification", inventoryDelivery, err)
+		}
+		return
+	}
 	if !processed || observeErr == nil {
 		t.Fatalf("rate-limited worker processed=%t err=%v, want claimed 429 failure", processed, observeErr)
 	}

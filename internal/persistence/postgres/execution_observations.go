@@ -158,8 +158,11 @@ func observationNextState(workType, next string) string {
 	if next == "TERMINAL" {
 		return "FAILED_TERMINAL"
 	}
-	if workType == "TASK_OBSERVE" && next != "INVENTORY_OBSERVE" {
-		return "WAITING_REBOOT"
+	if workType == "TASK_OBSERVE" {
+		if next != "INVENTORY_OBSERVE" {
+			return "WAITING_REBOOT"
+		}
+		return "VERIFYING"
 	}
 	if workType == "REBOOT_OBSERVE" || workType == "INVENTORY_OBSERVE" {
 		return "VERIFYING"

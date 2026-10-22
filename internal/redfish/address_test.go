@@ -30,6 +30,18 @@ func TestTargetAddressRejectsOriginsWithAnEmptyQueryMarker(t *testing.T) {
 	}
 }
 
+func TestTargetAddressResolvesSimulatorTaskReference(t *testing.T) {
+	address, err := ParseTargetAddress("http://127.0.0.1:12345", "target-dabb923d2f052386b8787839704b1e503a799340b5b6d76f0783480e79fa1d25")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := "TaskService/Tasks/task-3acf57d3777a10ef5eaa23cb432e0929a720b02e505a74e8e60ac0e82dcfecc9"
+	want := "http://127.0.0.1:12345/virtual-bmcs/target-dabb923d2f052386b8787839704b1e503a799340b5b6d76f0783480e79fa1d25/redfish/v1/" + resource
+	if got, err := address.ResolveResource(resource); err != nil || got != want {
+		t.Fatalf("ResolveResource(%q) = %q, %v; want %q", resource, got, err, want)
+	}
+}
+
 func TestDialPolicyRejectsPrivateMetadataAndLoopback(t *testing.T) {
 	allowed := []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}
 	if err := ValidateDialIP("198.51.100.8", allowed); err != nil {
