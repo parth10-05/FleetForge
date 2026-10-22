@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,9 @@ import (
 	"github.com/parth10-05/fleetforge/internal/delivery/eventhinthttp"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
+	"github.com/parth10-05/fleetforge/internal/platform/redfishexecution"
+	"github.com/parth10-05/fleetforge/internal/platform/syntheticcredentials"
+	"github.com/parth10-05/fleetforge/internal/redfish"
 	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 	"github.com/parth10-05/fleetforge/test/support/executionfixture"
@@ -661,6 +665,125 @@ func TestComposedHarnessLostCallbackLeavesPollingAuthoritative(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pending); err != nil || pending < 1 {
 		t.Fatalf("pending observations=%d err=%v, want at least one authoritative accepted-result work item", pending, err)
+	}
+}
+
+// TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair proves
+// that an actual Redfish 429 leaves safe-read work recoverable.  The
+// observation worker has no submission capability; repair returns the same
+// claimed observation to PENDING without inventing a firmware retry.
+func TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	harness := testpostgres.New(t)
+	root := repositoryRoot(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	if err := persistence.RunMigrations(ctx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate rate-limit schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.PrepareAdmission(ctx, pool, fixture, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(ctx, pool, fixture); err != nil {
+		t.Fatal(err)
+	}
+
+	runRoot, address, adminAddress := t.TempDir(), freeAddress(t), freeAddress(t)
+	input := readScenario(t, filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"))
+	input.ScenarioID = "rate-limited-observation"
+	input.Faults = append(input.Faults, scenario.Fault{FaultID: "rate-limit-observation", Name: "RF-F04", Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scenarioPath := filepath.Join(runRoot, "rate-limit-observation.json")
+	if err := os.WriteFile(scenarioPath, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetKey, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE targets SET endpoint_reference=$1,target_key=$2,contract_version='synthetic-redfish-v1',credential_provider='synthetic-test',credential_reference=$3,transport_policy_version='synthetic-allowlisted-v1',registration_hash=$4,trust_metadata_complete=true WHERE id=$5::uuid`, "http://"+address, targetKey, "synthetic-test:"+targetKey, harnessDigest('a'), fixture.TargetID); err != nil {
+		t.Fatal(err)
+	}
+
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build rate-limit simulator: %v: %s", err, output)
+	}
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(), "FLEETFORGE_ENV=test", "FLEETFORGE_READINESS_TIMEOUT=5s", "FLEETFORGE_SIMULATOR_ADDR="+address, "FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress, "FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot, "FLEETFORGE_SIMULATOR_SCENARIO_PATH="+scenarioPath, "FLEETFORGE_SIMULATOR_USERNAME=fault-harness", "FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password", "FLEETFORGE_SIMULATOR_ADMIN_SECRET=rate-limit-admin-secret")
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+
+	initial := executionfixture.AdmissionRequest(fixture, "5210")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	store := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return now }}
+	submit, claimed, err := store.ClaimSubmitWork(ctx, "rate-limit-harness", "00000000-0000-4000-8000-000000000210")
+	if err != nil || !claimed {
+		t.Fatalf("claim submit=%+v claimed=%t err=%v", submit, claimed, err)
+	}
+	remoteTask := submitAcceptedUpdateForAttempt(t, ctx, address, input, initial.FirmwareAttempt.AttemptID)
+	if err := store.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitAccepted, RemoteTaskReference: remoteTask, ResponseFingerprint: harnessDigest('a'), FinishedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	var observationsBefore int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM device_observations").Scan(&observationsBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	credential, err := syntheticcredentials.NewCredential("fault-harness", "fault-harness-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := syntheticcredentials.New(map[string]syntheticcredentials.Credential{targetKey: credential})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := redfishexecution.Adapter{Loader: redfishexecution.PostgresTargetLoader{Pool: pool}, Client: redfish.NewClient(redfish.ClientConfig{AllowedCIDRs: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}), Resolver: resolver, Now: func() time.Time { return now }}
+	worker := execution.ObservationWorker{Claimer: store, Repository: store, Target: target}
+	processed, observeErr := worker.RunOnce(ctx, "rate-limit-observer", "00000000-0000-4000-8000-000000000211")
+	if !processed || observeErr == nil {
+		t.Fatalf("rate-limited worker processed=%t err=%v, want claimed 429 failure", processed, observeErr)
+	}
+
+	var dueID, commandID, delivery string
+	var generation int64
+	if err := pool.QueryRow(ctx, "SELECT id::text,command_id::text,delivery_generation,delivery_state FROM due_work WHERE work_type='TASK_OBSERVE' ORDER BY created_at LIMIT 1").Scan(&dueID, &commandID, &generation, &delivery); err != nil || delivery != "CLAIMED" {
+		t.Fatalf("rate-limited work id=%s command=%s generation=%d state=%s err=%v, want claimed", dueID, commandID, generation, delivery, err)
+	}
+	var observations, pendingSubmits int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM device_observations").Scan(&observations); err != nil || observations != observationsBefore {
+		t.Fatalf("observations before=%d after=%d err=%v, want no evidence from the rate-limited read", observationsBefore, observations, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&pendingSubmits); err != nil || pendingSubmits != 0 {
+		t.Fatalf("pending submits=%d err=%v, want no retry submission", pendingSubmits, err)
+	}
+	repaired, err := persistence.RepairExpiredDueWork(ctx, pool, now.Add(2*time.Minute), 1)
+	if err != nil || len(repaired) != 1 || repaired[0] != dueID {
+		t.Fatalf("repaired=%v err=%v, want rate-limited work %s", repaired, err, dueID)
+	}
+	var repairedCommand, repairedState string
+	var repairedGeneration int64
+	if err := pool.QueryRow(ctx, "SELECT command_id::text,delivery_generation,delivery_state FROM due_work WHERE id=$1::uuid", dueID).Scan(&repairedCommand, &repairedGeneration, &repairedState); err != nil || repairedCommand != commandID || repairedGeneration != generation || repairedState != "PENDING" {
+		t.Fatalf("repaired command=%s generation=%d state=%s err=%v, want same identity pending", repairedCommand, repairedGeneration, repairedState, err)
 	}
 }
 
