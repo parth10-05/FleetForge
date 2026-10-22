@@ -553,6 +553,117 @@ func TestComposedHarnessLateCallbackIsFenced(t *testing.T) {
 	}
 }
 
+// TestComposedHarnessLostCallbackLeavesPollingAuthoritative verifies that an
+// RF-F03 event loss does not mutate durable execution state. The accepted
+// attempt's polling work remains the only authoritative observation path.
+func TestComposedHarnessLostCallbackLeavesPollingAuthoritative(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate lost callback schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatal(err)
+	}
+	callbackKey := bytes.Repeat([]byte("x"), 32)
+	var callbackAttempts atomic.Int64
+	callbackRoutes := eventhinthttp.New(callbackKey, persistence.EventHintStore{Pool: pool}, time.Now).Routes()
+	callback := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		callbackAttempts.Add(1)
+		callbackRoutes.ServeHTTP(writer, request)
+	}))
+	defer callback.Close()
+	runRoot, address, adminAddress := t.TempDir(), freeAddress(t), freeAddress(t)
+	scenarioPath := filepath.Join(root, "test", "fixtures", "simulator", "v1", "lost-event.json")
+	input := readScenario(t, scenarioPath)
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(setupCtx, "UPDATE targets SET target_key=$1 WHERE id=$2::uuid", targetID, fixture.TargetID); err != nil {
+		t.Fatal(err)
+	}
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build lost callback simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	adminSecret := "lost-callback-admin-secret"
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(), "FLEETFORGE_ENV=test", "FLEETFORGE_READINESS_TIMEOUT=5s", "FLEETFORGE_SIMULATOR_ADDR="+address, "FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress, "FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot, "FLEETFORGE_SIMULATOR_SCENARIO_PATH="+scenarioPath, "FLEETFORGE_SIMULATOR_USERNAME=fault-harness", "FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password", "FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret, "FLEETFORGE_SIMULATOR_CALLBACK_HMAC_SECRET="+base64.RawStdEncoding.EncodeToString(callbackKey))
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	subscribeCallback(t, ctx, address, targetID, callback.URL+"/v1/events/synthetic")
+	initial := executionfixture.AdmissionRequest(fixture, "5208")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatal(err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	work, claimed, err := adapter.ClaimSubmitWork(ctx, "lost-callback-harness", "00000000-0000-4000-8000-000000000208")
+	if err != nil || !claimed {
+		t.Fatalf("claim submit=%+v claimed=%t err=%v", work, claimed, err)
+	}
+	remoteTask := submitAcceptedUpdateForAttempt(t, ctx, address, input, initial.FirmwareAttempt.AttemptID)
+	if err := adapter.CommitSubmitResult(ctx, work, execution.SubmitResult{Class: execution.SubmitAccepted, RemoteTaskReference: remoteTask, ResponseFingerprint: harnessDigest('e'), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{adminSecret}}
+	eventDeadline := time.NewTimer(5 * time.Second)
+	defer eventDeadline.Stop()
+	for {
+		metrics := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/metrics", headers)
+		if faults, ok := metrics["Faults"].(float64); ok && faults >= 1 {
+			break
+		}
+		select {
+		case <-eventDeadline.C:
+			t.Fatalf("RF-F03 did not fire: metrics=%v", metrics)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	for {
+		var receipts int
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_event_receipts").Scan(&receipts); err == nil && receipts == 4 {
+			break
+		}
+		select {
+		case <-eventDeadline.C:
+			t.Fatal("timed out waiting for post-loss callbacks")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	var receipts, firstSequence, pending int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*), MIN(sequence) FROM execution_event_receipts").Scan(&receipts, &firstSequence); err != nil || receipts != 4 || firstSequence != 2 {
+		t.Fatalf("receipts=%d first_sequence=%d err=%v, want four callbacks beginning at sequence 2", receipts, firstSequence, err)
+	}
+	if callbackAttempts.Load() != 4 {
+		t.Fatalf("callback attempts=%d, want four after RF-F03 drops the first event", callbackAttempts.Load())
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("pending observations=%d err=%v, want authoritative accepted-result work", pending, err)
+	}
+}
+
 type callbackStatusRecorder struct {
 	http.ResponseWriter
 	status *atomic.Int64
