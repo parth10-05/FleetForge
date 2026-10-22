@@ -9,7 +9,7 @@
     {"id":"P05-F05","name":"late event delivery","boundary":"simulator+control-api","fault":"RF-F02","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F06","name":"lost event delivery","boundary":"simulator+control-api","fixture":"lost-event.json","fault":"RF-F03","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F07","name":"observation rate limit","boundary":"simulator+worker","fault":"RF-F04","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
-    {"id":"P05-F08","name":"observation unavailable","boundary":"simulator+worker","fault":"RF-F05","status":"PENDING_EXECUTION"},
+    {"id":"P05-F08","name":"observation unavailable","boundary":"simulator+worker","fault":"RF-F05","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F09","name":"task disappearance","boundary":"simulator+worker","fixture":"task-disappearance.json","fault":"RF-F08","status":"PENDING_EXECUTION"},
     {"id":"P05-F10","name":"version contradiction","boundary":"simulator+worker","fault":"RF-F10","status":"PENDING_EXECUTION"},
     {"id":"P05-F11","name":"health contradiction","boundary":"simulator+worker","fixture":"canary-health-failure.json","fault":"RF-F11","status":"PENDING_EXECUTION"},

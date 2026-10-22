@@ -673,6 +673,18 @@ func TestComposedHarnessLostCallbackLeavesPollingAuthoritative(t *testing.T) {
 // observation worker has no submission capability; repair returns the same
 // claimed observation to PENDING without inventing a firmware retry.
 func TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F04")
+}
+
+// TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair proves
+// that a real 503 observation failure has the same safe lease-repair
+// semantics as a rate-limited read: no evidence or submission is fabricated.
+func TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F05")
+}
+
+func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T, fault string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	harness := testpostgres.New(t)
@@ -695,13 +707,13 @@ func TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair(t *test
 
 	runRoot, address, adminAddress := t.TempDir(), freeAddress(t), freeAddress(t)
 	input := readScenario(t, filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"))
-	input.ScenarioID = "rate-limited-observation"
-	input.Faults = append(input.Faults, scenario.Fault{FaultID: "rate-limit-observation", Name: "RF-F04", Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
+	input.ScenarioID = "unavailable-observation"
+	input.Faults = append(input.Faults, scenario.Fault{FaultID: "unavailable-observation", Name: fault, Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
 	raw, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scenarioPath := filepath.Join(runRoot, "rate-limit-observation.json")
+	scenarioPath := filepath.Join(runRoot, "unavailable-observation.json")
 	if err := os.WriteFile(scenarioPath, append(raw, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
