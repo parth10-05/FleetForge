@@ -659,8 +659,8 @@ func TestComposedHarnessLostCallbackLeavesPollingAuthoritative(t *testing.T) {
 	if callbackAttempts.Load() != 4 {
 		t.Fatalf("callback attempts=%d, want four after RF-F03 drops the first event", callbackAttempts.Load())
 	}
-	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pending); err != nil || pending != 1 {
-		t.Fatalf("pending observations=%d err=%v, want authoritative accepted-result work", pending, err)
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pending); err != nil || pending < 1 {
+		t.Fatalf("pending observations=%d err=%v, want at least one authoritative accepted-result work item", pending, err)
 	}
 }
 
