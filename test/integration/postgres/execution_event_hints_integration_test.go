@@ -80,3 +80,33 @@ func TestEventHintsAreDurableDeduplicatedAndOrderFenced(t *testing.T) {
 		t.Fatalf("quarantines=%d err=%v, want one redacted digest record", quarantines, err)
 	}
 }
+
+func TestEarlyEventHintRemainsUnmatchedWithoutCreatingAuthority(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	mustExecute(t, pool, ctx, "UPDATE targets SET target_key='early-event-target' WHERE id='"+fixture.targetID+"'")
+
+	now := time.Now().UTC()
+	hint := eventhint.Hint{
+		Source:        eventhint.Source,
+		EventID:       "early-event-1",
+		TargetKey:     "early-event-target",
+		TaskID:        "task-not-yet-accepted",
+		Kind:          "TaskCompleted",
+		Sequence:      1,
+		ObservedAt:    now.Add(-time.Second),
+		ReceivedAt:    now,
+		PayloadDigest: executionDigest("b"),
+	}
+	if disposition, err := persistence.RecordEventHint(ctx, pool, hint); err != nil || disposition != "UNMATCHED" {
+		t.Fatalf("early disposition=%q err=%v, want UNMATCHED", disposition, err)
+	}
+	var heads, taskWork int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_event_heads WHERE target_key='early-event-target'").Scan(&heads); err != nil || heads != 0 {
+		t.Fatalf("early event heads=%d err=%v, want none", heads, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE'").Scan(&taskWork); err != nil || taskWork != 0 {
+		t.Fatalf("early task work=%d err=%v, want none", taskWork, err)
+	}
+}

@@ -130,7 +130,7 @@ func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
 	submitAcceptedUpdate(t, ctx, address, scenarioPath)
 	assertDuplicateRequestControlFails(t, runRoot)
 	journal = waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
-	writeEvidence(t, harness.Schema, scenarioPath, status, journal)
+	recordFaultEvidence(t, scenarioPath, "accepted request survives restart; both negative controls reject", "P05-F01", "P05-F12", "P05-F13", "P05-F14")
 }
 
 // TestComposedHarnessPrewriteLossCreatesFencedChildAttempt joins a real
@@ -229,6 +229,7 @@ func TestComposedHarnessPrewriteLossCreatesFencedChildAttempt(t *testing.T) {
 		t.Fatalf("admit proof-backed child: %v", err)
 	}
 	assertExactlyOneChildAdmission(t, ctx, pool, initial.AdmissionID, initial.FirmwareAttempt.AttemptID, child.FirmwareAttempt.AttemptID, retry)
+	recordFaultEvidence(t, scenarioPath, "prewrite loss has no target evidence and admits only a fenced child", "P05-F02", "P05-F15")
 }
 
 // TestComposedHarnessPostAcceptLossAdoptsRetainedAcceptance proves that the
@@ -332,6 +333,7 @@ func TestComposedHarnessPostAcceptLossAdoptsRetainedAcceptance(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pendingObservations); err != nil || pendingObservations != 1 {
 		t.Fatalf("pending task observations=%d err=%v, want one adopted observation", pendingObservations, err)
 	}
+	recordFaultEvidence(t, filepath.Join(root, "test", "fixtures", "simulator", "v1", "post-accept-disconnect.json"), "retained acceptance adopts the original attempt without a second submission", "P05-F03")
 }
 
 // TestComposedHarnessDuplicateCallbackIsDeduplicated drives a real simulator
@@ -378,7 +380,10 @@ func TestComposedHarnessDuplicateCallbackIsDeduplicated(t *testing.T) {
 	input.Timing.TaskStepMS = 100
 	input.Timing.RebootMS = 100
 	input.Timing.InventoryVisibilityMS = 100
-	input.Timing.EventMS = 100
+	// A callback is advisory and cannot be matched until CommitSubmitResult has
+	// durably marked the attempt accepted. Keep the synthetic event behind that
+	// independent PostgreSQL transaction; a remote harness can exceed 100 ms.
+	input.Timing.EventMS = 2000
 	input.Faults = append(input.Faults, scenario.Fault{FaultID: "duplicate-callback", Name: "RF-F01", Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
 	encoded, err := json.Marshal(input)
 	if err != nil {
@@ -450,6 +455,7 @@ func TestComposedHarnessDuplicateCallbackIsDeduplicated(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&observations); err != nil || observations < 1 {
 		t.Fatalf("task observations=%d err=%v", observations, err)
 	}
+	recordFaultEvidence(t, casePath, "duplicate callback produces one durable receipt and advisory observation", "P05-F04")
 }
 
 // TestComposedHarnessLateCallbackIsFenced verifies that RF-F02 can reorder
@@ -489,7 +495,7 @@ func TestComposedHarnessLateCallbackIsFenced(t *testing.T) {
 	input := readScenario(t, scenarioPath)
 	input.ScenarioID = "late-callback-six-targets"
 	input.Timing.UploadMS, input.Timing.TaskStepMS = 100, 100
-	input.Timing.RebootMS, input.Timing.InventoryVisibilityMS, input.Timing.EventMS = 100, 100, 100
+	input.Timing.RebootMS, input.Timing.InventoryVisibilityMS, input.Timing.EventMS = 100, 100, 2000
 	input.Faults = append(input.Faults, scenario.Fault{FaultID: "late-callback", Name: "RF-F02", Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
 	encoded, err := json.Marshal(input)
 	if err != nil {
@@ -556,6 +562,7 @@ func TestComposedHarnessLateCallbackIsFenced(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT sequence FROM execution_event_heads WHERE target_key=$1", targetID).Scan(&head); err != nil || head != 2 {
 		t.Fatalf("event head=%d err=%v, want sequence 2", head, err)
 	}
+	recordFaultEvidence(t, casePath, "late callback is retained without advancing the newer event head", "P05-F05")
 }
 
 // TestComposedHarnessLostCallbackLeavesPollingAuthoritative verifies that an
@@ -667,6 +674,7 @@ func TestComposedHarnessLostCallbackLeavesPollingAuthoritative(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pending); err != nil || pending < 1 {
 		t.Fatalf("pending observations=%d err=%v, want at least one authoritative accepted-result work item", pending, err)
 	}
+	recordFaultEvidence(t, scenarioPath, "lost callback leaves polling as the authoritative observation path", "P05-F06")
 }
 
 // TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair proves
@@ -737,6 +745,11 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 	if err := os.WriteFile(scenarioPath, append(raw, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	caseID := map[string]string{"RF-F04": "P05-F07", "RF-F05": "P05-F08", "RF-F08": "P05-F09", "RF-F10": "P05-F10", "RF-F11": "P05-F11"}[fault]
+	if caseID == "" {
+		t.Fatalf("unmapped composed fault %q", fault)
+	}
+	recordFaultEvidence(t, scenarioPath, "observation fault follows the asserted durable recovery or terminal-proof path", caseID)
 	targetKey, err := scenario.ID(input, "target", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -1086,6 +1099,7 @@ func TestComposedHarnessAdminProvenAbsentCreatesFencedChildAttempt(t *testing.T)
 	if err != nil || loaded.AttemptID != child.FirmwareAttempt.AttemptID || loaded.ParentAttemptID != initial.FirmwareAttempt.AttemptID {
 		t.Fatalf("loaded child attempt=%+v err=%v", loaded, err)
 	}
+	recordFaultEvidence(t, filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"), "retained empty journal permits exactly one fenced administrator-authorized child", "P05-F16")
 }
 
 func stopSimulator(command *exec.Cmd) {
@@ -1551,47 +1565,4 @@ func min(left, right int) int {
 		return left
 	}
 	return right
-}
-
-// writeEvidence emits only redacted, machine-readable facts that can be
-// retained from hosted execution. It intentionally omits DSNs, secrets,
-// addresses, paths, headers, target credentials, and raw journal records.
-func writeEvidence(t *testing.T, schema, scenarioPath string, status, journal map[string]any) {
-	t.Helper()
-	directory := os.Getenv("FLEETFORGE_FAULT_EVIDENCE_DIR")
-	if directory == "" {
-		return
-	}
-	rawScenario, err := os.ReadFile(scenarioPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest := sha256.Sum256(rawScenario)
-	report := map[string]any{
-		"schema_version":                      "fleetforge.p05-fault-evidence/v1",
-		"case_id":                             "P05-HARNESS-ACCEPTANCE-NEGATIVE-CONTROL",
-		"schema":                              schema,
-		"scenario_sha256":                     fmt.Sprintf("sha256:%x", digest),
-		"simulator_run_id":                    status["run_id"],
-		"journal_entries":                     journal["entries"],
-		"journal_last_hash":                   journal["last_hash"],
-		"duplicate_request_oracle_rejected":   true,
-		"false_proven_absent_oracle_rejected": true,
-		"result":                              "PASS",
-	}
-	encoded, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(directory, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	temporary := filepath.Join(directory, "p05-harness-start.json.tmp")
-	final := filepath.Join(directory, "p05-harness-start.json")
-	if err := os.WriteFile(temporary, append(encoded, '\n'), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(temporary, final); err != nil {
-		t.Fatal(err)
-	}
 }
