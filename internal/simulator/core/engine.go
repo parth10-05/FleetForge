@@ -435,13 +435,23 @@ func (m *model) fire(event clock.Event, now *clock.Manual, s *clock.Scheduler) e
 			_ = m.consume(target.ID, id)
 			target.Version = m.initial(target.ID)
 			target.Phase = LifecycleVersionContradiction
-			task.State = LifecycleVersionContradiction
+			// The update request itself completed.  RF-F10 changes the
+			// post-update inventory outcome, not the task protocol result, so
+			// callers can continue with the independent reboot and inventory
+			// verification steps that detect the contradiction.
+			task.State = LifecycleCompleted
+			task.PercentComplete = 100
 			op.State = LifecycleVersionContradiction
 		} else if id := m.firstFault(target.ID, "RF-F11"); id != "" {
 			_ = m.consume(target.ID, id)
 			target.Healthy = false
 			target.Phase = LifecycleHealthFailed
-			task.State = LifecycleHealthFailed
+			// As with RF-F10, the task acceptance and completion are distinct
+			// from the later health proof.  Preserve that distinction so the
+			// execution workflow reaches HEALTH_OBSERVE instead of retrying a
+			// completed task.
+			task.State = LifecycleCompleted
+			task.PercentComplete = 100
 			op.State = LifecycleHealthFailed
 		} else {
 			task.State = LifecycleCompleted

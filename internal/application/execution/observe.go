@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -113,21 +114,23 @@ func observationDecision(work WorkFence, observation Observation) (ObservationDe
 	switch observation.Kind {
 	case ObservationTask:
 		state, _ := document["TaskState"].(string)
-		switch state {
-		case "Completed":
+		switch {
+		case strings.EqualFold(state, "Completed"):
 			next = "REBOOT_OBSERVE"
-		case "Missing":
+		case strings.EqualFold(state, "Missing"):
 			// A task may be garbage-collected during reboot. Its disappearance
 			// is diagnostic evidence only, so defer to authoritative inventory
 			// verification rather than retrying submission or declaring success.
 			next = "INVENTORY_OBSERVE"
-		case "Exception", "Killed":
+		case strings.EqualFold(state, "Exception"), strings.EqualFold(state, "Killed"):
 			next = "TERMINAL"
 		}
 	case ObservationReboot:
 		next = "INVENTORY_OBSERVE"
 	case ObservationInventory:
-		if !observation.ContradictsExpectedState {
+		if observation.ContradictsExpectedState {
+			next = "TERMINAL"
+		} else {
 			next = "HEALTH_OBSERVE"
 		}
 	case ObservationHealth:

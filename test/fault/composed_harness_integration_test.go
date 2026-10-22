@@ -674,21 +674,29 @@ func TestComposedHarnessLostCallbackLeavesPollingAuthoritative(t *testing.T) {
 // observation worker has no submission capability; repair returns the same
 // claimed observation to PENDING without inventing a firmware retry.
 func TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair(t *testing.T) {
-	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F04", false)
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F04", false, false)
 }
 
 // TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair proves
 // that a real 503 observation failure has the same safe lease-repair
 // semantics as a rate-limited read: no evidence or submission is fabricated.
 func TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T) {
-	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F05", false)
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F05", false, false)
 }
 
 func TestComposedHarnessMissingTaskSchedulesInventoryVerification(t *testing.T) {
-	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F08", true)
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F08", true, false)
 }
 
-func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T, fault string, expectMissingTask bool) {
+// TestComposedHarnessInventoryContradictionTerminates proves that the actual
+// simulator's completed task, reachable manager, and contradictory inventory
+// flow through the durable task -> reboot -> inventory proof chain.  A stale
+// version is terminal evidence, not a retryable task failure.
+func TestComposedHarnessInventoryContradictionTerminates(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F10", false, true)
+}
+
+func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T, fault string, expectMissingTask, expectInventoryContradiction bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -791,15 +799,57 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	targetNow := func() time.Time { return now }
+	if expectInventoryContradiction {
+		// Follow-up observations are deliberately jittered by the durable
+		// scheduler.  Advance only the test worker's injected claim clock;
+		// the adapter still timestamps freshly collected target evidence from
+		// the real clock.
+		targetNow = func() time.Time { return time.Now().UTC() }
+	}
 	target := redfishexecution.Adapter{Loader: redfishexecution.PostgresTargetLoader{Pool: pool}, Client: redfish.NewClient(redfish.ClientConfig{AllowedCIDRs: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, ResolveIP: func(context.Context, string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
-	}}), Resolver: resolver, Now: func() time.Time { return now }}
+	}}), Resolver: resolver, Now: targetNow}
 	worker := execution.ObservationWorker{Claimer: store, Repository: store, Target: target}
 	var workBefore string
 	if err := pool.QueryRow(ctx, "SELECT COALESCE(string_agg(work_type || ':' || delivery_state, ',' ORDER BY created_at),'') FROM due_work").Scan(&workBefore); err != nil {
 		t.Fatal(err)
 	}
 	processed, observeErr := worker.RunOnce(ctx, "rate-limit-observer", "00000000-0000-4000-8000-000000000211")
+	if expectInventoryContradiction {
+		if !processed || observeErr != nil {
+			t.Fatalf("contradiction task observation processed=%t err=%v, want completed task proof", processed, observeErr)
+		}
+		for _, leaseToken := range []string{"00000000-0000-4000-8000-000000000212", "00000000-0000-4000-8000-000000000213"} {
+			now = now.Add(20 * time.Second)
+			processed, observeErr = worker.RunOnce(ctx, "contradiction-observer", leaseToken)
+			if !processed || observeErr != nil {
+				var work, state, taskState string
+				_ = pool.QueryRow(ctx, "SELECT COALESCE(string_agg(work_type || ':' || delivery_state, ',' ORDER BY created_at),'') FROM due_work").Scan(&work)
+				_ = pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.TargetUpdateID).Scan(&state)
+				_ = pool.QueryRow(ctx, "SELECT COALESCE(normalized_data->>'TaskState','') FROM device_observations WHERE target_update_id=$1::uuid AND kind='TASK' ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&taskState)
+				t.Fatalf("contradiction follow-up lease=%s processed=%t err=%v work=%q state=%q task_state=%q", leaseToken, processed, observeErr, work, state, taskState)
+			}
+		}
+		var state, attemptStatus, inventoryVersion string
+		var completed, pending int
+		if err := pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.TargetUpdateID).Scan(&state); err != nil || state != "FAILED_TERMINAL" {
+			t.Fatalf("contradiction target state=%s err=%v, want FAILED_TERMINAL", state, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT status FROM firmware_update_attempts WHERE id=$1::uuid", initial.FirmwareAttempt.AttemptID).Scan(&attemptStatus); err != nil || attemptStatus != "FAILED_TERMINAL" {
+			t.Fatalf("contradiction attempt status=%s err=%v, want FAILED_TERMINAL", attemptStatus, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT normalized_data->>'Version' FROM device_observations WHERE target_update_id=$1::uuid AND kind='INVENTORY' ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&inventoryVersion); err != nil || inventoryVersion != "1.0" {
+			t.Fatalf("contradiction inventory version=%s err=%v, want retained initial version", inventoryVersion, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE delivery_state='COMPLETED'").Scan(&completed); err != nil || completed != 4 {
+			t.Fatalf("contradiction completed work=%d err=%v, want submit and three observations", completed, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE delivery_state='PENDING'").Scan(&pending); err != nil || pending != 0 {
+			t.Fatalf("contradiction pending work=%d err=%v, want terminal quiescence", pending, err)
+		}
+		return
+	}
 	if expectMissingTask {
 		if !processed || observeErr != nil {
 			t.Fatalf("missing-task worker processed=%t task_reference=%q err=%v forbidden=%t unexpected-status=%t unexpected-media=%t, want normalized task-missing evidence", processed, remoteTask, observeErr, errors.Is(observeErr, redfish.ErrForbiddenAddress), errors.Is(observeErr, redfish.ErrUnexpectedStatus), errors.Is(observeErr, redfish.ErrUnexpectedMediaType))
@@ -824,6 +874,19 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 	}
 	if !processed || observeErr == nil {
 		t.Fatalf("rate-limited worker processed=%t err=%v, want claimed 429 failure", processed, observeErr)
+	}
+	var discovery redfish.DiscoveryError
+	wantKind := redfish.ErrorRateLimited
+	if fault == "RF-F05" {
+		wantKind = redfish.ErrorTransient
+	}
+	if !errors.As(observeErr, &discovery) || discovery.Kind != wantKind {
+		t.Fatalf("%s observation error=%v kind=%q, want typed %q", fault, observeErr, discovery.Kind, wantKind)
+	}
+	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{"rate-limit-admin-secret"}}
+	metrics := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/metrics", headers)
+	if faults, ok := metrics["Faults"].(float64); !ok || faults != 1 {
+		t.Fatalf("%s metrics=%v, want exactly one consumed simulator fault", fault, metrics)
 	}
 
 	var dueID, commandID, delivery string
