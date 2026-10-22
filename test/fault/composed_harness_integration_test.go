@@ -674,18 +674,18 @@ func TestComposedHarnessLostCallbackLeavesPollingAuthoritative(t *testing.T) {
 // observation worker has no submission capability; repair returns the same
 // claimed observation to PENDING without inventing a firmware retry.
 func TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair(t *testing.T) {
-	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F04", false, false)
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F04", false, false, false)
 }
 
 // TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair proves
 // that a real 503 observation failure has the same safe lease-repair
 // semantics as a rate-limited read: no evidence or submission is fabricated.
 func TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T) {
-	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F05", false, false)
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F05", false, false, false)
 }
 
 func TestComposedHarnessMissingTaskSchedulesInventoryVerification(t *testing.T) {
-	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F08", true, false)
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F08", true, false, false)
 }
 
 // TestComposedHarnessInventoryContradictionTerminates proves that the actual
@@ -693,10 +693,17 @@ func TestComposedHarnessMissingTaskSchedulesInventoryVerification(t *testing.T) 
 // flow through the durable task -> reboot -> inventory proof chain.  A stale
 // version is terminal evidence, not a retryable task failure.
 func TestComposedHarnessInventoryContradictionTerminates(t *testing.T) {
-	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F10", false, true)
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F10", false, true, false)
 }
 
-func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T, fault string, expectMissingTask, expectInventoryContradiction bool) {
+// TestComposedHarnessHealthContradictionTerminates proves that the actual
+// completed task and matching inventory never imply success without the final
+// independent health observation. A failed health report is terminal evidence.
+func TestComposedHarnessHealthContradictionTerminates(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F11", false, false, true)
+}
+
+func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T, fault string, expectMissingTask, expectInventoryContradiction, expectHealthContradiction bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -756,6 +763,12 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
 
 	initial := executionfixture.AdmissionRequest(fixture, "5210")
+	if expectHealthContradiction {
+		// RF-F11 must reach the health step after a successful independent
+		// inventory check, so align the durable expected version with the
+		// simulator request rather than using the fixture's generic value.
+		initial.FirmwareAttempt.ExpectedVersion = "1.1"
+	}
 	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +813,7 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 		t.Fatal(err)
 	}
 	targetNow := func() time.Time { return now }
-	if expectInventoryContradiction {
+	if expectInventoryContradiction || expectHealthContradiction {
 		// Follow-up observations are deliberately jittered by the durable
 		// scheduler.  Advance only the test worker's injected claim clock;
 		// the adapter still timestamps freshly collected target evidence from
@@ -816,11 +829,15 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 		t.Fatal(err)
 	}
 	processed, observeErr := worker.RunOnce(ctx, "rate-limit-observer", "00000000-0000-4000-8000-000000000211")
-	if expectInventoryContradiction {
+	if expectInventoryContradiction || expectHealthContradiction {
 		if !processed || observeErr != nil {
-			t.Fatalf("contradiction task observation processed=%t err=%v, want completed task proof", processed, observeErr)
+			t.Fatalf("post-update fault task observation processed=%t err=%v, want completed task proof", processed, observeErr)
 		}
-		for _, leaseToken := range []string{"00000000-0000-4000-8000-000000000212", "00000000-0000-4000-8000-000000000213"} {
+		leaseTokens := []string{"00000000-0000-4000-8000-000000000212", "00000000-0000-4000-8000-000000000213"}
+		if expectHealthContradiction {
+			leaseTokens = append(leaseTokens, "00000000-0000-4000-8000-000000000214")
+		}
+		for _, leaseToken := range leaseTokens {
 			now = now.Add(20 * time.Second)
 			processed, observeErr = worker.RunOnce(ctx, "contradiction-observer", leaseToken)
 			if !processed || observeErr != nil {
@@ -831,7 +848,7 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 				t.Fatalf("contradiction follow-up lease=%s processed=%t err=%v work=%q state=%q task_state=%q", leaseToken, processed, observeErr, work, state, taskState)
 			}
 		}
-		var state, attemptStatus, inventoryVersion string
+		var state, attemptStatus, inventoryVersion, health string
 		var completed, pending int
 		if err := pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.TargetUpdateID).Scan(&state); err != nil || state != "FAILED_TERMINAL" {
 			t.Fatalf("contradiction target state=%s err=%v, want FAILED_TERMINAL", state, err)
@@ -839,11 +856,22 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 		if err := pool.QueryRow(ctx, "SELECT status FROM firmware_update_attempts WHERE id=$1::uuid", initial.FirmwareAttempt.AttemptID).Scan(&attemptStatus); err != nil || attemptStatus != "FAILED_TERMINAL" {
 			t.Fatalf("contradiction attempt status=%s err=%v, want FAILED_TERMINAL", attemptStatus, err)
 		}
-		if err := pool.QueryRow(ctx, "SELECT normalized_data->>'Version' FROM device_observations WHERE target_update_id=$1::uuid AND kind='INVENTORY' ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&inventoryVersion); err != nil || inventoryVersion != "1.0" {
-			t.Fatalf("contradiction inventory version=%s err=%v, want retained initial version", inventoryVersion, err)
+		if expectInventoryContradiction {
+			if err := pool.QueryRow(ctx, "SELECT normalized_data->>'Version' FROM device_observations WHERE target_update_id=$1::uuid AND kind='INVENTORY' ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&inventoryVersion); err != nil || inventoryVersion != "1.0" {
+				t.Fatalf("inventory contradiction version=%s err=%v, want retained initial version", inventoryVersion, err)
+			}
 		}
-		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE delivery_state='COMPLETED'").Scan(&completed); err != nil || completed != 4 {
-			t.Fatalf("contradiction completed work=%d err=%v, want submit and three observations", completed, err)
+		if expectHealthContradiction {
+			if err := pool.QueryRow(ctx, "SELECT normalized_data->>'Health' FROM device_observations WHERE target_update_id=$1::uuid AND kind='HEALTH' ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&health); err != nil || health == "" || health == "OK" {
+				t.Fatalf("health contradiction report=%q err=%v, want non-OK retained health evidence", health, err)
+			}
+		}
+		wantCompleted := 4
+		if expectHealthContradiction {
+			wantCompleted = 5
+		}
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE delivery_state='COMPLETED'").Scan(&completed); err != nil || completed != wantCompleted {
+			t.Fatalf("post-update fault completed work=%d err=%v, want %d", completed, err, wantCompleted)
 		}
 		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE delivery_state='PENDING'").Scan(&pending); err != nil || pending != 0 {
 			t.Fatalf("contradiction pending work=%d err=%v, want terminal quiescence", pending, err)
