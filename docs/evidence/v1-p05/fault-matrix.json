@@ -19,7 +19,7 @@
     {"id":"P05-F15","name":"prewrite child retry admission","boundary":"simulator+postgres durable retry","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F16","name":"admin absence child retry admission","boundary":"simulator+postgres durable retry","source_test":"composed_harness_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F17","name":"stale worker fence","boundary":"postgres durable work","source_test":"due_work_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
-    {"id":"P05-F18","name":"reservation and epoch conflict","boundary":"postgres admission","status":"PENDING_EXECUTION"},
+    {"id":"P05-F18","name":"reservation and epoch conflict","boundary":"postgres admission","source_test":"admission_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"},
     {"id":"P05-F19","name":"pause after admission","boundary":"postgres command fence","status":"PENDING_EXECUTION"},
     {"id":"P05-F20","name":"abort and reservation release","boundary":"postgres target update","status":"PENDING_EXECUTION"},
     {"id":"P05-F21","name":"database uncertainty recovery","boundary":"postgres durable work","source_test":"execution_submit_integration_test.go","status":"IMPLEMENTED_IN_HARNESS"}
