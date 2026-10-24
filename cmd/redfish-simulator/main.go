@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -67,19 +68,20 @@ func run() error {
 	health.MarkStarted()
 	mux := http.NewServeMux()
 	targets := redfishsim.NewWithJournal(engine, []byte(cfg.Username), []byte(cfg.Password), cfg.ReadinessTimeout, int64(input.Limits.BodyBytes), writer)
-	targets.SetAfterMutation(func(ctx context.Context) error { return checkpoint(run, engine, ctx) })
+	checkpoints := &checkpointWriter{run: run, engine: engine}
+	targets.SetAfterMutation(checkpoints.Write)
 	targets.SetOpenConnectionLimit(input.Limits.OpenConnections)
-	dispatcher := redfishsim.NewCallbackDispatcher(input.Limits.CallbackWorkers, input.Limits.OpenConnections, cfg.ReadinessTimeout)
+	dispatcher := redfishsim.NewCallbackDispatcher(input.Limits.CallbackWorkers, input.Limits.OpenConnections, cfg.ReadinessTimeout, cfg.CallbackHMACKey)
 	defer dispatcher.Close()
 	targets.SetCallbackDispatcher(dispatcher)
 	realtimeContext, stopRealtime := context.WithCancel(context.Background())
 	realtimeDone := make(chan struct{})
-	go advanceRealtime(realtimeContext, realtimeDone, engine, targets, run)
+	go advanceRealtime(realtimeContext, realtimeDone, engine, targets, checkpoints)
 	defer func() { stopRealtime(); <-realtimeDone }()
 	mux.Handle("/virtual-bmcs/", targets.Routes())
 	mux.Handle("/", health.Routes())
 	server := &http.Server{Addr: cfg.Address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
-	admin := &http.Server{Addr: cfg.AdminAddress, Handler: simulatoradmin.New(appsim.New(runtimeStatus{runID: run.ID, journalPath: run.JournalPath, run: run, engine: engine, writer: writer, targets: targets}), []byte(cfg.AdminSecret), cfg.ReadinessTimeout).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
+	admin := &http.Server{Addr: cfg.AdminAddress, Handler: simulatoradmin.New(appsim.New(runtimeStatus{runID: run.ID, journalPath: run.JournalPath, run: run, engine: engine, writer: writer, targets: targets, checkpoints: checkpoints}), []byte(cfg.AdminSecret), cfg.ReadinessTimeout).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10}
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errorsChannel := make(chan error, 2)
@@ -100,7 +102,7 @@ func run() error {
 		<-realtimeDone
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
-		if err := checkpoint(run, engine, ctx); err != nil {
+		if err := checkpoints.Write(ctx); err != nil {
 			return fmt.Errorf("checkpoint retained simulator state: %w", err)
 		}
 		if err := server.Shutdown(ctx); err != nil {
@@ -113,7 +115,7 @@ func run() error {
 	}
 }
 
-func advanceRealtime(ctx context.Context, done chan<- struct{}, engine *core.Engine, targets *redfishsim.Handler, run simulatorstate.Run) {
+func advanceRealtime(ctx context.Context, done chan<- struct{}, engine *core.Engine, targets *redfishsim.Handler, checkpoints *checkpointWriter) {
 	defer close(done)
 	initial, err := engine.Submit(ctx, core.Snapshot{})
 	if err != nil {
@@ -136,7 +138,7 @@ func advanceRealtime(ctx context.Context, done chan<- struct{}, engine *core.Eng
 				continue
 			}
 			targets.DispatchEvents(ctx, result)
-			_ = checkpoint(run, engine, context.Background())
+			_ = checkpoints.Write(context.Background())
 		}
 	}
 }
@@ -156,12 +158,23 @@ func startRetainedEngine(run simulatorstate.Run, input scenario.Scenario) (*core
 	return core.StartRecovered(input, entries, 64)
 }
 
-func checkpoint(run simulatorstate.Run, engine *core.Engine, ctx context.Context) error {
-	state, result, err := core.SnapshotBytes(ctx, engine)
+// checkpointWriter serializes retained snapshots across realtime, target, and
+// admin mutations so each snapshot binds one coherent engine projection to one
+// retained journal checkpoint.
+type checkpointWriter struct {
+	mu     sync.Mutex
+	run    simulatorstate.Run
+	engine *core.Engine
+}
+
+func (c *checkpointWriter) Write(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, result, err := core.SnapshotBytes(ctx, c.engine)
 	if err != nil {
 		return err
 	}
-	return run.WriteStateSnapshot(int64(result.Time), state)
+	return c.run.WriteStateSnapshot(int64(result.Time), state)
 }
 
 func shutdownServers(server, admin *http.Server, timeout time.Duration) {
@@ -177,6 +190,7 @@ type runtimeStatus struct {
 	engine             *core.Engine
 	writer             *journal.Writer
 	targets            *redfishsim.Handler
+	checkpoints        *checkpointWriter
 }
 
 func (r runtimeStatus) Status(context.Context) (appsim.Status, error) {
@@ -204,5 +218,8 @@ func (r runtimeStatus) Reset(ctx context.Context) error {
 	if _, err := r.writer.Append(journal.Record{Kind: journal.Diagnostic, Payload: journal.Payload{Detail: "admin reset"}}); err != nil {
 		return err
 	}
-	return checkpoint(r.run, r.engine, ctx)
+	if r.checkpoints == nil {
+		return fmt.Errorf("checkpoint writer is unavailable")
+	}
+	return r.checkpoints.Write(ctx)
 }

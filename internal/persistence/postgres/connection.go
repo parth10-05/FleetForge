@@ -67,7 +67,10 @@ func OpenMigrationDB(ctx context.Context, settings config.PostgreSQL) (*sql.DB, 
 	defer cancel()
 	if err := database.PingContext(pingContext); err != nil {
 		_ = database.Close()
-		return nil, fmt.Errorf("%w: direct migration connection", ErrDatabaseUnavailable)
+		// Preserve the stable availability category while retaining the driver
+		// cause for callers that need to distinguish TLS, authentication, and
+		// startup-parameter failures. The DSN is never included in this path.
+		return nil, fmt.Errorf("%w: direct migration connection: %w", ErrDatabaseUnavailable, err)
 	}
 	return database, nil
 }

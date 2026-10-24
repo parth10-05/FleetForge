@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,6 +21,8 @@ var (
 	ErrCapacityExhausted     = errors.New("operation capacity exhausted")
 	ErrCapacityConfiguration = errors.New("operation capacity configuration conflict")
 )
+
+var sha256Pattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // ScopeCapacity is the immutable policy limit used while admitting one
 // operation. Existing durable rows must match this configuration exactly.
@@ -53,6 +56,103 @@ type AdmissionRequest struct {
 	ReducerVersion, DecisionPolicyVersion                              string
 	NormalizedFacts                                                    json.RawMessage
 	DecisionResult                                                     string
+	FirmwareAttempt                                                    *FirmwareAttemptRequest
+	PrecheckEvidence                                                   json.RawMessage
+	PrecheckObservedAt                                                 time.Time
+	RetryParentAttemptID, ClaimedWorkID, ClaimedLeaseToken             string
+	ClaimedDeliveryGeneration                                          int64
+}
+
+// AdmitRetryOperation is the only persistence path that can create a child
+// firmware attempt. It consumes a separately persisted proof authorization;
+// it never replays an ambiguous attempt and never acquires a second set of
+// physical reservations.
+func AdmitRetryOperation(ctx context.Context, pool *pgxpool.Pool, req AdmissionRequest) error {
+	if err := validateAdmissionRequest(req); err != nil || req.RetryParentAttemptID == "" {
+		return fmt.Errorf("invalid retry admission request")
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return fmt.Errorf("begin retry admission transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var admissionID, parentID, updateID, targetID string
+	var revision, epoch, authorizations, children int64
+	err = tx.QueryRow(ctx, `SELECT s.id::text,a.id::text,tu.id::text,s.target_id::text,tu.revision,tu.command_epoch,s.retry_authorizations,
+ (SELECT count(*) FROM firmware_update_attempts child WHERE child.submission_admission_id=s.id AND child.parent_attempt_id IS NOT NULL)
+FROM due_work d JOIN target_updates tu ON tu.id=d.subject_id JOIN submission_admissions s ON s.target_update_id=tu.id
+JOIN firmware_update_attempts a ON a.id=s.active_attempt_id JOIN campaigns c ON c.id=s.campaign_id
+WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED'
+AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6
+AND d.work_type='RETRY_PRECHECK' AND tu.state='RETRY_WAIT' AND a.id=$7::uuid AND a.status='PROVEN_ABSENT'
+AND c.state IN ('RUNNING_CANARY','RUNNING_WAVES') AND c.command_epoch=tu.command_epoch
+AND (a.result_class='PROVEN_PREWRITE_FAILURE' OR EXISTS (SELECT 1 FROM ambiguity_resolutions r WHERE r.attempt_id=a.id AND r.outcome='PROVEN_ABSENT' AND r.journal_confirmed_absent AND r.late_caller_excluded))
+FOR UPDATE OF d,tu,s,a,c`, req.ClaimedWorkID, req.CommandID, req.ClaimedDeliveryGeneration, req.ClaimedLeaseToken, req.ExpectedTargetRevision, req.CapturedCommandEpoch, req.RetryParentAttemptID).Scan(&admissionID, &parentID, &updateID, &targetID, &revision, &epoch, &authorizations, &children)
+	if err != nil {
+		return fmt.Errorf("lock retry admission: %w", err)
+	}
+	if admissionID != req.AdmissionID || updateID != req.TargetUpdateID || targetID != req.TargetID || revision != req.ExpectedTargetRevision || epoch != req.CapturedCommandEpoch || children >= authorizations {
+		return fmt.Errorf("%w: retry authorization or fence changed", ErrRevisionConflict)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO device_observations (id,target_id,target_update_id,kind,observed_at,received_at,normalized_data)
+VALUES (md5($1)::uuid,$2::uuid,$3::uuid,'FIRMWARE_PRECHECK',$4,$5,$6::jsonb)`, "fleetforge.firmware-retry-precheck/v1:"+req.ClaimedWorkID, req.TargetID, req.TargetUpdateID, req.PrecheckObservedAt.UTC(), req.DecisionLogicalTime.UTC(), req.PrecheckEvidence); err != nil {
+		return classifyAdmissionWrite(err, "persist retry precheck evidence")
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO step_attempts (id,target_update_id,step,attempt_number,command_id)
+VALUES ($1::uuid,$2::uuid,$3::varchar,(SELECT COALESCE(max(attempt_number),0)+1 FROM step_attempts WHERE target_update_id=$2::uuid AND step=$3::varchar),$4::uuid)`, req.StepAttemptID, req.TargetUpdateID, req.Step, req.CommandID); err != nil {
+		return classifyAdmissionWrite(err, "insert retry step attempt")
+	}
+	a := req.FirmwareAttempt
+	if _, err = tx.Exec(ctx, `INSERT INTO firmware_update_attempts (id,step_attempt_id,submission_admission_id,parent_attempt_id,target_update_id,campaign_id,target_id,artifact_id,provider,container,object_key,object_version,object_size,sha256_digest,expected_version,update_mechanism,request_fingerprint,captured_command_epoch,admitted_revision)
+SELECT $1::uuid,$2::uuid,s.id,$3::uuid,s.target_update_id,s.campaign_id,s.target_id,s.artifact_id,$4,$5,$6,$7,$8,$9,$10,'HTTP_PUSH_V1',$11,$12,$13
+FROM submission_admissions s WHERE s.id=$14::uuid`, a.AttemptID, req.StepAttemptID, parentID, a.Provider, a.Container, a.ObjectKey, a.ObjectVersion, a.ObjectSize, a.SHA256Digest, a.ExpectedVersion, a.RequestFingerprint, epoch, revision+1, admissionID); err != nil {
+		return classifyAdmissionWrite(err, "insert retry firmware attempt")
+	}
+	if _, err = tx.Exec(ctx, `UPDATE submission_admissions SET active_attempt_id=$2::uuid WHERE id=$1::uuid AND active_attempt_id=$3::uuid`, admissionID, a.AttemptID, parentID); err != nil {
+		return classifyAdmissionWrite(err, "activate retry firmware attempt")
+	}
+	tag, err := tx.Exec(ctx, `UPDATE target_updates SET state='SUBMITTING',resume_step=NULL,revision=revision+1,updated_at=$3 WHERE id=$1::uuid AND revision=$2 AND command_epoch=$4`, updateID, revision, req.DecisionLogicalTime.UTC(), epoch)
+	if err != nil || tag.RowsAffected() != 1 {
+		return fmt.Errorf("%w: advance retry admission", ErrRevisionConflict)
+	}
+	newRevision := revision + 1
+	if _, err = tx.Exec(ctx, `INSERT INTO decision_inputs (id,aggregate_type,aggregate_id,aggregate_revision,decision_sequence,logical_time,reducer_version,policy_version,normalized_facts,result,reason_code)
+VALUES ($1::uuid,'TARGET_UPDATE',$2::uuid,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)`, req.DecisionInputID, updateID, newRevision, req.DecisionSequence, req.DecisionLogicalTime.UTC(), req.ReducerVersion, req.DecisionPolicyVersion, req.NormalizedFacts, req.DecisionResult, req.ReasonCode); err != nil {
+		return classifyAdmissionWrite(err, "record retry admission decision")
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,command_id,correlation_id,causation_id,action,reason_code)
+VALUES ('TARGET_UPDATE',$1::uuid,$2,$3,$4,$5::uuid,$6::uuid,$7::uuid,$8,$9)`, updateID, newRevision, req.AuditEventSequence, req.ActorID, req.CommandID, req.CorrelationID, req.CausationID, req.Action, req.ReasonCode); err != nil {
+		return classifyAdmissionWrite(err, "append retry admission audit")
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO outbox_events (event_id,aggregate_type,aggregate_id,aggregate_revision,event_type,schema_version,payload)
+VALUES ($1::uuid,'TARGET_UPDATE',$2::uuid,$3,$4,$5,$6::jsonb)`, req.OutboxEventID, updateID, newRevision, req.OutboxEventType, req.OutboxSchemaVersion, req.OutboxPayload); err != nil {
+		return classifyAdmissionWrite(err, "insert retry admission outbox")
+	}
+	if _, err = tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$5 WHERE id=$1::uuid AND command_id=$2::uuid AND delivery_generation=$3 AND delivery_state='CLAIMED' AND lease_token=$4::uuid`, req.ClaimedWorkID, req.CommandID, req.ClaimedDeliveryGeneration, req.ClaimedLeaseToken, req.DecisionLogicalTime.UTC()); err != nil {
+		return classifyAdmissionWrite(err, "complete retry precheck work")
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO due_work (id,command_id,subject_type,subject_id,work_type,schema_version,not_before,expected_revision,expected_command_epoch)
+VALUES ($1::uuid,md5($2::text || ':retry-submit')::uuid,'TARGET_UPDATE',$3::uuid,'SUBMIT',1,$4,$5,$6)`, req.DueWorkID, req.CommandID, updateID, req.DueWorkNotBefore, newRevision, epoch); err != nil {
+		return classifyAdmissionWrite(err, "schedule retry submit work")
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return classifyAdmissionWrite(err, "commit retry admission")
+	}
+	return nil
+}
+
+// FirmwareAttemptRequest is the immutable, target-facing identity captured
+// with a P05 admission. It is intentionally separate from generic step
+// attempts: one semantic admission may later gain a proof-backed child, but
+// an ambiguous attempt can never be silently replayed.
+type FirmwareAttemptRequest struct {
+	AttemptID                string
+	Provider, Container      string
+	ObjectKey, ObjectVersion string
+	ObjectSize               int64
+	SHA256Digest             string
+	ExpectedVersion          string
+	RequestFingerprint       string
 }
 
 // AdmitOperation atomically fences an intended submission, reserves physical
@@ -101,6 +201,28 @@ func validateAdmissionRequest(r AdmissionRequest) error {
 			return fmt.Errorf("admission request contains empty reservation ID")
 		}
 	}
+	if r.FirmwareAttempt != nil {
+		if err := validateFirmwareAttemptRequest(*r.FirmwareAttempt); err != nil {
+			return err
+		}
+		if r.PrecheckObservedAt.IsZero() || len(r.PrecheckEvidence) == 0 || len(r.PrecheckEvidence) > 32768 || !json.Valid(r.PrecheckEvidence) {
+			return fmt.Errorf("firmware admission requires valid precheck evidence")
+		}
+		var evidence map[string]any
+		if err := json.Unmarshal(r.PrecheckEvidence, &evidence); err != nil || evidence == nil {
+			return fmt.Errorf("firmware admission precheck evidence must be an object")
+		}
+	}
+	return nil
+}
+
+func validateFirmwareAttemptRequest(r FirmwareAttemptRequest) error {
+	if r.AttemptID == "" || r.Provider == "" || r.Container == "" || r.ObjectKey == "" || r.ObjectVersion == "" || r.ExpectedVersion == "" || r.ObjectSize <= 0 || r.ObjectSize > 16777216 {
+		return fmt.Errorf("firmware attempt request contains required empty or invalid field")
+	}
+	if !sha256Pattern.MatchString(r.SHA256Digest) || !sha256Pattern.MatchString(r.RequestFingerprint) {
+		return fmt.Errorf("firmware attempt request contains non-canonical fingerprint")
+	}
 	return nil
 }
 
@@ -139,6 +261,12 @@ WHERE ct.id=$1::uuid AND ct.campaign_id=$2::uuid AND ct.target_id=$3::uuid AND c
 	if enrolledCampaign != r.CampaignID {
 		return fmt.Errorf("%w: target belongs to another campaign", ErrAdmissionBlocked)
 	}
+	if r.FirmwareAttempt != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO device_observations (id,target_id,target_update_id,kind,observed_at,received_at,normalized_data)
+VALUES (md5($1)::uuid,$2::uuid,$3::uuid,'FIRMWARE_PRECHECK',$4,$5,$6::jsonb)`, "fleetforge.firmware-precheck/v1:"+r.AdmissionID, r.TargetID, r.TargetUpdateID, r.PrecheckObservedAt.UTC(), r.DecisionLogicalTime.UTC(), r.PrecheckEvidence); err != nil {
+			return classifyAdmissionWrite(err, "persist firmware precheck evidence")
+		}
+	}
 
 	for _, scope := range []struct {
 		capacity      ScopeCapacity
@@ -168,6 +296,16 @@ WHERE ct.id=$1::uuid AND ct.campaign_id=$2::uuid AND ct.target_id=$3::uuid AND c
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO step_attempts (id,target_update_id,step,attempt_number,command_id) VALUES ($1::uuid,$2::uuid,$3,1,$4::uuid)", r.StepAttemptID, r.TargetUpdateID, r.Step, r.CommandID); err != nil {
 		return classifyAdmissionWrite(err, "insert submission step intent")
+	}
+	if r.FirmwareAttempt != nil {
+		a := r.FirmwareAttempt
+		if _, err = tx.Exec(ctx, `INSERT INTO firmware_update_attempts (id,step_attempt_id,submission_admission_id,target_update_id,campaign_id,target_id,artifact_id,provider,container,object_key,object_version,object_size,sha256_digest,expected_version,update_mechanism,request_fingerprint,captured_command_epoch,admitted_revision)
+VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8,$9,$10,$11,$12,$13,$14,'HTTP_PUSH_V1',$15,$16,$17)`, a.AttemptID, r.StepAttemptID, r.AdmissionID, r.TargetUpdateID, r.CampaignID, r.TargetID, r.ArtifactID, a.Provider, a.Container, a.ObjectKey, a.ObjectVersion, a.ObjectSize, a.SHA256Digest, a.ExpectedVersion, a.RequestFingerprint, r.CapturedCommandEpoch, r.ExpectedTargetRevision+1); err != nil {
+			return classifyAdmissionWrite(err, "insert firmware update attempt")
+		}
+		if _, err = tx.Exec(ctx, "UPDATE submission_admissions SET initial_attempt_id=$2::uuid,active_attempt_id=$2::uuid WHERE id=$1::uuid AND initial_attempt_id IS NULL AND active_attempt_id IS NULL", r.AdmissionID, a.AttemptID); err != nil {
+			return classifyAdmissionWrite(err, "link initial firmware attempt")
+		}
 	}
 	tag, err := tx.Exec(ctx, "UPDATE target_updates SET state=$3, revision=revision+1, resume_step=$4, updated_at=now() WHERE id=$1::uuid AND revision=$2 AND command_epoch=$5", r.TargetUpdateID, r.ExpectedTargetRevision, r.NextTargetState, r.ResumeStep, r.CapturedCommandEpoch)
 	if err != nil {

@@ -55,7 +55,35 @@ func TestAdmissionPersistsFencedIntentReservationsAndEvidenceAtomically(t *testi
 	}
 }
 
+func TestAdmissionPersistsInitialFirmwareAttemptAtomically(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	req := admissionRequest(fixture, "1011")
+	base := "00000000-0000-0000-1011-0000000000"
+	req.FirmwareAttempt = &persistence.FirmwareAttemptRequest{
+		AttemptID: base + "10", Provider: "local-versioned-v1", Container: "firmware", ObjectKey: "verified/firmware.bin", ObjectVersion: "v1", ObjectSize: 4096,
+		SHA256Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ExpectedVersion: "1.2.3", RequestFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}
+	req.PrecheckObservedAt = time.Now().UTC()
+	req.PrecheckEvidence = json.RawMessage(`{"current_version":"1.0.0","capable":true,"healthy":true,"compatible":true,"evidence_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`)
+	if err := persistence.AdmitOperation(ctx, pool, req); err != nil {
+		t.Fatalf("AdmitOperation: %v", err)
+	}
+	var status, initial, active string
+	var revision int64
+	if err := pool.QueryRow(ctx, `SELECT a.status,a.admitted_revision,s.initial_attempt_id::text,s.active_attempt_id::text
+FROM firmware_update_attempts a JOIN submission_admissions s ON s.id=a.submission_admission_id
+WHERE a.id=$1::uuid`, req.FirmwareAttempt.AttemptID).Scan(&status, &revision, &initial, &active); err != nil {
+		t.Fatal(err)
+	}
+	if status != "ADMITTED" || revision != 1 || initial != req.FirmwareAttempt.AttemptID || active != req.FirmwareAttempt.AttemptID {
+		t.Fatalf("attempt=%s revision=%d initial=%s active=%s", status, revision, initial, active)
+	}
+}
+
 func TestAdmissionStaleEpochRollsBackCapacityAndEvidence(t *testing.T) {
+	recordP05PostgresEvidence(t, "P05-F18", "stale epoch admission rolls back capacity and durable evidence atomically")
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	prepareAdmissionFixture(t, pool, ctx, fixture, 8)
@@ -104,6 +132,54 @@ func TestAdmissionBlockedByCommittedPause(t *testing.T) {
 		t.Fatalf("admission after pause=%v, want ErrAdmissionBlocked", err)
 	}
 	assertAdmissionAbsent(t, pool, ctx)
+}
+
+// TestCommittedPauseAfterAdmissionRetainsResidualExposure proves the narrow
+// pause boundary: pause prevents a later admission, but never rewrites or
+// releases an already committed device-operation intent. The existing SUBMIT
+// work remains visible for reconciliation/observation and capacity stays held.
+func TestCommittedPauseAfterAdmissionRetainsResidualExposure(t *testing.T) {
+	recordP05PostgresEvidence(t, "P05-F19", "pause after admission retains existing submission exposure and reservations")
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	initial := admissionRequest(fixture, "1005")
+	base := "00000000-0000-0000-1005-0000000000"
+	initial.FirmwareAttempt = &persistence.FirmwareAttemptRequest{
+		AttemptID: base + "10", Provider: "local-versioned-v1", Container: "firmware", ObjectKey: "verified/firmware.bin", ObjectVersion: "v1", ObjectSize: 4096,
+		SHA256Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ExpectedVersion: "1.2.3", RequestFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}
+	initial.PrecheckObservedAt = time.Now().UTC()
+	initial.PrecheckEvidence = json.RawMessage(`{"current_version":"1.0.0","capable":true,"healthy":true,"compatible":true,"evidence_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`)
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatalf("admit initial exposure: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE campaigns SET state='PAUSED', command_epoch=8 WHERE id=$1::uuid", fixture.campaignID); err != nil {
+		t.Fatalf("commit pause after admission: %v", err)
+	}
+	var updateState, attemptStatus, submitState string
+	var reservations, admissions, scopeCount int
+	if err := pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.targetUpdateID).Scan(&updateState); err != nil || updateState != "SUBMITTING" {
+		t.Fatalf("target update=%s err=%v, want retained SUBMITTING exposure", updateState, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT status FROM firmware_update_attempts WHERE id=$1::uuid", initial.FirmwareAttempt.AttemptID).Scan(&attemptStatus); err != nil || attemptStatus != "ADMITTED" {
+		t.Fatalf("attempt status=%s err=%v, want ADMITTED", attemptStatus, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1::uuid", initial.DueWorkID).Scan(&submitState); err != nil || submitState != "PENDING" {
+		t.Fatalf("submit work=%s err=%v, want PENDING residual exposure", submitState, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM operation_reservations WHERE admission_id=$1::uuid AND state='ACTIVE'", initial.AdmissionID).Scan(&reservations); err != nil || reservations != 3 {
+		t.Fatalf("active reservations=%d err=%v, want 3 retained", reservations, err)
+	}
+	if err := persistence.AdmitOperation(ctx, pool, admissionRequest(fixture, "1006")); err == nil {
+		t.Fatal("post-pause replacement admission unexpectedly succeeded")
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM submission_admissions").Scan(&admissions); err != nil || admissions != 1 {
+		t.Fatalf("admissions=%d err=%v, want only original", admissions, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COALESCE(SUM(active_reservation_count),0) FROM scope_capacities").Scan(&scopeCount); err != nil || scopeCount != 3 {
+		t.Fatalf("scope reservations=%d err=%v, want 3 retained", scopeCount, err)
+	}
 }
 
 func TestAdmissionDuplicateIdentityRollsBackTentativeCapacity(t *testing.T) {

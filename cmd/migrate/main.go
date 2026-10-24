@@ -20,7 +20,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), settings.TransactionTimeout)
 	defer cancel()
 	if err := postgres.RunMigrations(ctx, settings, os.DirFS("db/migrations")); err != nil {
-		log.Print("migration failed")
+		// RunMigrations and configuration validation deliberately redact DSNs.
+		// Preserve the classified migration cause so operators can distinguish a
+		// broken immutable migration from an unavailable database without ever
+		// printing connection credentials.
+		log.Printf("migration failed: %v", err)
 		os.Exit(1)
 	}
 }

@@ -76,6 +76,15 @@ jobs:
           go test -json -tags=postgresintegration -count=1 ./test/integration/postgres/... | tee test-results/postgres-integration.json
         env:
           FLEETFORGE_TEST_POSTGRES_DSN: postgres://fleetforge_test:fleetforge_test@localhost:5432/fleetforge_test?sslmode=disable
+          FLEETFORGE_POSTGRES_EVIDENCE_DIR: ${{ runner.temp }}/fleetforge-fault-evidence
+      - run: |
+          set -o pipefail
+          mkdir -p test-results
+          mkdir -p "$RUNNER_TEMP/fleetforge-fault-evidence"
+          go test -json -tags=postgresintegration -count=1 ./test/fault/... | tee test-results/fault-harness.json
+        env:
+          FLEETFORGE_TEST_POSTGRES_DSN: postgres://fleetforge_test:fleetforge_test@localhost:5432/fleetforge_test?sslmode=disable
+          FLEETFORGE_FAULT_EVIDENCE_DIR: ${{ runner.temp }}/fleetforge-fault-evidence
       - name: Confirm wrong PostgreSQL endpoint fails the integration gate
         run: |
           if FLEETFORGE_TEST_POSTGRES_DSN=postgres://fleetforge_test:fleetforge_test@localhost:1/fleetforge_test?sslmode=disable go test -tags=postgresintegration -count=1 ./test/integration/postgres/... -run TestDatabasePingUsesIsolatedSchema; then
@@ -91,12 +100,18 @@ jobs:
       - run: go test ./internal/redfish -run '^$' -fuzz '^FuzzDecodeDocumentRejectsUnsafeInputWithoutPanic$' -fuzztime=10s
       - run: go test ./internal/domain/campaignplan -run '^$' -fuzz '^FuzzBuildCanonicalPlanIsStable$' -fuzztime=10s
       - run: go test ./internal/application/orchestration -run '^$' -fuzz '^FuzzDecode$' -fuzztime=10s
-      - run: go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-worker ./cmd/wakeup-sweeper
+      - run: go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-worker ./cmd/wakeup-sweeper ./cmd/execution-worker ./cmd/precheck-worker ./cmd/observation-worker ./cmd/reconciliation-worker
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: go-test-results
           path: test-results/
+          if-no-files-found: warn
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fault-harness-evidence
+          path: ${{ runner.temp }}/fleetforge-fault-evidence/
           if-no-files-found: warn
 
   web:

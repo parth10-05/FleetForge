@@ -7,13 +7,18 @@ var ErrUnknownResumeStep = errors.New("unknown target update resume step")
 type ResumeStep string
 
 const (
-	ResumeStepPrecheck      ResumeStep = "PRECHECK"
-	ResumeStepSubmitting    ResumeStep = "SUBMITTING"
-	ResumeStepWaitingReboot ResumeStep = "WAITING_REBOOT"
-	ResumeStepVerifying     ResumeStep = "VERIFYING"
+	ResumeStepPrecheck           ResumeStep = "PRECHECK"
+	ResumeStepSubmitAdmission    ResumeStep = "SUBMIT_ADMISSION"
+	ResumeStepTaskObserve        ResumeStep = "TASK_OBSERVE"
+	ResumeStepRebootWait         ResumeStep = "REBOOT_WAIT"
+	ResumeStepVerifyVersion      ResumeStep = "VERIFY_VERSION"
+	ResumeStepVerifyHealth       ResumeStep = "VERIFY_HEALTH"
+	ResumeStepAmbiguityReconcile ResumeStep = "AMBIGUITY_RECONCILE"
 )
 
-var allResumeSteps = []ResumeStep{ResumeStepPrecheck, ResumeStepSubmitting, ResumeStepWaitingReboot, ResumeStepVerifying}
+// Resume steps are exact execution boundaries. In particular, no observation
+// or verification retry can be represented as a submission retry.
+var allResumeSteps = []ResumeStep{ResumeStepPrecheck, ResumeStepSubmitAdmission, ResumeStepTaskObserve, ResumeStepRebootWait, ResumeStepVerifyVersion, ResumeStepVerifyHealth, ResumeStepAmbiguityReconcile}
 
 func ParseResumeStep(raw string) (ResumeStep, error) {
 	for _, step := range allResumeSteps {

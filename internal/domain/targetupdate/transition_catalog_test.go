@@ -20,7 +20,7 @@ func TestCatalogIsCartesianAndRetryAttentionSafe(t *testing.T) {
 			t.Fatalf("retry %s/%s lacks resume step", transition.From, transition.Command)
 		}
 		if transition.From == StateWaitingReboot || transition.From == StateVerifying {
-			if transition.Result == StateRetryWait && transition.Resume == ResumeStepSubmitting {
+			if transition.Result == StateRetryWait && transition.Resume == ResumeStepSubmitAdmission {
 				t.Fatalf("observation retry %s/%s points to submit", transition.From, transition.Command)
 			}
 		}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parth10-05/fleetforge/internal/application/execution"
 	"github.com/parth10-05/fleetforge/internal/application/orchestration"
 	"github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
@@ -46,7 +47,11 @@ func run() error {
 		return err
 	}
 	adapter := postgres.WakeupWorkAdapter{Pool: pool, Owner: budget.Owner, LeaseDuration: budget.LeaseDuration, Now: func() time.Time { return time.Now().UTC() }, NewToken: newToken}
-	worker, err := orchestration.NewWorker(queue, queue, adapter, orchestration.SafetyProbeHandler{}, orchestration.WorkerConfig{ReceiveBatch: int(budget.ReceiveBatch), Concurrency: int(budget.WorkerConcurrency), HandlerTimeout: budget.HandlerTimeout})
+	handlers, err := orchestration.NewMultiplexHandler([]orchestration.WorkHandler{orchestration.SafetyProbeHandler{}}, []orchestration.FinalizingWorkHandler{execution.WakeupPrecheckStartHandler{Repository: postgres.ExecutionAdapter{Pool: pool}}})
+	if err != nil {
+		return err
+	}
+	worker, err := orchestration.NewWorker(queue, queue, adapter, handlers, orchestration.WorkerConfig{ReceiveBatch: int(budget.ReceiveBatch), Concurrency: int(budget.WorkerConcurrency), HandlerTimeout: budget.HandlerTimeout})
 	if err != nil {
 		return err
 	}

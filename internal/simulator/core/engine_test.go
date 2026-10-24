@@ -129,6 +129,55 @@ func TestEngineRunsHealthyUpdateLifecycleAndKeepsDuplicates(t *testing.T) {
 	}
 }
 
+func TestEngineSeparatesCompletedTaskFromPostUpdateVerificationFaults(t *testing.T) {
+	for _, testCase := range []struct {
+		name           string
+		fault          string
+		version        string
+		healthy        bool
+		targetPhase    Lifecycle
+		operationState Lifecycle
+	}{
+		{name: "inventory contradiction", fault: "RF-F10", version: "1", healthy: true, targetPhase: LifecycleVersionContradiction, operationState: LifecycleVersionContradiction},
+		{name: "health failure", fault: "RF-F11", version: "2", healthy: false, targetPhase: LifecycleHealthFailed, operationState: LifecycleHealthFailed},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			input := testScenario()
+			input.Timing = scenario.Timing{UploadMS: 1, TaskStepMS: 1, RebootMS: 1, InventoryVisibilityMS: 1}
+			input.Faults = []scenario.Fault{{FaultID: "post-update-fault", Name: testCase.fault, Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1}}
+			engine, err := Start(input, 4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer engine.Close()
+			target, _ := scenario.ID(input, "target", 1)
+			if _, err := engine.Submit(context.Background(), AcceptUpdate{TargetID: target, Version: "2", AttemptID: "verify-fault"}); err != nil {
+				t.Fatal(err)
+			}
+			result, err := engine.Submit(context.Background(), AdvanceTo{Time: 4})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Tasks) != 1 || result.Tasks[0].State != LifecycleCompleted || result.Tasks[0].PercentComplete != 100 {
+				t.Fatalf("task outcome=%#v, want completed task evidence", result.Tasks)
+			}
+			var targetState TargetState
+			for _, state := range result.State {
+				if state.ID == target {
+					targetState = state
+					break
+				}
+			}
+			if targetState.ID == "" || targetState.Version != testCase.version || targetState.Healthy != testCase.healthy || targetState.Phase != testCase.targetPhase {
+				t.Fatalf("target outcome=%#v, want version=%s healthy=%t phase=%s", targetState, testCase.version, testCase.healthy, testCase.targetPhase)
+			}
+			if len(result.Operations) != 1 || result.Operations[0].State != testCase.operationState {
+				t.Fatalf("operation outcome=%#v, want state=%s", result.Operations, testCase.operationState)
+			}
+		})
+	}
+}
+
 func TestEngineRejectsInvalidUpdateWithoutMutationAndConsumesFaultBoundedly(t *testing.T) {
 	input := testScenario()
 	input.Faults = []scenario.Fault{{FaultID: "fault-a", Name: "RF-F01", Scope: "all", Trigger: scenario.Trigger{Kind: "request_count"}, Consumption: 1}}

@@ -69,5 +69,8 @@ func assertSQLState(t *testing.T, pool interface {
 }
 
 func integrationSettings(dsn string) config.PostgreSQL {
-	return config.PostgreSQL{ApplicationDSN: dsn, MigrationDSN: dsn, MaxConns: 2, AcquireTimeout: 2 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	// The tagged integration suite may target a scale-to-zero remote PostgreSQL
+	// branch. Allow one bounded cold-start/TLS handshake without changing the
+	// production role's much tighter normal acquire budget.
+	return config.PostgreSQL{ApplicationDSN: dsn, MigrationDSN: dsn, MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
 }

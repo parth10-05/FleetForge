@@ -19,6 +19,7 @@ import (
 
 const (
 	apiAddressKey                     = "FLEETFORGE_API_ADDR"
+	apiEventHMACSecretKey             = "FLEETFORGE_API_EVENT_HMAC_SECRET"
 	simulatorAddressKey               = "FLEETFORGE_SIMULATOR_ADDR"
 	simulatorRunRootKey               = "FLEETFORGE_SIMULATOR_RUN_ROOT"
 	simulatorScenarioPathKey          = "FLEETFORGE_SIMULATOR_SCENARIO_PATH"
@@ -26,6 +27,7 @@ const (
 	simulatorPasswordKey              = "FLEETFORGE_SIMULATOR_PASSWORD"
 	simulatorAdminAddressKey          = "FLEETFORGE_SIMULATOR_ADMIN_ADDR"
 	simulatorAdminSecretKey           = "FLEETFORGE_SIMULATOR_ADMIN_SECRET"
+	simulatorCallbackHMACSecretKey    = "FLEETFORGE_SIMULATOR_CALLBACK_HMAC_SECRET"
 	objectStoreAddressKey             = "FLEETFORGE_OBJECT_STORE_ADDR"
 	objectStoreRootKey                = "FLEETFORGE_OBJECT_STORE_ROOT"
 	objectStoreHMACSecretKey          = "FLEETFORGE_OBJECT_STORE_HMAC_SECRET"
@@ -57,7 +59,8 @@ type Common struct {
 
 type API struct {
 	Common
-	Address string
+	Address      string
+	EventHMACKey []byte
 }
 type Worker struct{ Common }
 type ArtifactWorker struct {
@@ -70,6 +73,30 @@ type DiscoveryWorker struct {
 	Owner        string
 	AllowedCIDRs []netip.Prefix
 	Credentials  map[string]syntheticcredentials.Credential
+}
+type ExecutionWorker struct {
+	Common
+	Root         string
+	Owner        string
+	AllowedCIDRs []netip.Prefix
+	Credentials  map[string]syntheticcredentials.Credential
+}
+
+// PrecheckWorker can read target state and write fenced precheck outcomes. It
+// deliberately has no artifact-store root, which keeps firmware bytes and
+// submission authority out of the precheck process.
+type PrecheckWorker struct {
+	Common
+	Owner        string
+	AllowedCIDRs []netip.Prefix
+	Credentials  map[string]syntheticcredentials.Credential
+}
+
+// ReconciliationWorker can read retained simulator evidence but has neither
+// device credentials nor artifact-store access.
+type ReconciliationWorker struct {
+	Common
+	Owner, JournalPath, RunID string
 }
 
 // OrchestrationWorker is the bounded execution budget for P4 wakeup services.
@@ -85,6 +112,7 @@ type OrchestrationWorker struct {
 type Simulator struct {
 	Common
 	Address, RunRoot, ScenarioPath, Username, Password, AdminAddress, AdminSecret string
+	CallbackHMACKey                                                               []byte
 }
 type ObjectStore struct {
 	Common
@@ -121,7 +149,11 @@ func LoadAPI() (API, error) {
 	if err != nil {
 		return API{}, err
 	}
-	return API{Common: common, Address: address}, nil
+	key, err := optionalHMACKey(os.LookupEnv, apiEventHMACSecretKey)
+	if err != nil {
+		return API{}, err
+	}
+	return API{Common: common, Address: address, EventHMACKey: key}, nil
 }
 
 func LoadWorker() (Worker, error) {
@@ -171,6 +203,79 @@ func LoadDiscoveryWorker() (DiscoveryWorker, error) {
 		return DiscoveryWorker{}, err
 	}
 	return DiscoveryWorker{Common: common, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
+}
+
+// LoadExecutionWorker grants only the exact local artifact store, explicit
+// synthetic target credentials, and explicit target-network allowlist needed
+// for one-shot firmware execution. It never receives simulator-admin secrets.
+func LoadExecutionWorker() (ExecutionWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return ExecutionWorker{}, err
+	}
+	root, err := requiredAbsolutePath(os.LookupEnv, objectStoreRootKey)
+	if err != nil {
+		return ExecutionWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_EXECUTION_WORKER_OWNER", "firmware-executor")
+	if len(owner) > 128 || strings.TrimSpace(owner) == "" {
+		return ExecutionWorker{}, &Error{Key: "FLEETFORGE_EXECUTION_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	allowedCIDRs, err := requiredCIDRs(os.LookupEnv, "FLEETFORGE_EXECUTION_ALLOWED_CIDRS")
+	if err != nil {
+		return ExecutionWorker{}, err
+	}
+	credentials, err := requiredSyntheticCredentials(os.LookupEnv, "FLEETFORGE_EXECUTION_CREDENTIALS_JSON")
+	if err != nil {
+		return ExecutionWorker{}, err
+	}
+	return ExecutionWorker{Common: common, Root: root, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
+}
+
+// LoadPrecheckWorker grants only the synthetic target credentials and network
+// allowlist needed to inspect an enrolled target. It intentionally does not
+// require or expose the artifact-store root used by the submission worker.
+func LoadPrecheckWorker() (PrecheckWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return PrecheckWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_PRECHECK_WORKER_OWNER", "firmware-prechecker")
+	if len(owner) > 128 || strings.TrimSpace(owner) == "" {
+		return PrecheckWorker{}, &Error{Key: "FLEETFORGE_PRECHECK_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	allowedCIDRs, err := requiredCIDRs(os.LookupEnv, "FLEETFORGE_PRECHECK_ALLOWED_CIDRS")
+	if err != nil {
+		return PrecheckWorker{}, err
+	}
+	credentials, err := requiredSyntheticCredentials(os.LookupEnv, "FLEETFORGE_PRECHECK_CREDENTIALS_JSON")
+	if err != nil {
+		return PrecheckWorker{}, err
+	}
+	return PrecheckWorker{Common: common, Owner: owner, AllowedCIDRs: allowedCIDRs, Credentials: credentials}, nil
+}
+
+// LoadReconciliationWorker grants the minimum configuration necessary to
+// inspect an independently retained simulator journal. The run identity is
+// explicit so a worker cannot silently reconcile against an arbitrary run.
+func LoadReconciliationWorker() (ReconciliationWorker, error) {
+	common, err := loadCommon(os.LookupEnv)
+	if err != nil {
+		return ReconciliationWorker{}, err
+	}
+	owner := optional(os.LookupEnv, "FLEETFORGE_RECONCILIATION_WORKER_OWNER", "firmware-reconciler")
+	if strings.TrimSpace(owner) == "" || len(owner) > 128 {
+		return ReconciliationWorker{}, &Error{Key: "FLEETFORGE_RECONCILIATION_WORKER_OWNER", Reason: "must be nonempty and at most 128 bytes"}
+	}
+	journalPath, err := requiredAbsolutePath(os.LookupEnv, "FLEETFORGE_RECONCILIATION_JOURNAL_PATH")
+	if err != nil {
+		return ReconciliationWorker{}, err
+	}
+	runID := optional(os.LookupEnv, "FLEETFORGE_RECONCILIATION_RUN_ID", "")
+	if strings.TrimSpace(runID) == "" || len(runID) > 128 || strings.ContainsAny(runID, "\r\n\t") {
+		return ReconciliationWorker{}, &Error{Key: "FLEETFORGE_RECONCILIATION_RUN_ID", Reason: "must be nonempty, single-line, and at most 128 bytes"}
+	}
+	return ReconciliationWorker{Common: common, Owner: owner, JournalPath: journalPath, RunID: runID}, nil
 }
 
 func LoadOrchestrationWorker() (OrchestrationWorker, error) {
@@ -266,7 +371,23 @@ func LoadSimulator() (Simulator, error) {
 	if adminSecret == "" {
 		return Simulator{}, &Error{Key: simulatorAdminSecretKey, Reason: "is required"}
 	}
-	return Simulator{Common: common, Address: address, RunRoot: runRoot, ScenarioPath: scenarioPath, Username: username, Password: password, AdminAddress: adminAddress, AdminSecret: adminSecret}, nil
+	callbackKey, err := optionalHMACKey(os.LookupEnv, simulatorCallbackHMACSecretKey)
+	if err != nil {
+		return Simulator{}, err
+	}
+	return Simulator{Common: common, Address: address, RunRoot: runRoot, ScenarioPath: scenarioPath, Username: username, Password: password, AdminAddress: adminAddress, AdminSecret: adminSecret, CallbackHMACKey: callbackKey}, nil
+}
+
+func optionalHMACKey(lookup lookupEnv, key string) ([]byte, error) {
+	encoded := optional(lookup, key, "")
+	if encoded == "" {
+		return nil, nil
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(encoded)
+	if err != nil || len(decoded) < 32 {
+		return nil, &Error{Key: key, Reason: "must be base64 and decode to at least 32 bytes"}
+	}
+	return decoded, nil
 }
 
 // LoadObjectStore configures the independent local data-plane listener. Its

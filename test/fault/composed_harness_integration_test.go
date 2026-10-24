@@ -1,0 +1,1568 @@
+//go:build postgresintegration
+
+package fault
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parth10-05/fleetforge/internal/application/eventhint"
+	"github.com/parth10-05/fleetforge/internal/application/execution"
+	"github.com/parth10-05/fleetforge/internal/delivery/eventhinthttp"
+	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
+	"github.com/parth10-05/fleetforge/internal/platform/config"
+	"github.com/parth10-05/fleetforge/internal/platform/redfishexecution"
+	"github.com/parth10-05/fleetforge/internal/platform/syntheticcredentials"
+	"github.com/parth10-05/fleetforge/internal/redfish"
+	"github.com/parth10-05/fleetforge/internal/simulator/journal"
+	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
+	"github.com/parth10-05/fleetforge/test/support/executionfixture"
+	testpostgres "github.com/parth10-05/fleetforge/test/support/postgres"
+)
+
+// TestComposedHarnessStartsRealSixTargetSimulator establishes the process and
+// persistence boundary used by the P05 fault matrix. Worker and fault cases
+// build on this runner; this test intentionally makes no update-success claim.
+func TestComposedHarnessStartsRealSixTargetSimulator(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate composed harness schema: %v", err)
+	}
+
+	runRoot := t.TempDir()
+	address := freeAddress(t)
+	adminAddress := freeAddress(t)
+	adminSecret := "fault-harness-admin-secret"
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	buildOutput, err := build.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build real simulator: %v: %s", err, buildOutput)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer func() { cancel() }()
+	processEnv := append(os.Environ(),
+		"FLEETFORGE_ENV=test",
+		"FLEETFORGE_SIMULATOR_ADDR="+address,
+		"FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress,
+		"FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot,
+		"FLEETFORGE_SIMULATOR_SCENARIO_PATH="+filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"),
+		"FLEETFORGE_SIMULATOR_USERNAME=fault-harness",
+		"FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password",
+		"FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret,
+	)
+	var output limitedBuffer
+	start := func() *exec.Cmd {
+		command := exec.CommandContext(ctx, simulatorPath)
+		command.Env = processEnv
+		command.Stdout, command.Stderr = &output, &output
+		if err := command.Start(); err != nil {
+			t.Fatalf("start real simulator: %v", err)
+		}
+		return command
+	}
+	command := start()
+	t.Cleanup(func() {
+		stopSimulator(command)
+	})
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{adminSecret}}
+	journal := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	if _, ok := journal["entries"].(float64); !ok {
+		t.Fatalf("retained journal entries=%v, want numeric journal status; simulator output=%s", journal["entries"], output.String())
+	}
+	status := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/status", headers)
+	if ready, ok := status["ready"].(bool); !ok || !ready {
+		t.Fatalf("simulator status=%v, want ready; simulator output=%s", status, output.String())
+	}
+	scenarioPath := filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json")
+	submitAcceptedUpdate(t, ctx, address, scenarioPath)
+	journal = waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	if entries, ok := journal["entries"].(float64); !ok || entries < 2 {
+		t.Fatalf("retained journal entries=%v, want request and acceptance evidence; simulator output=%s", journal["entries"], output.String())
+	}
+	assertRetainedAcceptance(t, runRoot)
+	assertFirmwareVersion(t, ctx, address, scenarioPath, "1.1")
+	checkpoint := journal
+	stopSimulator(command)
+	cancel()
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	command = start()
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	restarted := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/status", headers)
+	if restarted["run_id"] != status["run_id"] {
+		t.Fatalf("restored simulator run_id=%v, want %v", restarted["run_id"], status["run_id"])
+	}
+	restoredJournal := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	if restoredJournal["last_hash"] != checkpoint["last_hash"] || restoredJournal["entries"] != checkpoint["entries"] {
+		t.Fatalf("restored journal=%v, want retained checkpoint=%v", restoredJournal, checkpoint)
+	}
+	assertFirmwareVersion(t, ctx, address, scenarioPath, "1.1")
+	assertFalseProvenAbsentControlFails(t, runRoot)
+	submitAcceptedUpdate(t, ctx, address, scenarioPath)
+	assertDuplicateRequestControlFails(t, runRoot)
+	journal = waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	recordFaultEvidence(t, scenarioPath, "accepted request survives restart; both negative controls reject", "P05-F01", "P05-F12", "P05-F13", "P05-F14")
+}
+
+// TestComposedHarnessPrewriteLossCreatesFencedChildAttempt joins a real
+// simulator RF-F06 transport loss with the durable retry path. The simulator
+// journal must show that no request reached the target before the only
+// proof-backed child admission is allowed.
+func TestComposedHarnessPrewriteLossCreatesFencedChildAttempt(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate composed prewrite schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatalf("seed durable fixture: %v", err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatalf("prepare durable fixture: %v", err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatalf("seed durable policy snapshot: %v", err)
+	}
+
+	runRoot := t.TempDir()
+	scenarioPath := writePrewriteFailureScenario(t, runRoot, filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"))
+	address, adminAddress := freeAddress(t), freeAddress(t)
+	adminSecret := "fault-harness-prewrite-secret"
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build prewrite simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var output limitedBuffer
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(),
+		"FLEETFORGE_ENV=test",
+		"FLEETFORGE_SIMULATOR_ADDR="+address,
+		"FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress,
+		"FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot,
+		"FLEETFORGE_SIMULATOR_SCENARIO_PATH="+scenarioPath,
+		"FLEETFORGE_SIMULATOR_USERNAME=fault-harness",
+		"FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password",
+		"FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret,
+	)
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Start(); err != nil {
+		t.Fatalf("start prewrite simulator: %v", err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+
+	initial := executionfixture.AdmissionRequest(fixture, "5201")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatalf("admit initial attempt: %v", err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	submit, claimed, err := adapter.ClaimSubmitWork(ctx, "prewrite-harness", "00000000-0000-4000-8000-000000000201")
+	if err != nil || !claimed {
+		t.Fatalf("claim initial submit work=%+v claimed=%t err=%v", submit, claimed, err)
+	}
+	submitExpectedTransportLoss(t, ctx, address, scenarioPath, initial.FirmwareAttempt.AttemptID)
+	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{adminSecret}}
+	journalStatus := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	if entries, ok := journalStatus["entries"].(float64); !ok || entries != 0 {
+		t.Fatalf("prewrite journal entries=%v, want no target-side request evidence; simulator output=%s", journalStatus["entries"], output.String())
+	}
+	if err := adapter.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitProvenPrewriteFailure, FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("persist proven prewrite result: %v", err)
+	}
+	retry, claimed, err := adapter.ClaimPrecheckWork(ctx, "prewrite-harness", "00000000-0000-4000-8000-000000000202")
+	if err != nil || !claimed {
+		t.Fatalf("claim proof-backed retry work=%+v claimed=%t err=%v", retry, claimed, err)
+	}
+	child := executionfixture.AdmissionRequest(fixture, "5202")
+	child.AdmissionID = initial.AdmissionID
+	child.CommandID = retry.CommandID
+	child.ExpectedTargetRevision = retry.ExpectedRevision
+	child.CapturedCommandEpoch = 7
+	child.ExpectedTargetState, child.NextTargetState = "RETRY_WAIT", "SUBMITTING"
+	child.RetryParentAttemptID = initial.FirmwareAttempt.AttemptID
+	child.ClaimedWorkID, child.ClaimedLeaseToken, child.ClaimedDeliveryGeneration = retry.DueWorkID, retry.LeaseToken, retry.DeliveryGeneration
+	child.DueWorkID = "00000000-0000-0000-5202-000000000099"
+	child.FirmwareAttempt.AttemptID = "00000000-0000-0000-5202-000000000010"
+	child.StepAttemptID = "00000000-0000-0000-5202-000000000011"
+	if err := persistence.AdmitRetryOperation(ctx, pool, child); err != nil {
+		t.Fatalf("admit proof-backed child: %v", err)
+	}
+	assertExactlyOneChildAdmission(t, ctx, pool, initial.AdmissionID, initial.FirmwareAttempt.AttemptID, child.FirmwareAttempt.AttemptID, retry)
+	recordFaultEvidence(t, scenarioPath, "prewrite loss has no target evidence and admits only a fenced child", "P05-F02", "P05-F15")
+}
+
+// TestComposedHarnessPostAcceptLossAdoptsRetainedAcceptance proves that the
+// RF-F07 response-loss boundary is resolved from the simulator's independent
+// journal. The reconciler must schedule observation for the original attempt;
+// it must not issue a second submission.
+func TestComposedHarnessPostAcceptLossAdoptsRetainedAcceptance(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate composed post-accept schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatalf("seed durable fixture: %v", err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatalf("prepare durable fixture: %v", err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatalf("seed durable policy snapshot: %v", err)
+	}
+
+	runRoot := t.TempDir()
+	address, adminAddress := freeAddress(t), freeAddress(t)
+	adminSecret := "fault-harness-post-accept-secret"
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build post-accept simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var output limitedBuffer
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(),
+		"FLEETFORGE_ENV=test",
+		"FLEETFORGE_SIMULATOR_ADDR="+address,
+		"FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress,
+		"FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot,
+		"FLEETFORGE_SIMULATOR_SCENARIO_PATH="+filepath.Join(root, "test", "fixtures", "simulator", "v1", "post-accept-disconnect.json"),
+		"FLEETFORGE_SIMULATOR_USERNAME=fault-harness",
+		"FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password",
+		"FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret,
+	)
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Start(); err != nil {
+		t.Fatalf("start post-accept simulator: %v", err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+
+	body := []byte("firmware-postaccept-artifact")
+	digest := sha256.Sum256(body)
+	initial := executionfixture.AdmissionRequest(fixture, "5205")
+	initial.FirmwareAttempt.RequestFingerprint = "sha256:" + hex.EncodeToString(digest[:])
+	initial.FirmwareAttempt.ExpectedVersion = "1.1"
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatalf("admit initial attempt: %v", err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	submit, claimed, err := adapter.ClaimSubmitWork(ctx, "post-accept-harness", "00000000-0000-4000-8000-000000000205")
+	if err != nil || !claimed {
+		t.Fatalf("claim initial submit work=%+v claimed=%t err=%v", submit, claimed, err)
+	}
+	submitExpectedPostAcceptTransportLoss(t, ctx, address, filepath.Join(root, "test", "fixtures", "simulator", "v1", "post-accept-disconnect.json"), initial.FirmwareAttempt.AttemptID, body)
+	acceptance := retainedAcceptanceForAttempt(t, runRoot, initial.FirmwareAttempt.AttemptID)
+	if len(acceptance.Entries) != 2 || !acceptance.Entries[0].Received || !acceptance.Entries[1].Accepted {
+		t.Fatalf("RF-F07 journal entries=%+v, want exactly ordered receive and acceptance evidence", acceptance.Entries)
+	}
+	if err := adapter.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitPossiblyAccepted, ResponseFingerprint: harnessDigest('f'), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("persist response-loss ambiguity: %v", err)
+	}
+	worker := execution.ReconciliationWorker{Claimer: adapter, Repository: adapter, Journal: retainedJournalReader{journal: acceptance}, RunID: acceptance.RunID, Now: func() time.Time { return time.Now().UTC() }}
+	processed, err := worker.RunOnce(ctx, "post-accept-harness", "00000000-0000-4000-8000-000000000206")
+	if err != nil || !processed {
+		t.Fatalf("reconcile retained acceptance processed=%t err=%v", processed, err)
+	}
+	if err := execution.VerifyPersistedJournal(ctx, adapter, acceptance); err != nil {
+		t.Fatalf("verify adopted durable attempt against retained journal: %v", err)
+	}
+	var attemptStatus, updateState string
+	var pendingSubmits, pendingObservations int
+	if err := pool.QueryRow(ctx, `SELECT a.status,tu.state FROM firmware_update_attempts a JOIN target_updates tu ON tu.id=a.target_update_id WHERE a.id=$1::uuid`, initial.FirmwareAttempt.AttemptID).Scan(&attemptStatus, &updateState); err != nil {
+		t.Fatal(err)
+	}
+	if attemptStatus != "ADOPTED" || updateState != "UPDATE_ACCEPTED" {
+		t.Fatalf("adopted lifecycle attempt=%s update=%s", attemptStatus, updateState)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&pendingSubmits); err != nil || pendingSubmits != 0 {
+		t.Fatalf("pending submits=%d err=%v, want no second target request", pendingSubmits, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pendingObservations); err != nil || pendingObservations != 1 {
+		t.Fatalf("pending task observations=%d err=%v, want one adopted observation", pendingObservations, err)
+	}
+	recordFaultEvidence(t, filepath.Join(root, "test", "fixtures", "simulator", "v1", "post-accept-disconnect.json"), "retained acceptance adopts the original attempt without a second submission", "P05-F03")
+}
+
+// TestComposedHarnessDuplicateCallbackIsDeduplicated drives a real simulator
+// EventService subscription through the signed HTTP ingress and confirms that
+// RF-F01's duplicate delivery remains only an advisory, durable single receipt.
+func TestComposedHarnessDuplicateCallbackIsDeduplicated(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate callback schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatal(err)
+	}
+	callbackKey := bytes.Repeat([]byte("c"), 32)
+	var callbackAttempts atomic.Int64
+	var callbackStatus atomic.Int64
+	callbackStore := &callbackStoreRecorder{store: persistence.EventHintStore{Pool: pool}}
+	callbackRoutes := eventhinthttp.New(callbackKey, callbackStore, time.Now).Routes()
+	callback := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		callbackAttempts.Add(1)
+		callbackRoutes.ServeHTTP(&callbackStatusRecorder{ResponseWriter: writer, status: &callbackStatus}, request)
+	}))
+	defer callback.Close()
+	runRoot, address, adminAddress := t.TempDir(), freeAddress(t), freeAddress(t)
+	scenarioPath := filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json")
+	input := readScenario(t, scenarioPath)
+	input.ScenarioID = "duplicate-callback-six-targets"
+	// Give the durable accepted-result transaction time to commit before the
+	// first advisory callback fires. The production invariant is that callbacks
+	// may accelerate observation only after a durable attempt exists.
+	input.Timing.UploadMS = 100
+	input.Timing.TaskStepMS = 100
+	input.Timing.RebootMS = 100
+	input.Timing.InventoryVisibilityMS = 100
+	// A callback is advisory and cannot be matched until CommitSubmitResult has
+	// durably marked the attempt accepted. Keep the synthetic event behind that
+	// independent PostgreSQL transaction; a remote harness can exceed 100 ms.
+	input.Timing.EventMS = 2000
+	input.Faults = append(input.Faults, scenario.Fault{FaultID: "duplicate-callback", Name: "RF-F01", Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	casePath := filepath.Join(runRoot, "duplicate-callback.json")
+	if err := os.WriteFile(casePath, append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(setupCtx, "UPDATE targets SET target_key=$1 WHERE id=$2::uuid", targetID, fixture.TargetID); err != nil {
+		t.Fatal(err)
+	}
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build callback simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(), "FLEETFORGE_ENV=test", "FLEETFORGE_READINESS_TIMEOUT=5s", "FLEETFORGE_SIMULATOR_ADDR="+address, "FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress, "FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot, "FLEETFORGE_SIMULATOR_SCENARIO_PATH="+casePath, "FLEETFORGE_SIMULATOR_USERNAME=fault-harness", "FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password", "FLEETFORGE_SIMULATOR_ADMIN_SECRET=callback-admin-secret", "FLEETFORGE_SIMULATOR_CALLBACK_HMAC_SECRET="+base64.RawStdEncoding.EncodeToString(callbackKey))
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	subscribeCallback(t, ctx, address, targetID, callback.URL+"/v1/events/synthetic")
+	initial := executionfixture.AdmissionRequest(fixture, "5206")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatal(err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	work, claimed, err := adapter.ClaimSubmitWork(ctx, "callback-harness", "00000000-0000-4000-8000-000000000206")
+	if err != nil || !claimed {
+		t.Fatalf("claim submit=%+v claimed=%t err=%v", work, claimed, err)
+	}
+	remoteTask := submitAcceptedUpdateForAttempt(t, ctx, address, input, initial.FirmwareAttempt.AttemptID)
+	if err := adapter.CommitSubmitResult(ctx, work, execution.SubmitResult{Class: execution.SubmitAccepted, RemoteTaskReference: remoteTask, ResponseFingerprint: harnessDigest('c'), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		var receipts int
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_event_receipts").Scan(&receipts); err == nil && receipts == 1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			var quarantined int
+			_ = pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM execution_event_quarantine").Scan(&quarantined)
+			t.Fatalf("timed out waiting for signed callback receipt: callback_attempts=%d last_status=%d quarantined=%d record_error=%q", callbackAttempts.Load(), callbackStatus.Load(), quarantined, callbackStore.LastError())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	var receipts, sequence, observations int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_event_receipts").Scan(&receipts); err != nil || receipts != 1 {
+		t.Fatalf("receipts=%d err=%v, want one deduplicated receipt", receipts, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT sequence FROM execution_event_heads WHERE target_key=$1", targetID).Scan(&sequence); err != nil || sequence < 1 {
+		t.Fatalf("sequence=%d err=%v", sequence, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&observations); err != nil || observations < 1 {
+		t.Fatalf("task observations=%d err=%v", observations, err)
+	}
+	recordFaultEvidence(t, casePath, "duplicate callback produces one durable receipt and advisory observation", "P05-F04")
+}
+
+// TestComposedHarnessLateCallbackIsFenced verifies that RF-F02 can reorder
+// two real signed callbacks, while only the newer task transition advances the
+// durable event head. The delayed callback remains an advisory LATE receipt.
+func TestComposedHarnessLateCallbackIsFenced(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate late callback schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatal(err)
+	}
+	callbackKey := bytes.Repeat([]byte("l"), 32)
+	var callbackAttempts, callbackStatus atomic.Int64
+	callbackStore := &callbackStoreRecorder{store: persistence.EventHintStore{Pool: pool}}
+	callbackRoutes := eventhinthttp.New(callbackKey, callbackStore, time.Now).Routes()
+	callback := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		callbackAttempts.Add(1)
+		callbackRoutes.ServeHTTP(&callbackStatusRecorder{ResponseWriter: writer, status: &callbackStatus}, request)
+	}))
+	defer callback.Close()
+	runRoot, address, adminAddress := t.TempDir(), freeAddress(t), freeAddress(t)
+	scenarioPath := filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json")
+	input := readScenario(t, scenarioPath)
+	input.ScenarioID = "late-callback-six-targets"
+	input.Timing.UploadMS, input.Timing.TaskStepMS = 100, 100
+	input.Timing.RebootMS, input.Timing.InventoryVisibilityMS, input.Timing.EventMS = 100, 100, 2000
+	input.Faults = append(input.Faults, scenario.Fault{FaultID: "late-callback", Name: "RF-F02", Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	casePath := filepath.Join(runRoot, "late-callback.json")
+	if err := os.WriteFile(casePath, append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(setupCtx, "UPDATE targets SET target_key=$1 WHERE id=$2::uuid", targetID, fixture.TargetID); err != nil {
+		t.Fatal(err)
+	}
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build late callback simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(), "FLEETFORGE_ENV=test", "FLEETFORGE_READINESS_TIMEOUT=5s", "FLEETFORGE_SIMULATOR_ADDR="+address, "FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress, "FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot, "FLEETFORGE_SIMULATOR_SCENARIO_PATH="+casePath, "FLEETFORGE_SIMULATOR_USERNAME=fault-harness", "FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password", "FLEETFORGE_SIMULATOR_ADMIN_SECRET=callback-admin-secret", "FLEETFORGE_SIMULATOR_CALLBACK_HMAC_SECRET="+base64.RawStdEncoding.EncodeToString(callbackKey))
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	subscribeCallback(t, ctx, address, targetID, callback.URL+"/v1/events/synthetic")
+	initial := executionfixture.AdmissionRequest(fixture, "5207")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatal(err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	work, claimed, err := adapter.ClaimSubmitWork(ctx, "late-callback-harness", "00000000-0000-4000-8000-000000000207")
+	if err != nil || !claimed {
+		t.Fatalf("claim submit=%+v claimed=%t err=%v", work, claimed, err)
+	}
+	remoteTask := submitAcceptedUpdateForAttempt(t, ctx, address, input, initial.FirmwareAttempt.AttemptID)
+	if err := adapter.CommitSubmitResult(ctx, work, execution.SubmitResult{Class: execution.SubmitAccepted, RemoteTaskReference: remoteTask, ResponseFingerprint: harnessDigest('d'), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		var receipts int
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_event_receipts").Scan(&receipts); err == nil && receipts >= 2 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for reordered callbacks: callback_attempts=%d last_status=%d record_error=%q", callbackAttempts.Load(), callbackStatus.Load(), callbackStore.LastError())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	var late, scheduled, head int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FILTER (WHERE disposition='LATE'), COUNT(*) FILTER (WHERE disposition='SCHEDULED') FROM execution_event_receipts").Scan(&late, &scheduled); err != nil || late != 1 || scheduled != 1 {
+		t.Fatalf("late=%d scheduled=%d err=%v, want one each", late, scheduled, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT sequence FROM execution_event_heads WHERE target_key=$1", targetID).Scan(&head); err != nil || head != 2 {
+		t.Fatalf("event head=%d err=%v, want sequence 2", head, err)
+	}
+	recordFaultEvidence(t, casePath, "late callback is retained without advancing the newer event head", "P05-F05")
+}
+
+// TestComposedHarnessLostCallbackLeavesPollingAuthoritative verifies that an
+// RF-F03 event loss does not mutate durable execution state. The accepted
+// attempt's polling work remains the only authoritative observation path.
+func TestComposedHarnessLostCallbackLeavesPollingAuthoritative(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate lost callback schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatal(err)
+	}
+	callbackKey := bytes.Repeat([]byte("x"), 32)
+	var callbackAttempts atomic.Int64
+	callbackRoutes := eventhinthttp.New(callbackKey, persistence.EventHintStore{Pool: pool}, time.Now).Routes()
+	callback := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		callbackAttempts.Add(1)
+		callbackRoutes.ServeHTTP(writer, request)
+	}))
+	defer callback.Close()
+	runRoot, address, adminAddress := t.TempDir(), freeAddress(t), freeAddress(t)
+	scenarioPath := filepath.Join(root, "test", "fixtures", "simulator", "v1", "lost-event.json")
+	input := readScenario(t, scenarioPath)
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(setupCtx, "UPDATE targets SET target_key=$1 WHERE id=$2::uuid", targetID, fixture.TargetID); err != nil {
+		t.Fatal(err)
+	}
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build lost callback simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	adminSecret := "lost-callback-admin-secret"
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(), "FLEETFORGE_ENV=test", "FLEETFORGE_READINESS_TIMEOUT=5s", "FLEETFORGE_SIMULATOR_ADDR="+address, "FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress, "FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot, "FLEETFORGE_SIMULATOR_SCENARIO_PATH="+scenarioPath, "FLEETFORGE_SIMULATOR_USERNAME=fault-harness", "FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password", "FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret, "FLEETFORGE_SIMULATOR_CALLBACK_HMAC_SECRET="+base64.RawStdEncoding.EncodeToString(callbackKey))
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	subscribeCallback(t, ctx, address, targetID, callback.URL+"/v1/events/synthetic")
+	initial := executionfixture.AdmissionRequest(fixture, "5208")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatal(err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	work, claimed, err := adapter.ClaimSubmitWork(ctx, "lost-callback-harness", "00000000-0000-4000-8000-000000000208")
+	if err != nil || !claimed {
+		t.Fatalf("claim submit=%+v claimed=%t err=%v", work, claimed, err)
+	}
+	remoteTask := submitAcceptedUpdateForAttempt(t, ctx, address, input, initial.FirmwareAttempt.AttemptID)
+	if err := adapter.CommitSubmitResult(ctx, work, execution.SubmitResult{Class: execution.SubmitAccepted, RemoteTaskReference: remoteTask, ResponseFingerprint: harnessDigest('e'), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{adminSecret}}
+	eventDeadline := time.NewTimer(5 * time.Second)
+	defer eventDeadline.Stop()
+	for {
+		metrics := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/metrics", headers)
+		if faults, ok := metrics["Faults"].(float64); ok && faults >= 1 {
+			break
+		}
+		select {
+		case <-eventDeadline.C:
+			t.Fatalf("RF-F03 did not fire: metrics=%v", metrics)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	for {
+		var receipts int
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_event_receipts").Scan(&receipts); err == nil && receipts == 4 {
+			break
+		}
+		select {
+		case <-eventDeadline.C:
+			t.Fatal("timed out waiting for post-loss callbacks")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	var receipts, firstSequence, pending int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*), MIN(sequence) FROM execution_event_receipts").Scan(&receipts, &firstSequence); err != nil || receipts != 4 || firstSequence != 2 {
+		t.Fatalf("receipts=%d first_sequence=%d err=%v, want four callbacks beginning at sequence 2", receipts, firstSequence, err)
+	}
+	if callbackAttempts.Load() != 4 {
+		t.Fatalf("callback attempts=%d, want four after RF-F03 drops the first event", callbackAttempts.Load())
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pending); err != nil || pending < 1 {
+		t.Fatalf("pending observations=%d err=%v, want at least one authoritative accepted-result work item", pending, err)
+	}
+	recordFaultEvidence(t, scenarioPath, "lost callback leaves polling as the authoritative observation path", "P05-F06")
+}
+
+// TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair proves
+// that an actual Redfish 429 leaves safe-read work recoverable.  The
+// observation worker has no submission capability; repair returns the same
+// claimed observation to PENDING without inventing a firmware retry.
+func TestComposedHarnessRateLimitedObservationRecoversThroughLeaseRepair(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F04", false, false, false)
+}
+
+// TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair proves
+// that a real 503 observation failure has the same safe lease-repair
+// semantics as a rate-limited read: no evidence or submission is fabricated.
+func TestComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F05", false, false, false)
+}
+
+func TestComposedHarnessMissingTaskSchedulesInventoryVerification(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F08", true, false, false)
+}
+
+// TestComposedHarnessInventoryContradictionTerminates proves that the actual
+// simulator's completed task, reachable manager, and contradictory inventory
+// flow through the durable task -> reboot -> inventory proof chain.  A stale
+// version is terminal evidence, not a retryable task failure.
+func TestComposedHarnessInventoryContradictionTerminates(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F10", false, true, false)
+}
+
+// TestComposedHarnessHealthContradictionTerminates proves that the actual
+// completed task and matching inventory never imply success without the final
+// independent health observation. A failed health report is terminal evidence.
+func TestComposedHarnessHealthContradictionTerminates(t *testing.T) {
+	testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t, "RF-F11", false, false, true)
+}
+
+func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *testing.T, fault string, expectMissingTask, expectInventoryContradiction, expectHealthContradiction bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	harness := testpostgres.New(t)
+	root := repositoryRoot(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	if err := persistence.RunMigrations(ctx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate rate-limit schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.PrepareAdmission(ctx, pool, fixture, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(ctx, pool, fixture); err != nil {
+		t.Fatal(err)
+	}
+
+	runRoot, address, adminAddress := t.TempDir(), freeAddress(t), freeAddress(t)
+	input := readScenario(t, filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"))
+	input.ScenarioID = "unavailable-observation"
+	input.Faults = append(input.Faults, scenario.Fault{FaultID: "unavailable-observation", Name: fault, Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scenarioPath := filepath.Join(runRoot, "unavailable-observation.json")
+	if err := os.WriteFile(scenarioPath, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	caseID := map[string]string{"RF-F04": "P05-F07", "RF-F05": "P05-F08", "RF-F08": "P05-F09", "RF-F10": "P05-F10", "RF-F11": "P05-F11"}[fault]
+	if caseID == "" {
+		t.Fatalf("unmapped composed fault %q", fault)
+	}
+	recordFaultEvidence(t, scenarioPath, "observation fault follows the asserted durable recovery or terminal-proof path", caseID)
+	targetKey, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE targets SET endpoint_reference=$1,target_key=$2,contract_version='synthetic-redfish-v1',credential_provider='synthetic-test',credential_reference=$3,transport_policy_version='synthetic-allowlisted-v1',registration_hash=$4,trust_metadata_complete=true WHERE id=$5::uuid`, "http://"+address, targetKey, "synthetic-test:"+targetKey, harnessDigest('a'), fixture.TargetID); err != nil {
+		t.Fatal(err)
+	}
+
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build rate-limit simulator: %v: %s", err, output)
+	}
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(), "FLEETFORGE_ENV=test", "FLEETFORGE_READINESS_TIMEOUT=5s", "FLEETFORGE_SIMULATOR_ADDR="+address, "FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress, "FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot, "FLEETFORGE_SIMULATOR_SCENARIO_PATH="+scenarioPath, "FLEETFORGE_SIMULATOR_USERNAME=fault-harness", "FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password", "FLEETFORGE_SIMULATOR_ADMIN_SECRET=rate-limit-admin-secret")
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+
+	initial := executionfixture.AdmissionRequest(fixture, "5210")
+	if expectHealthContradiction {
+		// RF-F11 must reach the health step after a successful independent
+		// inventory check, so align the durable expected version with the
+		// simulator request rather than using the fixture's generic value.
+		initial.FirmwareAttempt.ExpectedVersion = "1.1"
+	}
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	store := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return now }}
+	submit, claimed, err := store.ClaimSubmitWork(ctx, "rate-limit-harness", "00000000-0000-4000-8000-000000000210")
+	if err != nil || !claimed {
+		t.Fatalf("claim submit=%+v claimed=%t err=%v", submit, claimed, err)
+	}
+	remoteTask := submitAcceptedUpdateForAttempt(t, ctx, address, input, initial.FirmwareAttempt.AttemptID)
+	if err := store.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitAccepted, RemoteTaskReference: remoteTask, ResponseFingerprint: harnessDigest('a'), FinishedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if expectMissingTask {
+		for index := 0; index < 5; index++ {
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+address+"/virtual-bmcs/"+targetKey+"/redfish/v1/", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.SetBasicAuth("fault-harness", "fault-harness-password")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("advance simulator status=%d", response.StatusCode)
+			}
+		}
+	}
+	var observationsBefore int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM device_observations").Scan(&observationsBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	credential, err := syntheticcredentials.NewCredential("fault-harness", "fault-harness-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := syntheticcredentials.New(map[string]syntheticcredentials.Credential{targetKey: credential})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetNow := func() time.Time { return now }
+	if expectInventoryContradiction || expectHealthContradiction {
+		// Follow-up observations are deliberately jittered by the durable
+		// scheduler.  Advance only the test worker's injected claim clock;
+		// the adapter still timestamps freshly collected target evidence from
+		// the real clock.
+		targetNow = func() time.Time { return time.Now().UTC() }
+	}
+	target := redfishexecution.Adapter{Loader: redfishexecution.PostgresTargetLoader{Pool: pool}, Client: redfish.NewClient(redfish.ClientConfig{AllowedCIDRs: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, ResolveIP: func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+	}}), Resolver: resolver, Now: targetNow}
+	worker := execution.ObservationWorker{Claimer: store, Repository: store, Target: target}
+	var workBefore string
+	if err := pool.QueryRow(ctx, "SELECT COALESCE(string_agg(work_type || ':' || delivery_state, ',' ORDER BY created_at),'') FROM due_work").Scan(&workBefore); err != nil {
+		t.Fatal(err)
+	}
+	processed, observeErr := worker.RunOnce(ctx, "rate-limit-observer", "00000000-0000-4000-8000-000000000211")
+	if expectInventoryContradiction || expectHealthContradiction {
+		if !processed || observeErr != nil {
+			t.Fatalf("post-update fault task observation processed=%t err=%v, want completed task proof", processed, observeErr)
+		}
+		leaseTokens := []string{"00000000-0000-4000-8000-000000000212", "00000000-0000-4000-8000-000000000213"}
+		if expectHealthContradiction {
+			leaseTokens = append(leaseTokens, "00000000-0000-4000-8000-000000000214")
+		}
+		for _, leaseToken := range leaseTokens {
+			now = now.Add(20 * time.Second)
+			processed, observeErr = worker.RunOnce(ctx, "contradiction-observer", leaseToken)
+			if !processed || observeErr != nil {
+				var work, state, taskState string
+				_ = pool.QueryRow(ctx, "SELECT COALESCE(string_agg(work_type || ':' || delivery_state, ',' ORDER BY created_at),'') FROM due_work").Scan(&work)
+				_ = pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.TargetUpdateID).Scan(&state)
+				_ = pool.QueryRow(ctx, "SELECT COALESCE(normalized_data->>'TaskState','') FROM device_observations WHERE target_update_id=$1::uuid AND kind='TASK' ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&taskState)
+				t.Fatalf("contradiction follow-up lease=%s processed=%t err=%v work=%q state=%q task_state=%q", leaseToken, processed, observeErr, work, state, taskState)
+			}
+		}
+		var state, attemptStatus, inventoryVersion, health string
+		var completed, pending int
+		if err := pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.TargetUpdateID).Scan(&state); err != nil || state != "FAILED_TERMINAL" {
+			t.Fatalf("contradiction target state=%s err=%v, want FAILED_TERMINAL", state, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT status FROM firmware_update_attempts WHERE id=$1::uuid", initial.FirmwareAttempt.AttemptID).Scan(&attemptStatus); err != nil || attemptStatus != "FAILED_TERMINAL" {
+			t.Fatalf("contradiction attempt status=%s err=%v, want FAILED_TERMINAL", attemptStatus, err)
+		}
+		if expectInventoryContradiction {
+			if err := pool.QueryRow(ctx, "SELECT normalized_data->>'Version' FROM device_observations WHERE target_update_id=$1::uuid AND kind='INVENTORY' ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&inventoryVersion); err != nil || inventoryVersion != "1.0" {
+				t.Fatalf("inventory contradiction version=%s err=%v, want retained initial version", inventoryVersion, err)
+			}
+		}
+		if expectHealthContradiction {
+			if err := pool.QueryRow(ctx, "SELECT normalized_data->>'Health' FROM device_observations WHERE target_update_id=$1::uuid AND kind='HEALTH' ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&health); err != nil || health == "" || health == "OK" {
+				t.Fatalf("health contradiction report=%q err=%v, want non-OK retained health evidence", health, err)
+			}
+		}
+		wantCompleted := 4
+		if expectHealthContradiction {
+			wantCompleted = 5
+		}
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE delivery_state='COMPLETED'").Scan(&completed); err != nil || completed != wantCompleted {
+			t.Fatalf("post-update fault completed work=%d err=%v, want %d", completed, err, wantCompleted)
+		}
+		if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE delivery_state='PENDING'").Scan(&pending); err != nil || pending != 0 {
+			t.Fatalf("contradiction pending work=%d err=%v, want terminal quiescence", pending, err)
+		}
+		return
+	}
+	if expectMissingTask {
+		if !processed || observeErr != nil {
+			t.Fatalf("missing-task worker processed=%t task_reference=%q err=%v forbidden=%t unexpected-status=%t unexpected-media=%t, want normalized task-missing evidence", processed, remoteTask, observeErr, errors.Is(observeErr, redfish.ErrForbiddenAddress), errors.Is(observeErr, redfish.ErrUnexpectedStatus), errors.Is(observeErr, redfish.ErrUnexpectedMediaType))
+		}
+		var state, taskState, taskDelivery, inventoryDelivery string
+		var workAfter, observationKind string
+		_ = pool.QueryRow(ctx, "SELECT COALESCE(string_agg(work_type || ':' || delivery_state, ',' ORDER BY created_at),'') FROM due_work").Scan(&workAfter)
+		_ = pool.QueryRow(ctx, "SELECT COALESCE(kind,'') FROM device_observations WHERE target_update_id=$1::uuid ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&observationKind)
+		if err := pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.TargetUpdateID).Scan(&state); err != nil || state != "VERIFYING" {
+			t.Fatalf("target update state=%s err=%v, want VERIFYING; work before=%q after=%q observation kind=%q", state, err, workBefore, workAfter, observationKind)
+		}
+		if err := pool.QueryRow(ctx, "SELECT normalized_data->>'TaskState' FROM device_observations WHERE target_update_id=$1::uuid ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&taskState); err != nil || taskState != "Missing" {
+			t.Fatalf("task observation state=%s err=%v, want Missing", taskState, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE work_type='TASK_OBSERVE' ORDER BY created_at LIMIT 1").Scan(&taskDelivery); err != nil || taskDelivery != "COMPLETED" {
+			t.Fatalf("task delivery=%s err=%v, want completed", taskDelivery, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE work_type='INVENTORY_OBSERVE' ORDER BY created_at LIMIT 1").Scan(&inventoryDelivery); err != nil || inventoryDelivery != "PENDING" {
+			t.Fatalf("inventory delivery=%s err=%v, want pending verification", inventoryDelivery, err)
+		}
+		return
+	}
+	if !processed || observeErr == nil {
+		t.Fatalf("rate-limited worker processed=%t err=%v, want claimed 429 failure", processed, observeErr)
+	}
+	var discovery redfish.DiscoveryError
+	wantKind := redfish.ErrorRateLimited
+	if fault == "RF-F05" {
+		wantKind = redfish.ErrorTransient
+	}
+	if !errors.As(observeErr, &discovery) || discovery.Kind != wantKind {
+		t.Fatalf("%s observation error=%v kind=%q, want typed %q", fault, observeErr, discovery.Kind, wantKind)
+	}
+	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{"rate-limit-admin-secret"}}
+	metrics := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/metrics", headers)
+	if faults, ok := metrics["Faults"].(float64); !ok || faults != 1 {
+		t.Fatalf("%s metrics=%v, want exactly one consumed simulator fault", fault, metrics)
+	}
+
+	var dueID, commandID, delivery string
+	var generation int64
+	if err := pool.QueryRow(ctx, "SELECT id::text,command_id::text,delivery_generation,delivery_state FROM due_work WHERE work_type='TASK_OBSERVE' ORDER BY created_at LIMIT 1").Scan(&dueID, &commandID, &generation, &delivery); err != nil || delivery != "CLAIMED" {
+		t.Fatalf("rate-limited work id=%s command=%s generation=%d state=%s err=%v, want claimed", dueID, commandID, generation, delivery, err)
+	}
+	var observations, pendingSubmits int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM device_observations").Scan(&observations); err != nil || observations != observationsBefore {
+		t.Fatalf("observations before=%d after=%d err=%v, want no evidence from the rate-limited read", observationsBefore, observations, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&pendingSubmits); err != nil || pendingSubmits != 0 {
+		t.Fatalf("pending submits=%d err=%v, want no retry submission", pendingSubmits, err)
+	}
+	repaired, err := persistence.RepairExpiredDueWork(ctx, pool, now.Add(2*time.Minute), 1)
+	if err != nil || len(repaired) != 1 || repaired[0] != dueID {
+		t.Fatalf("repaired=%v err=%v, want rate-limited work %s", repaired, err, dueID)
+	}
+	var repairedCommand, repairedState string
+	var repairedGeneration int64
+	if err := pool.QueryRow(ctx, "SELECT command_id::text,delivery_generation,delivery_state FROM due_work WHERE id=$1::uuid", dueID).Scan(&repairedCommand, &repairedGeneration, &repairedState); err != nil || repairedCommand != commandID || repairedGeneration != generation || repairedState != "PENDING" {
+		t.Fatalf("repaired command=%s generation=%d state=%s err=%v, want same identity pending", repairedCommand, repairedGeneration, repairedState, err)
+	}
+}
+
+type callbackStatusRecorder struct {
+	http.ResponseWriter
+	status *atomic.Int64
+}
+
+type callbackStoreRecorder struct {
+	store   eventhinthttp.Store
+	lastErr atomic.Value
+}
+
+func (store *callbackStoreRecorder) RecordEventHint(ctx context.Context, hint eventhint.Hint) (string, error) {
+	disposition, err := store.store.RecordEventHint(ctx, hint)
+	if err != nil {
+		store.lastErr.Store(err.Error())
+	}
+	return disposition, err
+}
+
+func (store *callbackStoreRecorder) QuarantineEventHint(ctx context.Context, body []byte, reason string, receivedAt time.Time) error {
+	return store.store.QuarantineEventHint(ctx, body, reason, receivedAt)
+}
+
+func (store *callbackStoreRecorder) LastError() string {
+	if value := store.lastErr.Load(); value != nil {
+		return value.(string)
+	}
+	return ""
+}
+
+func (writer *callbackStatusRecorder) WriteHeader(status int) {
+	writer.status.Store(int64(status))
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *callbackStatusRecorder) Write(body []byte) (int, error) {
+	if writer.status.Load() == 0 {
+		writer.status.Store(http.StatusOK)
+	}
+	return writer.ResponseWriter.Write(body)
+}
+
+// TestComposedHarnessAdminProvenAbsentCreatesFencedChildAttempt proves that
+// an administrator can authorize a replacement only after a retained real
+// simulator run has no matching request evidence. The durable retry still
+// carries the normal revision, lease, and reservation fences.
+func TestComposedHarnessAdminProvenAbsentCreatesFencedChildAttempt(t *testing.T) {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelSetup()
+	harness := testpostgres.New(t)
+	settings := config.PostgreSQL{ApplicationDSN: harness.ScopedDSN(t), MigrationDSN: harness.ScopedDSN(t), MaxConns: 2, AcquireTimeout: 15 * time.Second, TransactionTimeout: 10 * time.Second, StatementTimeout: 5 * time.Second, MaxConnLifetime: time.Minute, MaxConnIdleTime: time.Minute}
+	root := repositoryRoot(t)
+	if err := persistence.RunMigrations(setupCtx, settings, os.DirFS(filepath.Join(root, "db", "migrations"))); err != nil {
+		t.Fatalf("migrate composed admin-absence schema: %v", err)
+	}
+	pool := harness.OpenPool(t)
+	fixture, err := executionfixture.Seed(setupCtx, pool)
+	if err != nil {
+		t.Fatalf("seed durable fixture: %v", err)
+	}
+	if err := executionfixture.PrepareAdmission(setupCtx, pool, fixture, 7); err != nil {
+		t.Fatalf("prepare durable fixture: %v", err)
+	}
+	if err := executionfixture.SeedPolicySnapshot(setupCtx, pool, fixture); err != nil {
+		t.Fatalf("seed durable policy snapshot: %v", err)
+	}
+
+	runRoot := t.TempDir()
+	address, adminAddress := freeAddress(t), freeAddress(t)
+	adminSecret := "fault-harness-admin-absence-secret"
+	simulatorPath := filepath.Join(runRoot, "redfish-simulator")
+	if runtime.GOOS == "windows" {
+		simulatorPath += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", simulatorPath, "./cmd/redfish-simulator")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build admin-absence simulator: %v: %s", err, output)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var output limitedBuffer
+	command := exec.CommandContext(ctx, simulatorPath)
+	command.Env = append(os.Environ(),
+		"FLEETFORGE_ENV=test",
+		"FLEETFORGE_SIMULATOR_ADDR="+address,
+		"FLEETFORGE_SIMULATOR_ADMIN_ADDR="+adminAddress,
+		"FLEETFORGE_SIMULATOR_RUN_ROOT="+runRoot,
+		"FLEETFORGE_SIMULATOR_SCENARIO_PATH="+filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"),
+		"FLEETFORGE_SIMULATOR_USERNAME=fault-harness",
+		"FLEETFORGE_SIMULATOR_PASSWORD=fault-harness-password",
+		"FLEETFORGE_SIMULATOR_ADMIN_SECRET="+adminSecret,
+	)
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Start(); err != nil {
+		t.Fatalf("start admin-absence simulator: %v", err)
+	}
+	t.Cleanup(func() { stopSimulator(command) })
+	waitForStatus(t, ctx, "http://"+address+"/health/ready", http.Header{}, http.StatusOK)
+	headers := http.Header{"X-FleetForge-Simulator-Admin": []string{adminSecret}}
+	journalStatus := waitForJSON(t, ctx, "http://"+adminAddress+"/admin/v1/journal", headers)
+	if entries, ok := journalStatus["entries"].(float64); !ok || entries != 0 {
+		t.Fatalf("admin absence journal entries=%v, want no target request evidence; simulator output=%s", journalStatus["entries"], output.String())
+	}
+
+	initial := executionfixture.AdmissionRequest(fixture, "5203")
+	if err := persistence.AdmitOperation(ctx, pool, initial); err != nil {
+		t.Fatalf("admit initial ambiguous attempt: %v", err)
+	}
+	adapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	submit, claimed, err := adapter.ClaimSubmitWork(ctx, "admin-absence-harness", "00000000-0000-4000-8000-000000000203")
+	if err != nil || !claimed {
+		t.Fatalf("claim initial submit work=%+v claimed=%t err=%v", submit, claimed, err)
+	}
+	if err := adapter.CommitSubmitResult(ctx, submit, execution.SubmitResult{Class: execution.SubmitPossiblyAccepted, ResponseFingerprint: harnessDigest('d'), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("persist ambiguous result: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := adapter.ResolveAttention(ctx, execution.AdminResolutionCommand{
+		Principal: execution.VerifiedPrincipal{Subject: "admin", IssuerClass: "local-test", Roles: []string{"firmware:resolve"}, Verified: true, AuthenticatedAt: now, ExpiresAt: now.Add(time.Minute)},
+		Work:      execution.WorkFence{CommandID: "00000000-0000-0000-5203-000000000098", ExpectedRevision: 2}, AttemptID: initial.FirmwareAttempt.AttemptID,
+		Action: "RETRY_PROVEN_ABSENT", Reason: "harness.proven_absent", EvidenceFingerprint: harnessDigest('e'), JournalConfirmedAbsent: true, LateCallerExcluded: true,
+		LateCallerExclusionMethod: "retained-journal-empty", ProofReference: "simulator://retained-empty-journal", Now: now,
+	}); err != nil {
+		t.Fatalf("persist administrator proven-absent resolution: %v", err)
+	}
+	retry, claimed, err := adapter.ClaimPrecheckWork(ctx, "admin-absence-harness", "00000000-0000-4000-8000-000000000204")
+	if err != nil || !claimed {
+		t.Fatalf("claim administrator retry work=%+v claimed=%t err=%v", retry, claimed, err)
+	}
+	child := executionfixture.AdmissionRequest(fixture, "5204")
+	child.AdmissionID, child.CommandID, child.ExpectedTargetRevision, child.CapturedCommandEpoch = initial.AdmissionID, retry.CommandID, retry.ExpectedRevision, 7
+	child.ExpectedTargetState, child.NextTargetState, child.RetryParentAttemptID = "RETRY_WAIT", "SUBMITTING", initial.FirmwareAttempt.AttemptID
+	child.ClaimedWorkID, child.ClaimedLeaseToken, child.ClaimedDeliveryGeneration = retry.DueWorkID, retry.LeaseToken, retry.DeliveryGeneration
+	child.DueWorkID, child.FirmwareAttempt.AttemptID, child.StepAttemptID = "00000000-0000-0000-5204-000000000099", "00000000-0000-0000-5204-000000000010", "00000000-0000-0000-5204-000000000011"
+	if err := persistence.AdmitRetryOperation(ctx, pool, child); err != nil {
+		t.Fatalf("admit administrator-authorized child: %v", err)
+	}
+	assertExactlyOneChildAdmission(t, ctx, pool, initial.AdmissionID, initial.FirmwareAttempt.AttemptID, child.FirmwareAttempt.AttemptID, retry)
+	childSubmit, claimed, err := adapter.ClaimSubmitWork(ctx, "admin-absence-harness", "00000000-0000-4000-8000-000000000205")
+	if err != nil || !claimed {
+		t.Fatalf("claim child submit work=%+v claimed=%t err=%v", childSubmit, claimed, err)
+	}
+	loaded, err := adapter.LoadAttempt(ctx, childSubmit)
+	if err != nil || loaded.AttemptID != child.FirmwareAttempt.AttemptID || loaded.ParentAttemptID != initial.FirmwareAttempt.AttemptID {
+		t.Fatalf("loaded child attempt=%+v err=%v", loaded, err)
+	}
+	recordFaultEvidence(t, filepath.Join(root, "test", "fixtures", "simulator", "v1", "accepted-harness.json"), "retained empty journal permits exactly one fenced administrator-authorized child", "P05-F16")
+}
+
+func stopSimulator(command *exec.Cmd) {
+	if command == nil || command.Process == nil {
+		return
+	}
+	_ = command.Process.Signal(os.Interrupt)
+	_ = command.Wait()
+}
+
+func harnessDigest(character byte) string {
+	return "sha256:" + string(bytes.Repeat([]byte{character}, 64))
+}
+
+func submitAcceptedUpdate(t *testing.T, ctx context.Context, address, scenarioPath string) {
+	t.Helper()
+	input := readScenario(t, scenarioPath)
+	assertAcceptanceFleet(t, input)
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("firmware-harness-artifact")
+	digest := sha256.Sum256(body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/UpdateService/update", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-FleetForge-Expected-Version", "1.1")
+	request.Header.Set("X-FleetForge-Artifact-SHA256", hex.EncodeToString(digest[:]))
+	request.Header.Set("X-FleetForge-Attempt", "harness-attempt-1")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("update status=%d, want %d: %s", response.StatusCode, http.StatusAccepted, responseBody)
+	}
+}
+
+func subscribeCallback(t *testing.T, ctx context.Context, address, targetID, destination string) {
+	t.Helper()
+	body := []byte(`{"Destination":"` + destination + `","Protocol":"Redfish","SubscriptionType":"RedfishEvent"}`)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/EventService/Subscriptions", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("subscribe status=%d", response.StatusCode)
+	}
+}
+
+func submitAcceptedUpdateForAttempt(t *testing.T, ctx context.Context, address string, input scenario.Scenario, attemptID string) string {
+	t.Helper()
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("firmware-callback-artifact")
+	digest := sha256.Sum256(body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/UpdateService/update", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-FleetForge-Expected-Version", "1.1")
+	request.Header.Set("X-FleetForge-Artifact-SHA256", hex.EncodeToString(digest[:]))
+	request.Header.Set("X-FleetForge-Attempt", attemptID)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("update status=%d", response.StatusCode)
+	}
+	if location := response.Header.Get("Location"); location != "" {
+		prefix := "/virtual-bmcs/" + targetID
+		if strings.HasPrefix(location, prefix) {
+			return strings.TrimPrefix(location, prefix)
+		}
+		t.Fatalf("accepted update location=%q, want virtual BMC task URI", location)
+	}
+	t.Fatal("accepted update omitted task Location")
+	return ""
+}
+
+func submitExpectedTransportLoss(t *testing.T, ctx context.Context, address, scenarioPath, attemptID string) {
+	t.Helper()
+	input := readScenario(t, scenarioPath)
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("firmware-prewrite-artifact")
+	digest := sha256.Sum256(body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/UpdateService/update", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-FleetForge-Expected-Version", "1.1")
+	request.Header.Set("X-FleetForge-Artifact-SHA256", hex.EncodeToString(digest[:]))
+	request.Header.Set("X-FleetForge-Attempt", attemptID)
+	response, err := http.DefaultClient.Do(request)
+	if err == nil {
+		response.Body.Close()
+		t.Fatal("RF-F06 update unexpectedly returned a response")
+	}
+}
+
+func submitExpectedPostAcceptTransportLoss(t *testing.T, ctx context.Context, address, scenarioPath, attemptID string, body []byte) {
+	t.Helper()
+	input := readScenario(t, scenarioPath)
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/virtual-bmcs/"+targetID+"/redfish/v1/UpdateService/update", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("fault-harness", "fault-harness-password")
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-FleetForge-Expected-Version", "1.1")
+	request.Header.Set("X-FleetForge-Artifact-SHA256", hex.EncodeToString(digest[:]))
+	request.Header.Set("X-FleetForge-Attempt", attemptID)
+	response, err := http.DefaultClient.Do(request)
+	if err == nil {
+		response.Body.Close()
+		t.Fatal("RF-F07 update unexpectedly returned a response")
+	}
+}
+
+func writePrewriteFailureScenario(t *testing.T, directory, source string) string {
+	t.Helper()
+	input := readScenario(t, source)
+	input.ScenarioID = "p05-prewrite-failure"
+	input.Seed = "5201"
+	input.Faults = append(input.Faults, scenario.Fault{FaultID: "prewrite-loss", Name: "RF-F06", Scope: "all", Trigger: scenario.Trigger{Kind: "logical_time", Value: 0}, Consumption: 1, Priority: 1})
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "prewrite-failure.json")
+	if err := os.WriteFile(path, append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func assertExactlyOneChildAdmission(t *testing.T, ctx context.Context, pool *pgxpool.Pool, admissionID, parentAttemptID, childAttemptID string, retry execution.WorkFence) {
+	t.Helper()
+	var parent, active, state, delivery, submitCommandID string
+	var children, reservations, submits int
+	if err := pool.QueryRow(ctx, `SELECT a.parent_attempt_id::text,s.active_attempt_id::text,tu.state
+FROM firmware_update_attempts a JOIN submission_admissions s ON s.id=a.submission_admission_id
+JOIN target_updates tu ON tu.id=a.target_update_id WHERE a.id=$1::uuid`, childAttemptID).Scan(&parent, &active, &state); err != nil {
+		t.Fatal(err)
+	}
+	if parent != parentAttemptID || active != childAttemptID || state != "SUBMITTING" {
+		t.Fatalf("child parent=%s active=%s state=%s", parent, active, state)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM firmware_update_attempts WHERE submission_admission_id=$1::uuid AND parent_attempt_id IS NOT NULL", admissionID).Scan(&children); err != nil || children != 1 {
+		t.Fatalf("children=%d err=%v, want one", children, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM operation_reservations WHERE admission_id=$1::uuid", admissionID).Scan(&reservations); err != nil || reservations != 3 {
+		t.Fatalf("reservations=%d err=%v, want three retained", reservations, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1::uuid", retry.DueWorkID).Scan(&delivery); err != nil || delivery != "COMPLETED" {
+		t.Fatalf("retry delivery=%s err=%v, want completed", delivery, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&submits); err != nil || submits != 1 {
+		t.Fatalf("pending submits=%d err=%v, want one child", submits, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT command_id::text FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&submitCommandID); err != nil || submitCommandID == retry.CommandID {
+		t.Fatalf("child submit command=%s err=%v, want distinct retry identity", submitCommandID, err)
+	}
+}
+
+func readScenario(t *testing.T, scenarioPath string) scenario.Scenario {
+	t.Helper()
+	rawScenario, err := os.ReadFile(scenarioPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := scenario.Decode(rawScenario)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return input
+}
+
+func assertFirmwareVersion(t *testing.T, ctx context.Context, address, scenarioPath, want string) {
+	t.Helper()
+	input := readScenario(t, scenarioPath)
+	targetID, err := scenario.ID(input, "target", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := "http://" + address + "/virtual-bmcs/" + targetID + "/redfish/v1/UpdateService/FirmwareInventory/BMC"
+	for {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.SetBasicAuth("fault-harness", "fault-harness-password")
+		response, err := http.DefaultClient.Do(request)
+		if err == nil {
+			var body map[string]any
+			decodeErr := json.NewDecoder(response.Body).Decode(&body)
+			response.Body.Close()
+			if decodeErr == nil && body["Version"] == want {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("wait for restored firmware version %q: %v", want, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func assertAcceptanceFleet(t *testing.T, input scenario.Scenario) {
+	t.Helper()
+	if len(input.Targets) < 6 || len(input.Targets) > 10 {
+		t.Fatalf("acceptance scenario targets=%d, want 6 through 10", len(input.Targets))
+	}
+	racks := make(map[string]struct{}, len(input.Targets))
+	for _, target := range input.Targets {
+		racks[target.Rack] = struct{}{}
+	}
+	if len(racks) < 2 {
+		t.Fatalf("acceptance scenario racks=%d, want at least two", len(racks))
+	}
+}
+
+func assertRetainedAcceptance(t *testing.T, runRoot string) {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(runRoot, "*", "journal.jsonl"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("retained journal paths=%v err=%v", paths, err)
+	}
+	entries, err := journal.Load(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	received, accepted := -1, -1
+	for index, entry := range entries {
+		if entry.Payload.CorrelationID != "harness-attempt-1" {
+			continue
+		}
+		if entry.Kind == journal.RequestReceived {
+			received = index
+		}
+		if entry.Kind == journal.UpdateAccepted {
+			accepted = index
+		}
+	}
+	if received < 0 || accepted < 0 || received >= accepted {
+		t.Fatalf("retained acceptance ordering received=%d accepted=%d", received, accepted)
+	}
+}
+
+func retainedAcceptanceForAttempt(t *testing.T, runRoot, attemptID string) execution.AcceptanceJournal {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(runRoot, "*", "journal.jsonl"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("retained journal paths=%v err=%v", paths, err)
+	}
+	entries, err := journal.Load(paths[0])
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("load retained RF-F07 journal entries=%d err=%v", len(entries), err)
+	}
+	acceptance := execution.AcceptanceJournal{RunID: entries[0].RunID, CheckpointHash: "sha256:" + entries[len(entries)-1].Hash}
+	for _, entry := range entries {
+		if entry.Payload.CorrelationID != attemptID || (entry.Kind != journal.RequestReceived && entry.Kind != journal.UpdateAccepted) {
+			continue
+		}
+		acceptance.Entries = append(acceptance.Entries, execution.AcceptanceEntry{AttemptID: attemptID, RequestFingerprint: "sha256:" + entry.Payload.Fingerprint, Received: entry.Kind == journal.RequestReceived, Accepted: entry.Kind == journal.UpdateAccepted, Sequence: int64(entry.Sequence)})
+	}
+	if len(acceptance.Entries) == 0 {
+		t.Fatalf("retained RF-F07 journal has no evidence for attempt %s", attemptID)
+	}
+	return acceptance
+}
+
+type retainedJournalReader struct{ journal execution.AcceptanceJournal }
+
+func (reader retainedJournalReader) ReadAcceptance(_ context.Context, runID, _ string, _, _ time.Time) (execution.AcceptanceJournal, error) {
+	if runID != reader.journal.RunID {
+		return execution.AcceptanceJournal{}, fmt.Errorf("unexpected simulator run %q", runID)
+	}
+	return reader.journal, nil
+}
+
+func assertDuplicateRequestControlFails(t *testing.T, runRoot string) {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(runRoot, "*", "journal.jsonl"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("retained journal paths=%v err=%v", paths, err)
+	}
+	entries, err := journal.Load(paths[0])
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("load retained duplicate-control journal entries=%d err=%v", len(entries), err)
+	}
+	acceptance := execution.AcceptanceJournal{RunID: entries[0].RunID, CheckpointHash: "sha256:" + entries[len(entries)-1].Hash}
+	requestFingerprint := ""
+	for _, entry := range entries {
+		if entry.Payload.CorrelationID != "harness-attempt-1" {
+			continue
+		}
+		if requestFingerprint == "" {
+			requestFingerprint = "sha256:" + entry.Payload.Fingerprint
+		}
+		if entry.Kind == journal.RequestReceived || entry.Kind == journal.UpdateAccepted {
+			acceptance.Entries = append(acceptance.Entries, execution.AcceptanceEntry{
+				AttemptID:          entry.Payload.CorrelationID,
+				RequestFingerprint: "sha256:" + entry.Payload.Fingerprint,
+				Received:           entry.Kind == journal.RequestReceived,
+				Accepted:           entry.Kind == journal.UpdateAccepted,
+				Sequence:           int64(entry.Sequence),
+			})
+		}
+	}
+	if requestFingerprint == "" {
+		t.Fatal("duplicate-control journal has no request fingerprint")
+	}
+	err = execution.VerifyIndependentJournal([]execution.OracleAttempt{{
+		AttemptID:          "harness-attempt-1",
+		IntendedUpdateID:   "harness-target-update-1",
+		RequestFingerprint: requestFingerprint,
+		Resolution:         "ACCEPTED",
+	}}, acceptance)
+	if err == nil {
+		t.Fatal("duplicate request negative control unexpectedly passed the independent journal oracle")
+	}
+}
+
+func assertFalseProvenAbsentControlFails(t *testing.T, runRoot string) {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(runRoot, "*", "journal.jsonl"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("retained journal paths=%v err=%v", paths, err)
+	}
+	entries, err := journal.Load(paths[0])
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("load retained false-absence-control journal entries=%d err=%v", len(entries), err)
+	}
+	acceptance := execution.AcceptanceJournal{RunID: entries[0].RunID, CheckpointHash: "sha256:" + entries[len(entries)-1].Hash}
+	requestFingerprint := ""
+	for _, entry := range entries {
+		if entry.Payload.CorrelationID != "harness-attempt-1" {
+			continue
+		}
+		if requestFingerprint == "" {
+			requestFingerprint = "sha256:" + entry.Payload.Fingerprint
+		}
+		if entry.Kind == journal.RequestReceived || entry.Kind == journal.UpdateAccepted {
+			acceptance.Entries = append(acceptance.Entries, execution.AcceptanceEntry{
+				AttemptID:          entry.Payload.CorrelationID,
+				RequestFingerprint: "sha256:" + entry.Payload.Fingerprint,
+				Received:           entry.Kind == journal.RequestReceived,
+				Accepted:           entry.Kind == journal.UpdateAccepted,
+				Sequence:           int64(entry.Sequence),
+			})
+		}
+	}
+	if requestFingerprint == "" {
+		t.Fatal("false-absence-control journal has no request fingerprint")
+	}
+	err = execution.VerifyIndependentJournal([]execution.OracleAttempt{{
+		AttemptID:          "harness-attempt-1",
+		IntendedUpdateID:   "harness-target-update-1",
+		RequestFingerprint: requestFingerprint,
+		Resolution:         "PROVEN_ABSENT",
+		LateCallerExcluded: true,
+	}}, acceptance)
+	if err == nil {
+		t.Fatal("false proven-absent negative control unexpectedly passed the independent journal oracle")
+	}
+}
+
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+func freeAddress(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	return listener.Addr().String()
+}
+func waitForStatus(t *testing.T, ctx context.Context, url string, headers http.Header, want int) {
+	t.Helper()
+	for {
+		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		request.Header = headers
+		response, err := http.DefaultClient.Do(request)
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode == want {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("wait for %s: %v", url, ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+func waitForJSON(t *testing.T, ctx context.Context, url string, headers http.Header) map[string]any {
+	t.Helper()
+	waitForStatus(t, ctx, url, headers, http.StatusOK)
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	request.Header = headers
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+type limitedBuffer struct{ bytes.Buffer }
+
+func (b *limitedBuffer) Write(value []byte) (int, error) {
+	const max = 8192
+	if b.Len() < max {
+		_, _ = b.Buffer.Write(value[:min(len(value), max-b.Len())])
+	}
+	return len(value), nil
+}
+func min(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
+}

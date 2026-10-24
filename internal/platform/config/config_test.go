@@ -72,6 +72,27 @@ func TestLoadDiscoveryWorkerRedactsCredentialInput(t *testing.T) {
 	}
 }
 
+func TestLoadPrecheckWorkerDoesNotRequireArtifactStore(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv(objectStoreRootKey, "")
+	t.Setenv("FLEETFORGE_PRECHECK_ALLOWED_CIDRS", "127.0.0.0/8")
+	t.Setenv("FLEETFORGE_PRECHECK_CREDENTIALS_JSON", `{"rack-a":{"username":"sim-user","password":"test-secret"}}`)
+	loaded, err := LoadPrecheckWorker()
+	if err != nil || loaded.Owner == "" || len(loaded.AllowedCIDRs) != 1 || len(loaded.Credentials) != 1 {
+		t.Fatalf("LoadPrecheckWorker()=%#v err=%v", loaded, err)
+	}
+}
+
+func TestLoadReconciliationWorkerUsesOnlyRetainedJournalConfiguration(t *testing.T) {
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv("FLEETFORGE_RECONCILIATION_JOURNAL_PATH", t.TempDir()+"/journal.jsonl")
+	t.Setenv("FLEETFORGE_RECONCILIATION_RUN_ID", "simulation-run-1")
+	loaded, err := LoadReconciliationWorker()
+	if err != nil || loaded.Owner == "" || loaded.JournalPath == "" || loaded.RunID != "simulation-run-1" {
+		t.Fatalf("LoadReconciliationWorker()=%#v err=%v", loaded, err)
+	}
+}
+
 func TestLoadObjectStoreRedactsInvalidSecret(t *testing.T) {
 	const secret = "credential-that-must-not-appear"
 	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")

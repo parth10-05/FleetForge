@@ -42,7 +42,7 @@ func (a WakeupWorkAdapter) Claim(ctx context.Context, envelope orchestration.Env
 	if !owned {
 		return orchestration.ClaimedWork{}, orchestration.ClaimIgnored, nil
 	}
-	return orchestration.ClaimedWork{DueWorkID: claimed.ID, CommandID: claimed.CommandID, LeaseToken: claimed.LeaseToken, WorkType: claimed.WorkType, DeliveryGeneration: claimed.DeliveryGeneration, ExpectedRevision: claimed.ExpectedRevision, ExpectedCommandEpoch: claimed.ExpectedCommandEpoch}, orchestration.ClaimOwned, nil
+	return orchestration.ClaimedWork{DueWorkID: claimed.ID, CommandID: claimed.CommandID, LeaseToken: claimed.LeaseToken, WorkType: claimed.WorkType, QueueClass: envelope.QueueClass, DeliveryGeneration: claimed.DeliveryGeneration, ExpectedRevision: claimed.ExpectedRevision, ExpectedCommandEpoch: claimed.ExpectedCommandEpoch}, orchestration.ClaimOwned, nil
 }
 
 func (a WakeupWorkAdapter) Complete(ctx context.Context, work orchestration.ClaimedWork) error {
