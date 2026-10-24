@@ -65,6 +65,7 @@ func TestPersistedOracleRejectsReceivedOperationClaimedProvenAbsent(t *testing.T
 }
 
 func TestAdminTerminalDispositionPreservesOrReleasesThreeScopeCapacity(t *testing.T) {
+	recordP05PostgresEvidence(t, "P05-F20", "terminal disposition preserves quarantine or releases only proof-backed capacity")
 	for _, tc := range []struct {
 		name, disposition, proof                    string
 		wantQuarantined, wantReleased, wantCapacity int

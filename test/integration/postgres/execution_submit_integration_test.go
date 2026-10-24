@@ -55,6 +55,7 @@ WHERE a.id=$1::uuid`, attempt.AttemptID).Scan(&status, &state, &revision, &deliv
 }
 
 func TestFencedAmbiguousSubmitSchedulesReconciliationWithoutSecondSubmit(t *testing.T) {
+	recordP05PostgresEvidence(t, "P05-F21", "ambiguous submit schedules reconciliation without a second target submission")
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	prepareAdmissionFixture(t, pool, ctx, fixture, 7)

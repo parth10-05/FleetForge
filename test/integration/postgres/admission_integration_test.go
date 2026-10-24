@@ -83,6 +83,7 @@ WHERE a.id=$1::uuid`, req.FirmwareAttempt.AttemptID).Scan(&status, &revision, &i
 }
 
 func TestAdmissionStaleEpochRollsBackCapacityAndEvidence(t *testing.T) {
+	recordP05PostgresEvidence(t, "P05-F18", "stale epoch admission rolls back capacity and durable evidence atomically")
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	prepareAdmissionFixture(t, pool, ctx, fixture, 8)
@@ -138,6 +139,7 @@ func TestAdmissionBlockedByCommittedPause(t *testing.T) {
 // releases an already committed device-operation intent. The existing SUBMIT
 // work remains visible for reconciliation/observation and capacity stays held.
 func TestCommittedPauseAfterAdmissionRetainsResidualExposure(t *testing.T) {
+	recordP05PostgresEvidence(t, "P05-F19", "pause after admission retains existing submission exposure and reservations")
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	prepareAdmissionFixture(t, pool, ctx, fixture, 7)

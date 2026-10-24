@@ -15,6 +15,7 @@ import (
 )
 
 func TestDueWorkClaimFencesStaleCompletion(t *testing.T) {
+	recordP05PostgresEvidence(t, "P05-F17", "stale worker completion is rejected by the durable lease fence")
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)
 	now := time.Now().UTC()

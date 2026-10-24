@@ -76,6 +76,7 @@ jobs:
           go test -json -tags=postgresintegration -count=1 ./test/integration/postgres/... | tee test-results/postgres-integration.json
         env:
           FLEETFORGE_TEST_POSTGRES_DSN: postgres://fleetforge_test:fleetforge_test@localhost:5432/fleetforge_test?sslmode=disable
+          FLEETFORGE_POSTGRES_EVIDENCE_DIR: ${{ runner.temp }}/fleetforge-fault-evidence
       - run: |
           set -o pipefail
           mkdir -p test-results
