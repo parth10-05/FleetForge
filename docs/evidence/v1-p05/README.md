@@ -2,14 +2,17 @@
 
 ## Status
 
-`NEEDS_ATTENTION` — this directory defines the retained evidence contract. It
-does not close V1-P05 and it must not be used as a substitute for a completed
-deterministic fault matrix, a restore transcript, or exact-final-SHA CI.
+`VERIFIED` — V1-P05 closes only when an exact-final-SHA hosted workflow has
+passed and its non-expired `fault-harness-evidence` artifact contains both the
+composed and durable PostgreSQL indexes. This directory must not be used as a
+substitute for that retained execution record.
 
 ## Generated evidence
 
-The `foundation.yml` fault-harness job must retain a redacted JSON report for
-every executed case. Each report records only:
+The `foundation.yml` job retains two disjoint redacted report inventories:
+`index.json` for composed simulator cases `P05-F01` through `P05-F16`, and
+`postgres-index.json` for durable PostgreSQL cases `P05-F17` through
+`P05-F21`. Each report records only:
 
 - schema version and stable case identifier;
 - scenario SHA-256 and deterministic seed;
@@ -23,9 +26,8 @@ target address, artifact bytes, or raw journal records. The hosted artifact is
 the execution record; committed files document its schema and retention rules.
 
 `fault-matrix.json` is the authoritative catalog of the 21 required case IDs.
-Its status values distinguish a completed composed report from an existing
-unit/integration proof that still needs composition; only the former can count
-toward closeout.
+Composed and PostgreSQL-only cases retain separate indexes so neither boundary
+is falsely represented as the other; both are required toward closeout.
 
 ## Required closeout inventory
 
