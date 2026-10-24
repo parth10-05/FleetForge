@@ -2,12 +2,17 @@
 
 ## Goal
 
-Expose only the operator flows required for the v1 demo through a versioned, OIDC-authenticated API and a repeatable CLI/script. This is a thin Phase 10 slice, not completion of the full API or browser console.
+Expose only the operator flows required for the v1 demo through a versioned,
+locally authenticated API and a repeatable CLI/script. Under ADR-040, v1 uses
+only a repository-configured local synthetic HS256 bearer-token verifier; it
+does not establish Cognito, OIDC discovery, JWKS, asymmetric JWT, browser, or
+external identity-provider compatibility. This is a thin Phase 10 slice, not
+completion of the full API or browser console.
 
 ## Tasks
 
 - [ ] **V1-P06-T01** Publish a minimal OpenAPI 3.1 contract and lint it in CI. Include health/version, targets/discovery, artifact initiate/status, campaign create/validate/start/pause, campaign status/audit, and attention resolution endpoints.
-- [ ] **V1-P06-T02** Implement isolated Cognito-compatible OIDC validation against a local test issuer for issuer, audience, signature, expiry, `auth_time`, and role mapping. Keep provider types/tokens outside domain/application rules and redact authentication errors.
+- [ ] **V1-P06-T02** Implement ADR-040 local synthetic HS256 validation for configured issuer, audience, signature, expiry, `auth_time`, and role mapping. Keep provider types/tokens outside domain/application rules, redact authentication errors, and make no Cognito/OIDC/JWKS compatibility claim.
 - [ ] **V1-P06-T03** Enforce deny-by-default roles: viewer reads, operator performs draft/validate/start/pause, admin registers targets/artifacts and resolves attention. Prevent resource existence leaks.
 - [ ] **V1-P06-T04** Require `Idempotency-Key` for every mutation and expected revision where a state race is possible. Exact duplicates replay a stable result; same key/different request returns a safe conflict.
 - [ ] **V1-P06-T05** Map each handler to exactly one application command/query. No handler may run Redfish I/O, transition state directly, or wait for firmware completion; asynchronous actions return a safe operation/resource reference.

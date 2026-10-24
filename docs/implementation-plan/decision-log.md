@@ -50,7 +50,7 @@ This log tracks implementation decisions that must remain explicit. Create one A
 | ADR-022 | Ambiguity evidence hierarchy/proof-of-absence policy | 09 | Safety, synthetic-target observability, operator burden | Conservative hierarchy; inconclusive → attention |
 | ADR-023 | Redfish event authentication/correlation | 09 | Supported target behavior, spoofing/replay | Signed secret/network isolation where available; polling remains correctness path |
 | ADR-024 | Amazon Cognito User Pools, Google sign-in, application RBAC, and browser session storage | 10/11 | Secure session/token storage, CSRF, revocation, `auth_time` recent auth | Cognito OIDC adapter; server-managed secure cookie or in-memory token flow; no localStorage by default |
-| ADR-025 | API versioning and breaking-change policy | 10 | Client compatibility, contract governance | `/v1` plus schema diff; additive within version |
+| ADR-025 | API versioning and breaking-change policy | Accepted 2026-10-24 | Client compatibility, contract governance | `/v1` plus schema diff; additive within version |
 | ADR-026 | SSE projection/resync design | 10/11 | Bounded buffers, gaps, auth | Events as hints; gap triggers authoritative refetch |
 | ADR-027 | Metrics/logs/traces backend and cardinality budget | 12 | Free limits, OTel, retention, alerts | Grafana Cloud Free via OTel with bounded labels |
 | ADR-028 | IaC state and environment topology | 13 | Security, reproducibility, cost | Remote protected state; dev/staging/demo separation |
@@ -87,6 +87,7 @@ Avoid long implementation code. Small diagrams, contract fragments, or benchmark
 - [ADR-012 — Database-enforced audit append-only boundary](../adr/ADR-012-audit-immutability-roles.md)
 - [ADR-014 — Simulator scenarios and logical time](../adr/ADR-014-simulator-scenarios-and-logical-time.md)
 - [ADR-021 — Deterministic lock order for persistence writers](../adr/ADR-021-persistence-lock-order.md)
+- [ADR-025 — API versioning and compatibility policy](../adr/ADR-025-api-versioning-and-compatibility.md)
 - [ADR-038 — Synthetic target isolation and single-owner runtime](../adr/ADR-038-simulator-isolation.md)
 - [ADR-039 — Synthetic Redfish-shaped update mechanism](../adr/ADR-039-synthetic-redfish-update-contract.md)
 
