@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := verify
 
-.PHONY: format lint test test-race build domain-test domain-property-test postgres-integration-test redfish-fuzz-test sqlc-generate web-typecheck web-lint web-test web-build container-build secret-scan verify
+.PHONY: format lint test test-race build domain-test domain-property-test postgres-integration-test redfish-fuzz-test sqlc-generate openapi-lint web-typecheck web-lint web-test web-build container-build secret-scan verify
 
 format:
 	go fmt ./...
@@ -30,6 +30,9 @@ redfish-fuzz-test:
 
 sqlc-generate:
 	CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+
+openapi-lint:
+	pnpm --dir web exec spectral lint --ruleset ../api/openapi/.spectral.yaml ../api/openapi/openapi.yaml
 
 build:
 	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-sweeper ./cmd/wakeup-worker ./cmd/execution-worker ./cmd/precheck-worker ./cmd/observation-worker ./cmd/reconciliation-worker

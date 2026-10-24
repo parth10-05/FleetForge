@@ -38,6 +38,7 @@ jobs:
               - '.gitleaks.toml'
               - '.github/workflows/foundation.yml'
             web:
+              - 'api/**'
               - 'web/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
@@ -129,6 +130,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir web exec spectral lint --ruleset ../api/openapi/.spectral.yaml ../api/openapi/openapi.yaml
       - run: pnpm --dir web lint
       - run: pnpm --dir web typecheck
       - run: mkdir -p test-results && pnpm --dir web test -- --reporter=json --outputFile=../test-results/web-unit.json

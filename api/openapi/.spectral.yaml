@@ -1,0 +1,23 @@
+extends: []
+
+rules:
+  fleetforge-openapi-version:
+    description: FleetForge publishes OpenAPI 3.1 contracts only.
+    given: '$'
+    then:
+      field: openapi
+      function: pattern
+      functionOptions:
+        match: '^3\\.1\\.0$'
+  fleetforge-operation-id:
+    description: Every declared operation has one stable operation ID.
+    given: '$.paths[*][get,post]'
+    then:
+      field: operationId
+      function: truthy
+  fleetforge-human-auth:
+    description: Human V1 operations declare bearer authentication.
+    given: '$.paths./v1~1targets[get,post]'
+    then:
+      field: security
+      function: truthy

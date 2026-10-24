@@ -2,6 +2,7 @@ packages:
   - web
 
 allowBuilds:
+  '@scarf/scarf': set this to true or false
   esbuild: true
 
 # Keep transitive glob parsing on patched brace-expansion releases until its
