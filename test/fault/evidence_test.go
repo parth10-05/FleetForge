@@ -94,7 +94,7 @@ func writeFaultEvidenceIndex(directory string) error {
 	}
 	reports := make([]faultEvidenceReport, 0, len(composedEvidenceCases))
 	for _, entry := range entries {
-		if entry.IsDir() || entry.Name() == "index.json" || strings.HasSuffix(entry.Name(), ".tmp") {
+		if entry.IsDir() || !isComposedEvidenceFilename(entry.Name()) {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(directory, entry.Name()))
@@ -136,6 +136,18 @@ func knownComposedEvidenceCase(caseID string) bool {
 		}
 	}
 	return false
+}
+
+func isComposedEvidenceFilename(name string) bool {
+	if len(name) != len("p05-f00.json") || !strings.HasPrefix(name, "p05-f") || !strings.HasSuffix(name, ".json") {
+		return false
+	}
+	for _, character := range name[len("p05-f"):len("p05-f00")] {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func TestMain(m *testing.M) {
