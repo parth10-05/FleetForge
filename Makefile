@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := verify
 
-.PHONY: format lint test test-race build domain-test domain-property-test postgres-integration-test redfish-fuzz-test sqlc-generate openapi-lint web-typecheck web-lint web-test web-build container-build secret-scan verify
+.PHONY: format lint test test-race build domain-test domain-property-test postgres-integration-test redfish-fuzz-test sqlc-generate openapi-lint openapi-generate openapi-generate-check web-typecheck web-lint web-test web-build container-build secret-scan verify
 
 format:
 	go fmt ./...
@@ -33,6 +33,12 @@ sqlc-generate:
 
 openapi-lint:
 	pnpm --dir web exec spectral lint --ruleset ../api/openapi/.spectral.yaml ../api/openapi/openapi.yaml
+
+openapi-generate:
+	go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1 --config api/openapi/oapi-codegen.yaml api/openapi/openapi.yaml
+
+openapi-generate-check: openapi-generate
+	git diff --exit-code -- internal/delivery/controlhttp/openapi_types.gen.go
 
 build:
 	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-sweeper ./cmd/wakeup-worker ./cmd/execution-worker ./cmd/precheck-worker ./cmd/observation-worker ./cmd/reconciliation-worker

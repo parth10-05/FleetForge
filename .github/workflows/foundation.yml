@@ -66,6 +66,7 @@ jobs:
         with:
           go-version: '1.27.0'
           cache-dependency-path: go.mod
+      - run: go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1 --config api/openapi/oapi-codegen.yaml api/openapi/openapi.yaml && git diff --exit-code -- internal/delivery/controlhttp/openapi_types.gen.go
       - run: CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate && git diff --exit-code -- internal/persistence/postgres/sqlcgen
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...

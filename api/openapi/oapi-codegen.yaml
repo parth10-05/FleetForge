@@ -1,0 +1,6 @@
+package: controlhttp
+generate:
+  models: true
+output: internal/delivery/controlhttp/openapi_types.gen.go
+output-options:
+  skip-prune: true
