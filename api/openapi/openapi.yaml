@@ -347,10 +347,11 @@ components:
     targetRegistration:
       type: object
       additionalProperties: false
-      required: [display_name, endpoint_reference, credential_reference]
+      required: [display_name, endpoint_reference, target_key, credential_reference, labels]
       properties:
         display_name: {type: string, minLength: 1, maxLength: 256}
         endpoint_reference: {type: string, minLength: 1, maxLength: 1024}
+        target_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'}
         credential_reference: {type: string, minLength: 1, maxLength: 512}
         labels:
           type: object

@@ -107,10 +107,11 @@ type TargetPage struct {
 
 // TargetRegistration defines model for targetRegistration.
 type TargetRegistration struct {
-	CredentialReference string             `json:"credential_reference"`
-	DisplayName         string             `json:"display_name"`
-	EndpointReference   string             `json:"endpoint_reference"`
-	Labels              *map[string]string `json:"labels,omitempty"`
+	CredentialReference string            `json:"credential_reference"`
+	DisplayName         string            `json:"display_name"`
+	EndpointReference   string            `json:"endpoint_reference"`
+	Labels              map[string]string `json:"labels"`
+	TargetKey           string            `json:"target_key"`
 }
 
 // Cursor defines model for cursor.
