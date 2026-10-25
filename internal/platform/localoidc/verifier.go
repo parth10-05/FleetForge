@@ -138,5 +138,4 @@ func normalizeRoles(groups []string) []string {
 	return roles
 }
 
-var _ execution.TokenVerifier = Verifier{}
 var _ access.TokenVerifier = Verifier{}

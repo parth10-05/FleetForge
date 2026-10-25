@@ -5,6 +5,8 @@ import (
 	"context"
 	"io"
 	"time"
+
+	"github.com/parth10-05/fleetforge/internal/application/access"
 )
 
 type WorkFence struct {
@@ -167,6 +169,7 @@ type VerifiedPrincipal struct {
 }
 type AdminResolutionCommand struct {
 	Principal                                      VerifiedPrincipal
+	AccessPrincipal                                access.Principal
 	Work                                           WorkFence
 	AttemptID, Action, Reason, EvidenceFingerprint string
 	ReservationDisposition                         string
@@ -222,7 +225,4 @@ type AcceptanceEntry struct {
 	AttemptID, RequestFingerprint string
 	Received, Accepted            bool
 	Sequence                      int64
-}
-type TokenVerifier interface {
-	VerifyAccessToken(context.Context, string) (VerifiedPrincipal, error)
 }
