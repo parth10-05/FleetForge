@@ -82,6 +82,8 @@ func (verifier Verifier) VerifyAccessToken(ctx context.Context, token string) (e
 		TokenUse  string   `json:"token_use"`
 		ExpiresAt int64    `json:"exp"`
 		AuthTime  int64    `json:"auth_time"`
+		IssuedAt  *int64   `json:"iat"`
+		NotBefore *int64   `json:"nbf"`
 		Groups    []string `json:"cognito:groups"`
 	}
 	if err := decode(parts[1], &claims); err != nil {
@@ -93,11 +95,15 @@ func (verifier Verifier) VerifyAccessToken(ctx context.Context, token string) (e
 	}
 	authenticated := time.Unix(claims.AuthTime, 0).UTC()
 	expires := time.Unix(claims.ExpiresAt, 0).UTC()
-	if claims.Subject == "" || claims.Issuer != verifier.Issuer || claims.TokenUse != "access" || !matchesAudience(claims.Audience, claims.ClientID, verifier.Audience) || claims.ExpiresAt <= 0 || !expires.After(now) || claims.AuthTime <= 0 || authenticated.After(now) || now.Sub(authenticated) > verifier.RecentAuth {
+	if claims.Subject == "" || claims.Issuer != verifier.Issuer || claims.TokenUse != "access" || !matchesAudience(claims.Audience, claims.ClientID, verifier.Audience) || claims.ExpiresAt <= 0 || !expires.After(now) || claims.AuthTime <= 0 || authenticated.After(now) || now.Sub(authenticated) > verifier.RecentAuth || invalidOptionalTime(claims.IssuedAt, now) || invalidOptionalTime(claims.NotBefore, now) {
 		return execution.VerifiedPrincipal{}, fmt.Errorf("access token claims are not authorized")
 	}
 	roles := normalizeRoles(claims.Groups)
 	return execution.VerifiedPrincipal{Subject: claims.Subject, IssuerClass: "local-synthetic-hs256", Roles: roles, AuthenticatedAt: authenticated, ExpiresAt: expires, Verified: true}, nil
+}
+
+func invalidOptionalTime(value *int64, now time.Time) bool {
+	return value != nil && (*value <= 0 || time.Unix(*value, 0).UTC().After(now))
 }
 
 func decode(raw string, destination any) error {

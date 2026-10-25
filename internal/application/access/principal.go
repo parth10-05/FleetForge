@@ -64,13 +64,16 @@ func MapGroupsToRoles(groups []string) ([]Role, error) {
 		case "":
 			return nil, fmt.Errorf("empty identity group")
 		default:
-			continue
+			return nil, fmt.Errorf("unknown identity group")
 		}
 		if _, exists := seen[role]; exists {
 			return nil, fmt.Errorf("duplicate identity group")
 		}
 		seen[role] = struct{}{}
 		roles = append(roles, role)
+	}
+	if len(roles) == 0 {
+		return nil, fmt.Errorf("no recognized identity groups")
 	}
 	return roles, nil
 }

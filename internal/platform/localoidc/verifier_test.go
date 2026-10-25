@@ -25,7 +25,7 @@ func TestVerifierMapsOnlyExactControlAPIGroups(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	key := []byte("01234567890123456789012345678901")
 	verifier := Verifier{Issuer: "issuer", Audience: "aud", Key: key, RecentAuth: 15 * time.Minute, Now: func() time.Time { return now }}
-	token := signedToken(t, key, map[string]any{"sub": "admin", "iss": "issuer", "client_id": "aud", "token_use": "access", "exp": now.Add(time.Hour).Unix(), "auth_time": now.Add(-time.Minute).Unix(), "cognito:groups": []string{"fleetforge-admin", "unknown"}})
+	token := signedToken(t, key, map[string]any{"sub": "admin", "iss": "issuer", "client_id": "aud", "token_use": "access", "exp": now.Add(time.Hour).Unix(), "auth_time": now.Add(-time.Minute).Unix(), "cognito:groups": []string{"fleetforge-admin"}})
 	principal, err := verifier.VerifyPrincipal(context.Background(), token)
 	if err != nil || principal.Subject != "admin" || len(principal.Roles) != 1 || string(principal.Roles[0]) != "admin" {
 		t.Fatalf("principal=%+v err=%v", principal, err)
@@ -60,6 +60,8 @@ func TestVerifierRejectsUnsupportedOrUnauthorizedTokenClaims(t *testing.T) {
 		{name: "wrong audience", header: map[string]string{"alg": "HS256", "typ": "JWT"}, claims: withClaim(valid, "client_id", "other-audience")},
 		{name: "expired", header: map[string]string{"alg": "HS256", "typ": "JWT"}, claims: withClaim(valid, "exp", now.Add(-time.Second).Unix())},
 		{name: "future authentication", header: map[string]string{"alg": "HS256", "typ": "JWT"}, claims: withClaim(valid, "auth_time", now.Add(time.Second).Unix())},
+		{name: "future issued at", header: map[string]string{"alg": "HS256", "typ": "JWT"}, claims: withClaim(valid, "iat", now.Add(time.Second).Unix())},
+		{name: "future not before", header: map[string]string{"alg": "HS256", "typ": "JWT"}, claims: withClaim(valid, "nbf", now.Add(time.Second).Unix())},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -67,6 +69,16 @@ func TestVerifierRejectsUnsupportedOrUnauthorizedTokenClaims(t *testing.T) {
 				t.Fatal("unauthorized token accepted")
 			}
 		})
+	}
+}
+
+func TestVerifierRejectsUnknownGroupsForSharedPrincipal(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	key := []byte("01234567890123456789012345678901")
+	verifier := Verifier{Issuer: "issuer", Audience: "aud", Key: key, RecentAuth: 15 * time.Minute, Now: func() time.Time { return now }}
+	token := signedToken(t, key, map[string]any{"sub": "admin", "iss": "issuer", "client_id": "aud", "token_use": "access", "exp": now.Add(time.Hour).Unix(), "auth_time": now.Add(-time.Minute).Unix(), "cognito:groups": []string{"fleetforge-admin", "unknown"}})
+	if _, err := verifier.VerifyPrincipal(context.Background(), token); err == nil {
+		t.Fatal("unknown group accepted for shared principal")
 	}
 }
 
