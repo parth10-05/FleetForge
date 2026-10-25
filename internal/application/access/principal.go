@@ -4,10 +4,17 @@
 package access
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"time"
 )
+
+// TokenVerifier is the provider-neutral verifier port used by authenticated
+// delivery adapters. Implementations must return only validated principals.
+type TokenVerifier interface {
+	VerifyPrincipal(context.Context, string) (Principal, error)
+}
 
 type Role string
 

@@ -21,6 +21,17 @@ func TestVerifierRequiresSignedRecentAdminAccessToken(t *testing.T) {
 	}
 }
 
+func TestVerifierMapsOnlyExactControlAPIGroups(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	key := []byte("01234567890123456789012345678901")
+	verifier := Verifier{Issuer: "issuer", Audience: "aud", Key: key, RecentAuth: 15 * time.Minute, Now: func() time.Time { return now }}
+	token := signedToken(t, key, map[string]any{"sub": "admin", "iss": "issuer", "client_id": "aud", "token_use": "access", "exp": now.Add(time.Hour).Unix(), "auth_time": now.Add(-time.Minute).Unix(), "cognito:groups": []string{"fleetforge-admin", "unknown"}})
+	principal, err := verifier.VerifyPrincipal(context.Background(), token)
+	if err != nil || principal.Subject != "admin" || len(principal.Roles) != 1 || string(principal.Roles[0]) != "admin" {
+		t.Fatalf("principal=%+v err=%v", principal, err)
+	}
+}
+
 func TestVerifierRejectsStaleOrTamperedToken(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	key := []byte("01234567890123456789012345678901")

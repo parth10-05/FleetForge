@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/parth10-05/fleetforge/internal/application/access"
 	"github.com/parth10-05/fleetforge/internal/application/execution"
 )
 
@@ -22,6 +23,28 @@ type Verifier struct {
 	Key              []byte
 	RecentAuth       time.Duration
 	Now              func() time.Time
+}
+
+// VerifyPrincipal exposes the ADR-040 local synthetic verifier through the
+// provider-neutral P06 access port. The existing execution-specific method is
+// retained temporarily for P05 resolution callers until their repository and
+// test fixtures migrate together.
+func (verifier Verifier) VerifyPrincipal(ctx context.Context, token string) (access.Principal, error) {
+	verified, err := verifier.VerifyAccessToken(ctx, token)
+	if err != nil {
+		return access.Principal{}, err
+	}
+	roles, err := access.MapGroupsToRoles(verified.Roles)
+	if err != nil {
+		return access.Principal{}, fmt.Errorf("map local access groups: %w", err)
+	}
+	return access.Principal{
+		Subject:         verified.Subject,
+		Roles:           roles,
+		AuthenticatedAt: verified.AuthenticatedAt,
+		ExpiresAt:       verified.ExpiresAt,
+		IssuerClass:     verified.IssuerClass,
+	}, nil
 }
 
 func (verifier Verifier) VerifyAccessToken(ctx context.Context, token string) (execution.VerifiedPrincipal, error) {
@@ -116,3 +139,4 @@ func normalizeRoles(groups []string) []string {
 }
 
 var _ execution.TokenVerifier = Verifier{}
+var _ access.TokenVerifier = Verifier{}
