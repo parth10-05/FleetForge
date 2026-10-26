@@ -36,6 +36,15 @@ func TestControlTargetRoutePersistsAtomicRegistration(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
+	replayRequest := httptest.NewRequest(http.MethodPost, "/v1/targets", strings.NewReader(`{"display_name":"rack-a","endpoint_reference":"https://simulator.example","target_key":"rack-a","credential_reference":"synthetic-test:rack-a","labels":{"site":"west","rack":"a"}}`))
+	replayRequest.Header.Set("Authorization", "Bearer admin-token")
+	replayRequest.Header.Set("Content-Type", "application/json")
+	replayRequest.Header.Set("Idempotency-Key", "target-http-registration")
+	replayRecorder := httptest.NewRecorder()
+	router.ServeHTTP(replayRecorder, replayRequest)
+	if replayRecorder.Code != http.StatusCreated || replayRecorder.Body.String() != recorder.Body.String() {
+		t.Fatalf("replay status=%d body=%s, want original=%s", replayRecorder.Code, replayRecorder.Body.String(), recorder.Body.String())
+	}
 	for _, table := range []string{"targets", "audit_events", "decision_inputs", "outbox_events"} {
 		var count int
 		query := "SELECT COUNT(*) FROM " + table
