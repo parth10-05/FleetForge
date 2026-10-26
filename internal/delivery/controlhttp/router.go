@@ -11,10 +11,19 @@ import (
 // mount internal service routes separately so bearer and HMAC credentials can
 // never become interchangeable.
 func NewRouter(verifier access.TokenVerifier, now func() time.Time) http.Handler {
+	return NewRouterWithTargets(verifier, now, nil)
+}
+
+// NewRouterWithTargets registers only command routes whose application
+// dependencies are available. Internal service routes remain outside it.
+func NewRouterWithTargets(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar) http.Handler {
 	if now == nil {
 		now = time.Now
 	}
 	mux := http.NewServeMux()
+	if targets != nil {
+		mux.Handle("POST /v1/targets", withAuthentication(verifier)(requirePermission(access.PermissionRegisterTargets, now)(registerTargetHandler(targets))))
+	}
 	mux.Handle("/v1/", withAuthentication(verifier)(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, Problem{
 			Type:          "https://fleetforge.local/problems/not-found",

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/parth10-05/fleetforge/internal/application/control"
 	"github.com/parth10-05/fleetforge/internal/delivery/controlhttp"
 	"github.com/parth10-05/fleetforge/internal/delivery/eventhinthttp"
 	"github.com/parth10-05/fleetforge/internal/delivery/healthhttp"
@@ -46,7 +47,7 @@ func run() error {
 	verifier := localoidc.Verifier{Issuer: cfg.LocalIdentity.Issuer, Audience: cfg.LocalIdentity.Audience, Key: cfg.LocalIdentity.Key, RecentAuth: cfg.LocalIdentity.RecentAuth, Now: time.Now}
 	mux := http.NewServeMux()
 	mux.Handle("/", health.Routes())
-	mux.Handle("/v1/", controlhttp.NewRouter(verifier, time.Now))
+	mux.Handle("/v1/", controlhttp.NewRouterWithTargets(verifier, time.Now, control.NewTargetService(postgres.ControlTargetAdapter{Pool: pool}, time.Now)))
 	mux.Handle("/v1/events/synthetic", eventhinthttp.New(cfg.EventHMACKey, postgres.EventHintStore{Pool: pool}, time.Now).Routes())
 	server := newServer(cfg.Address, mux)
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
