@@ -23,15 +23,26 @@ type RegistrationResult struct {
 // semantic request is stable; changing an existing external identity is never
 // an implicit update and instead returns ErrRegistrationConflict.
 func RegisterTarget(ctx context.Context, pool *pgxpool.Pool, targetID string, registration inventory.Registration) (RegistrationResult, error) {
-	id, err := uuidParameter(targetID)
-	if err != nil {
-		return RegistrationResult{}, fmt.Errorf("target registration id: %w", err)
-	}
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return RegistrationResult{}, fmt.Errorf("begin target registration: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	result, err := registerTargetInTx(ctx, tx, targetID, registration)
+	if err != nil {
+		return RegistrationResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return RegistrationResult{}, fmt.Errorf("commit target registration: %w", err)
+	}
+	return result, nil
+}
+
+func registerTargetInTx(ctx context.Context, tx pgx.Tx, targetID string, registration inventory.Registration) (RegistrationResult, error) {
+	id, err := uuidParameter(targetID)
+	if err != nil {
+		return RegistrationResult{}, fmt.Errorf("target registration id: %w", err)
+	}
 	queries := sqlcgen.New(tx)
 	labels := registration.Labels()
 	row, err := queries.RegisterTrustedTarget(ctx, sqlcgen.RegisterTrustedTargetParams{
@@ -52,9 +63,6 @@ func RegisterTarget(ctx context.Context, pool *pgxpool.Pool, targetID string, re
 				return RegistrationResult{}, fmt.Errorf("insert target label %q: %w", key, err)
 			}
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return RegistrationResult{}, fmt.Errorf("commit target registration: %w", err)
-		}
 		return RegistrationResult{TargetID: resultID, Created: true}, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -70,9 +78,6 @@ func RegisterTarget(ctx context.Context, pool *pgxpool.Pool, targetID string, re
 	resultID, err := sqlcUUIDText(existing.ID)
 	if err != nil {
 		return RegistrationResult{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return RegistrationResult{}, fmt.Errorf("commit idempotent registration: %w", err)
 	}
 	return RegistrationResult{TargetID: resultID}, nil
 }
