@@ -44,6 +44,10 @@ func TestIdempotentTargetRegistrationCommitsItsDurableEnvelope(t *testing.T) {
 	if err != nil || !found || status != 201 || storedReference != reference {
 		t.Fatalf("completed replay status=%d reference=%q found=%v err=%v", status, storedReference, found, err)
 	}
+	replay, err := persistence.ResolveTargetRegistrationReplay(ctx, pool, storedReference)
+	if err != nil || replay.TargetID != targetID || replay.CommandID != claim.CommandID || replay.Revision != 0 || replay.AcceptedAt.IsZero() {
+		t.Fatalf("replay=%+v err=%v", replay, err)
+	}
 }
 
 func TestIdempotentTargetRegistrationRejectsExistingIdentityWithAnotherTargetID(t *testing.T) {

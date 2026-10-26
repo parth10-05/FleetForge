@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,6 +20,14 @@ type IdempotentTargetRegistration struct {
 	OutboxEventID, DecisionInputID     string
 	Registration                       inventory.Registration
 	Completion                         IdempotencyCompletion
+}
+
+// TargetRegistrationReplay is the stable, secret-free source for rebuilding
+// a completed registration envelope without consulting mutable target state.
+type TargetRegistrationReplay struct {
+	TargetID, CommandID string
+	Revision            int64
+	AcceptedAt          time.Time
 }
 
 // ApplyIdempotentTargetRegistration writes a newly registered target and its
@@ -97,4 +106,22 @@ func appendTargetRegistrationEvidence(ctx context.Context, tx pgx.Tx, input Idem
 		return fmt.Errorf("append target registration outbox: %w", err)
 	}
 	return nil
+}
+
+// ResolveTargetRegistrationReplay reconstructs immutable registration response
+// fields from the completed response reference. It deliberately uses the
+// reference revision rather than the target's current mutable revision.
+func ResolveTargetRegistrationReplay(ctx context.Context, pool *pgxpool.Pool, responseReference string) (TargetRegistrationReplay, error) {
+	reference, err := DecodeResponseReference(responseReference)
+	if err != nil || reference.Operation != "target-register" {
+		return TargetRegistrationReplay{}, fmt.Errorf("invalid target registration response reference")
+	}
+	var acceptedAt time.Time
+	if err := pool.QueryRow(ctx, "SELECT created_at FROM targets WHERE id=$1::uuid", reference.ResourceID).Scan(&acceptedAt); err != nil {
+		if err == pgx.ErrNoRows {
+			return TargetRegistrationReplay{}, fmt.Errorf("target registration response not found")
+		}
+		return TargetRegistrationReplay{}, fmt.Errorf("read target registration response: %w", err)
+	}
+	return TargetRegistrationReplay{TargetID: reference.ResourceID, CommandID: reference.CommandID, Revision: reference.Revision, AcceptedAt: acceptedAt.UTC()}, nil
 }
