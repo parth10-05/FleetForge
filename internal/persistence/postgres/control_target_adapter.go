@@ -52,4 +52,16 @@ func (adapter ControlTargetAdapter) targetReplay(ctx context.Context, reference 
 	return control.TargetRegistrationResult{TargetID: replay.TargetID, CommandID: replay.CommandID, Revision: replay.Revision, AcceptedAt: replay.AcceptedAt}, nil
 }
 
+func (adapter ControlTargetAdapter) GetTarget(ctx context.Context, targetID string) (control.TargetRegistrationResult, string, error) {
+	if adapter.Pool == nil {
+		return control.TargetRegistrationResult{}, "", fmt.Errorf("target projection persistence is unavailable")
+	}
+	projection, err := GetTargetProjection(ctx, adapter.Pool, targetID)
+	if err != nil {
+		return control.TargetRegistrationResult{}, "", err
+	}
+	return control.TargetRegistrationResult{TargetID: projection.ID, Revision: projection.Revision, AcceptedAt: projection.AsOf}, projection.State, nil
+}
+
 var _ control.TargetRegistrationStore = ControlTargetAdapter{}
+var _ control.TargetProjectionReader = ControlTargetAdapter{}

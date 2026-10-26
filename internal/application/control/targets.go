@@ -36,6 +36,10 @@ type TargetRegistrationStore interface {
 	RegisterTarget(context.Context, access.Principal, CommandMeta, string, inventory.Registration) (TargetRegistrationResult, error)
 }
 
+type TargetProjectionReader interface {
+	GetTarget(context.Context, string) (TargetRegistrationResult, string, error)
+}
+
 type TargetService struct {
 	store TargetRegistrationStore
 	now   func() time.Time
@@ -60,4 +64,18 @@ func (service *TargetService) RegisterTarget(ctx context.Context, principal acce
 		return TargetRegistrationResult{}, fmt.Errorf("%w: %v", ErrInvalidTargetRegistration, err)
 	}
 	return service.store.RegisterTarget(ctx, principal, meta, command.TargetID, registration)
+}
+
+func (service *TargetService) GetTarget(ctx context.Context, principal access.Principal, targetID string) (TargetRegistrationResult, string, error) {
+	if service == nil || service.store == nil || targetID == "" {
+		return TargetRegistrationResult{}, "", ErrInvalidTargetRegistration
+	}
+	if err := access.Authorize(principal, access.PermissionReadTargets, service.now()); err != nil {
+		return TargetRegistrationResult{}, "", err
+	}
+	reader, ok := service.store.(TargetProjectionReader)
+	if !ok {
+		return TargetRegistrationResult{}, "", fmt.Errorf("target projection persistence is unavailable")
+	}
+	return reader.GetTarget(ctx, targetID)
 }
