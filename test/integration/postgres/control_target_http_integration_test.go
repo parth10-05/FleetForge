@@ -36,7 +36,8 @@ func TestControlTargetRoutePersistsAtomicRegistration(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	replayRequest := httptest.NewRequest(http.MethodPost, "/v1/targets", strings.NewReader(`{"display_name":"rack-a","endpoint_reference":"https://simulator.example","target_key":"rack-a","credential_reference":"synthetic-test:rack-a","labels":{"site":"west","rack":"a"}}`))
+	// Map order differs but the semantic request and canonical idempotency hash do not.
+	replayRequest := httptest.NewRequest(http.MethodPost, "/v1/targets", strings.NewReader(`{"display_name":"rack-a","endpoint_reference":"https://simulator.example","target_key":"rack-a","credential_reference":"synthetic-test:rack-a","labels":{"rack":"a","site":"west"}}`))
 	replayRequest.Header.Set("Authorization", "Bearer admin-token")
 	replayRequest.Header.Set("Content-Type", "application/json")
 	replayRequest.Header.Set("Idempotency-Key", "target-http-registration")
