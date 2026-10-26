@@ -11,8 +11,10 @@ import (
 )
 
 type CommandMeta struct {
-	CommandID, CorrelationID, Route, IdempotencyKey string
-	CanonicalRequest                                []byte
+	ClaimID, CommandID, CorrelationID, OwnerToken string
+	OutboxEventID, DecisionInputID                string
+	Route, IdempotencyKey                         string
+	CanonicalRequest                              []byte
 }
 
 type RegisterTargetCommand struct {
@@ -44,7 +46,7 @@ func NewTargetService(store TargetRegistrationStore, now func() time.Time) *Targ
 }
 
 func (service *TargetService) RegisterTarget(ctx context.Context, principal access.Principal, meta CommandMeta, command RegisterTargetCommand) (TargetRegistrationResult, error) {
-	if service == nil || service.store == nil || meta.CommandID == "" || meta.CorrelationID == "" || meta.Route != "/v1/targets" || meta.IdempotencyKey == "" || len(meta.CanonicalRequest) == 0 || command.TargetID == "" {
+	if service == nil || service.store == nil || meta.ClaimID == "" || meta.CommandID == "" || meta.CorrelationID == "" || meta.OwnerToken == "" || meta.OutboxEventID == "" || meta.DecisionInputID == "" || meta.Route != "/v1/targets" || meta.IdempotencyKey == "" || len(meta.CanonicalRequest) == 0 || command.TargetID == "" {
 		return TargetRegistrationResult{}, fmt.Errorf("invalid target registration command")
 	}
 	if err := access.Authorize(principal, access.PermissionRegisterTargets, service.now()); err != nil {
