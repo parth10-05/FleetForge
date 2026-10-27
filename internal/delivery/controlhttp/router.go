@@ -34,6 +34,11 @@ func NewRouterWithResources(verifier access.TokenVerifier, now func() time.Time,
 // NewRouterWithResourcesAndUpload additionally mounts artifact initiation when
 // the independent local upload endpoint has been configured.
 func NewRouterWithResourcesAndUpload(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar, artifacts artifactReader, cursorKey []byte, uploadURL string) http.Handler {
+	return NewRouterWithResourcesUploadAndCampaigns(verifier, now, targets, artifacts, nil, cursorKey, uploadURL)
+}
+
+// NewRouterWithResourcesUploadAndCampaigns mounts the available public control resources.
+func NewRouterWithResourcesUploadAndCampaigns(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar, artifacts artifactReader, campaigns campaignCreator, cursorKey []byte, uploadURL string) http.Handler {
 	if now == nil {
 		now = time.Now
 	}
@@ -55,6 +60,9 @@ func NewRouterWithResourcesAndUpload(verifier access.TokenVerifier, now func() t
 		if initiator, ok := artifacts.(artifactInitiator); ok && uploadURL != "" {
 			mux.Handle("POST /v1/artifacts:initiate", withAuthentication(verifier)(requirePermission(access.PermissionInitiateArtifacts, now)(initiateArtifactHandler(initiator, uploadURL, now))))
 		}
+	}
+	if campaigns != nil {
+		mux.Handle("POST /v1/campaigns", withAuthentication(verifier)(requirePermission(access.PermissionCreateCampaigns, now)(createCampaignHandler(campaigns))))
 	}
 	mux.Handle("/v1/", withAuthentication(verifier)(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, Problem{
