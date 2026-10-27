@@ -42,6 +42,15 @@ func TestCreateCampaignRouteRequiresOperatorAndCanonicalizesDraft(t *testing.T) 
 	if denied.Code != http.StatusForbidden || creator.calls != 1 {
 		t.Fatalf("status=%d calls=%d", denied.Code, creator.calls)
 	}
+	invalid := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/v1/campaigns", strings.NewReader(strings.Replace(body, `"strict_worst_case_capacity":false`, `"strict_worst_case_capacity":false,"unknown":true`, 1)))
+	request.Header.Set("Authorization", "Bearer operator")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(idempotencyHeader, "campaign-create-0002")
+	router.ServeHTTP(invalid, request)
+	if invalid.Code != http.StatusBadRequest || creator.calls != 1 {
+		t.Fatalf("unknown policy status=%d calls=%d", invalid.Code, creator.calls)
+	}
 }
 
 type recordingCampaignCreator struct {
