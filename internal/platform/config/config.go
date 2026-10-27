@@ -20,6 +20,7 @@ import (
 const (
 	apiAddressKey                     = "FLEETFORGE_API_ADDR"
 	apiEventHMACSecretKey             = "FLEETFORGE_API_EVENT_HMAC_SECRET"
+	apiCursorHMACSecretKey            = "FLEETFORGE_API_CURSOR_HMAC_SECRET"
 	apiLocalAuthIssuerKey             = "FLEETFORGE_LOCAL_AUTH_ISSUER"
 	apiLocalAuthAudienceKey           = "FLEETFORGE_LOCAL_AUTH_AUDIENCE"
 	apiLocalAuthKeyKey                = "FLEETFORGE_LOCAL_AUTH_KEY"
@@ -65,6 +66,7 @@ type API struct {
 	Common
 	Address       string
 	EventHMACKey  []byte
+	CursorHMACKey []byte
 	LocalIdentity LocalIdentity
 }
 type LocalIdentity struct {
@@ -163,11 +165,15 @@ func LoadAPI() (API, error) {
 	if err != nil {
 		return API{}, err
 	}
+	cursorKey, err := requiredHMACKey(os.LookupEnv, apiCursorHMACSecretKey)
+	if err != nil {
+		return API{}, err
+	}
 	identity, err := loadLocalIdentity(os.LookupEnv)
 	if err != nil {
 		return API{}, err
 	}
-	return API{Common: common, Address: address, EventHMACKey: key, LocalIdentity: identity}, nil
+	return API{Common: common, Address: address, EventHMACKey: key, CursorHMACKey: cursorKey, LocalIdentity: identity}, nil
 }
 
 func loadLocalIdentity(lookup lookupEnv) (LocalIdentity, error) {
@@ -420,6 +426,15 @@ func optionalHMACKey(lookup lookupEnv, key string) ([]byte, error) {
 	}
 	decoded, err := base64.RawStdEncoding.DecodeString(encoded)
 	if err != nil || len(decoded) < 32 {
+		return nil, &Error{Key: key, Reason: "must be base64 and decode to at least 32 bytes"}
+	}
+	return decoded, nil
+}
+
+func requiredHMACKey(lookup lookupEnv, key string) ([]byte, error) {
+	encoded, ok := lookup(key)
+	decoded, err := base64.RawStdEncoding.DecodeString(encoded)
+	if !ok || strings.TrimSpace(encoded) == "" || err != nil || len(decoded) < 32 {
 		return nil, &Error{Key: key, Reason: "must be base64 and decode to at least 32 bytes"}
 	}
 	return decoded, nil
