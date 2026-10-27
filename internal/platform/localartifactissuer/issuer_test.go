@@ -38,3 +38,19 @@ func TestIssuerSignsExactProviderAssignedObjectCapability(t *testing.T) {
 		t.Fatalf("claims=%+v object=%+v", claims, capability.Object)
 	}
 }
+
+func TestIssuerHonorsPersistedVersionID(t *testing.T) {
+	secret := []byte("01234567890123456789012345678901")
+	digest, err := value.ParseSHA256Digest("sha256:" + strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := artifact.NewUploadMetadata("firmware.bin", artifact.SyntheticFirmwareMediaType, 3, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, err := New(secret, nil).IssueUploadCapability(context.Background(), app.UploadCapabilityRequest{ArtifactID: "00000000-0000-0000-2401-000000000001", GrantID: "grant-1", Container: "artifacts", Key: "artifacts/v1/a.bin", VersionID: "local-stable-version-1", Metadata: metadata, ExpiresAt: time.Now().UTC().Add(time.Minute)})
+	if err != nil || capability.Object.VersionID() != "local-stable-version-1" {
+		t.Fatalf("capability=%+v err=%v", capability, err)
+	}
+}
