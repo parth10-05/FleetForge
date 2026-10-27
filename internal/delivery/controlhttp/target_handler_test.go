@@ -84,6 +84,43 @@ func TestGetTargetRouteAllowsViewerWithoutExistenceLeak(t *testing.T) {
 	}
 }
 
+func TestListTargetsRouteUsesBoundedSignedCursor(t *testing.T) {
+	now := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	first := "10000000-0000-0000-0000-000000000001"
+	second := "10000000-0000-0000-0000-000000000002"
+	registrar := &recordingTargetRegistrar{page: control.TargetPage{Items: []control.TargetProjection{{TargetID: first, Revision: 0, AsOf: now, State: "REGISTERED"}}, NextTargetID: second}}
+	verifier := tokenVerifierFunc(func(_ context.Context, _ string) (access.Principal, error) {
+		return access.Principal{Subject: "viewer", Roles: []access.Role{access.RoleViewer}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}, nil
+	})
+	key := []byte("abcdefghijklmnopqrstuvwxyz012345")
+	router := NewRouterWithTargetsAndCursor(verifier, func() time.Time { return now }, registrar, key)
+	request := httptest.NewRequest(http.MethodGet, "/v1/targets?page_size=1", nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || registrar.listCalls != 1 || registrar.pageSize != 1 || registrar.afterID != "" {
+		t.Fatalf("status=%d calls=%d pageSize=%d after=%q body=%s", recorder.Code, registrar.listCalls, registrar.pageSize, registrar.afterID, recorder.Body.String())
+	}
+	var page TargetPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &page); err != nil || len(page.Items) != 1 || page.NextCursor == nil {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/targets?page_size=1&cursor="+*page.NextCursor, nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || registrar.listCalls != 2 || registrar.afterID != second {
+		t.Fatalf("status=%d calls=%d after=%q body=%s", recorder.Code, registrar.listCalls, registrar.afterID, recorder.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/targets?page_size=2&cursor="+*page.NextCursor, nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest || registrar.listCalls != 2 {
+		t.Fatalf("mismatched cursor status=%d calls=%d", recorder.Code, registrar.listCalls)
+	}
+}
+
 func TestDiscoverTargetRouteRequiresPreconditionAndAdmin(t *testing.T) {
 	now := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
 	targetID := "10000000-0000-0000-0000-000000000001"
@@ -131,6 +168,16 @@ type recordingTargetRegistrar struct {
 	state          string
 	discovery      control.TargetRegistrationResult
 	discoveryCalls int
+	page           control.TargetPage
+	listCalls      int
+	afterID        string
+	pageSize       int
+}
+
+func (registrar *recordingTargetRegistrar) ListTargets(_ context.Context, _ access.Principal, afterID string, pageSize int) (control.TargetPage, error) {
+	registrar.listCalls++
+	registrar.afterID, registrar.pageSize = afterID, pageSize
+	return registrar.page, nil
 }
 
 func (registrar *recordingTargetRegistrar) DiscoverTarget(_ context.Context, _ access.Principal, _ control.CommandMeta, targetID string, revision int64) (control.TargetRegistrationResult, error) {

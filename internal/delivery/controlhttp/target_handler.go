@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -18,6 +19,10 @@ type targetRegistrar interface {
 
 type targetReader interface {
 	GetTarget(context.Context, access.Principal, string) (control.TargetRegistrationResult, string, error)
+}
+
+type targetLister interface {
+	ListTargets(context.Context, access.Principal, string, int) (control.TargetPage, error)
 }
 
 type targetDiscoverer interface {
@@ -96,6 +101,66 @@ func getTargetHandler(reader targetReader) http.Handler {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("ETag", etag)
 		_ = json.NewEncoder(writer).Encode(Target{Id: targetUUID, Revision: int(result.Revision), AsOf: result.AcceptedAt, State: state})
+	})
+}
+
+func listTargetsHandler(lister targetLister, cursorKey []byte) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		query := request.URL.Query()
+		for key, values := range query {
+			if (key != "page_size" && key != "cursor") || len(values) != 1 || values[0] == "" {
+				writeControlProblem(writer, request, http.StatusBadRequest, "invalid_request")
+				return
+			}
+		}
+		pageSize := 50
+		if raw := query.Get("page_size"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 || parsed > 100 || strconv.Itoa(parsed) != raw {
+				writeControlProblem(writer, request, http.StatusBadRequest, "invalid_request")
+				return
+			}
+			pageSize = parsed
+		}
+		afterID := ""
+		if cursor := query.Get("cursor"); cursor != "" {
+			var err error
+			afterID, err = decodeTargetCursor(cursorKey, cursor, pageSize)
+			if err != nil {
+				writeControlProblem(writer, request, http.StatusBadRequest, "invalid_request")
+				return
+			}
+		}
+		principal, ok := principalFromContext(request.Context())
+		if !ok {
+			writeUnauthorized(writer, correlationID(request.Context()))
+			return
+		}
+		page, err := lister.ListTargets(request.Context(), principal, afterID, pageSize)
+		if err != nil {
+			writeControlProblem(writer, request, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		items := make([]Target, 0, len(page.Items))
+		for _, item := range page.Items {
+			id, err := uuid.Parse(item.TargetID)
+			if err != nil {
+				writeControlProblem(writer, request, http.StatusInternalServerError, "internal_error")
+				return
+			}
+			items = append(items, Target{Id: id, Revision: int(item.Revision), AsOf: item.AsOf, State: item.State})
+		}
+		response := TargetPage{Items: items}
+		if page.NextTargetID != "" {
+			next, err := encodeTargetCursor(cursorKey, page.NextTargetID, pageSize)
+			if err != nil {
+				writeControlProblem(writer, request, http.StatusInternalServerError, "internal_error")
+				return
+			}
+			response.NextCursor = &next
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(response)
 	})
 }
 

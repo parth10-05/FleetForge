@@ -10,16 +10,17 @@ import (
 )
 
 type targetCursor struct {
-	Version int    `json:"v"`
-	Route   string `json:"r"`
-	ID      string `json:"id"`
+	Version  int    `json:"v"`
+	Route    string `json:"r"`
+	ID       string `json:"id"`
+	PageSize int    `json:"s"`
 }
 
-func encodeTargetCursor(key []byte, id string) (string, error) {
-	if len(key) < 32 || id == "" {
+func encodeTargetCursor(key []byte, id string, pageSize int) (string, error) {
+	if len(key) < 32 || id == "" || pageSize < 1 || pageSize > 100 {
 		return "", fmt.Errorf("invalid cursor")
 	}
-	payload, err := json.Marshal(targetCursor{Version: 1, Route: "/v1/targets", ID: id})
+	payload, err := json.Marshal(targetCursor{Version: 1, Route: "/v1/targets", ID: id, PageSize: pageSize})
 	if err != nil {
 		return "", err
 	}
@@ -28,8 +29,8 @@ func encodeTargetCursor(key []byte, id string) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-func decodeTargetCursor(key []byte, value string) (string, error) {
-	if len(key) < 32 {
+func decodeTargetCursor(key []byte, value string, pageSize int) (string, error) {
+	if len(key) < 32 || pageSize < 1 || pageSize > 100 {
 		return "", fmt.Errorf("invalid cursor")
 	}
 	parts := strings.Split(value, ".")
@@ -50,7 +51,7 @@ func decodeTargetCursor(key []byte, value string) (string, error) {
 		return "", fmt.Errorf("invalid cursor")
 	}
 	var cursor targetCursor
-	if json.Unmarshal(payload, &cursor) != nil || cursor.Version != 1 || cursor.Route != "/v1/targets" || cursor.ID == "" {
+	if json.Unmarshal(payload, &cursor) != nil || cursor.Version != 1 || cursor.Route != "/v1/targets" || cursor.ID == "" || cursor.PageSize != pageSize {
 		return "", fmt.Errorf("invalid cursor")
 	}
 	return cursor.ID, nil

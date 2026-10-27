@@ -73,6 +73,47 @@ func TestControlTargetRoutePersistsAtomicRegistration(t *testing.T) {
 	}
 }
 
+func TestControlTargetListRouteUsesKeysetCursor(t *testing.T) {
+	_, pool, _ := migratedHarness(t)
+	now := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	service := control.NewTargetService(persistence.ControlTargetAdapter{Pool: pool}, func() time.Time { return now })
+	verifier := integrationVerifier{principal: access.Principal{Subject: "user:admin", Roles: []access.Role{access.RoleAdmin}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}}
+	router := controlhttp.NewRouterWithTargetsAndCursor(verifier, func() time.Time { return now }, service, []byte("abcdefghijklmnopqrstuvwxyz012345"))
+	for _, name := range []string{"rack-a", "rack-b"} {
+		request := httptest.NewRequest(http.MethodPost, "/v1/targets", strings.NewReader(`{"display_name":"`+name+`","endpoint_reference":"https://simulator.example","target_key":"`+name+`","credential_reference":"synthetic-test:`+name+`","labels":{"site":"west"}}`))
+		request.Header.Set("Authorization", "Bearer admin-token")
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", "register-"+name)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("register %s status=%d body=%s", name, recorder.Code, recorder.Body.String())
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/targets?page_size=1", nil)
+	request.Header.Set("Authorization", "Bearer admin-token")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("first page status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var first controlhttp.TargetPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &first); err != nil || len(first.Items) != 1 || first.NextCursor == nil {
+		t.Fatalf("first page=%+v err=%v", first, err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/targets?page_size=1&cursor="+*first.NextCursor, nil)
+	request.Header.Set("Authorization", "Bearer admin-token")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("second page status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var second controlhttp.TargetPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &second); err != nil || len(second.Items) != 1 || second.Items[0].Id == first.Items[0].Id || second.NextCursor != nil {
+		t.Fatalf("second page=%+v err=%v", second, err)
+	}
+}
+
 type integrationVerifier struct{ principal access.Principal }
 
 func (verifier integrationVerifier) VerifyPrincipal(context.Context, string) (access.Principal, error) {

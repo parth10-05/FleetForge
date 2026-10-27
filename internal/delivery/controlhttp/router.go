@@ -17,12 +17,20 @@ func NewRouter(verifier access.TokenVerifier, now func() time.Time) http.Handler
 // NewRouterWithTargets registers only command routes whose application
 // dependencies are available. Internal service routes remain outside it.
 func NewRouterWithTargets(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar) http.Handler {
+	return NewRouterWithTargetsAndCursor(verifier, now, targets, nil)
+}
+
+// NewRouterWithTargetsAndCursor additionally enables signed target pagination.
+func NewRouterWithTargetsAndCursor(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar, cursorKey []byte) http.Handler {
 	if now == nil {
 		now = time.Now
 	}
 	mux := http.NewServeMux()
 	if targets != nil {
 		mux.Handle("POST /v1/targets", withAuthentication(verifier)(requirePermission(access.PermissionRegisterTargets, now)(registerTargetHandler(targets))))
+		if lister, ok := targets.(targetLister); ok && len(cursorKey) >= 32 {
+			mux.Handle("GET /v1/targets", withAuthentication(verifier)(requirePermission(access.PermissionReadTargets, now)(listTargetsHandler(lister, cursorKey))))
+		}
 		if reader, ok := targets.(targetReader); ok {
 			mux.Handle("GET /v1/targets/{target_id}", withAuthentication(verifier)(requirePermission(access.PermissionReadTargets, now)(getTargetHandler(reader))))
 		}

@@ -48,6 +48,22 @@ type TargetProjectionReader interface {
 	GetTarget(context.Context, string) (TargetRegistrationResult, string, error)
 }
 
+type TargetProjection struct {
+	TargetID string
+	State    string
+	Revision int64
+	AsOf     time.Time
+}
+
+type TargetPage struct {
+	Items        []TargetProjection
+	NextTargetID string
+}
+
+type TargetProjectionLister interface {
+	ListTargets(context.Context, string, int) (TargetPage, error)
+}
+
 type TargetService struct {
 	store TargetRegistrationStore
 	now   func() time.Time
@@ -86,6 +102,20 @@ func (service *TargetService) GetTarget(ctx context.Context, principal access.Pr
 		return TargetRegistrationResult{}, "", fmt.Errorf("target projection persistence is unavailable")
 	}
 	return reader.GetTarget(ctx, targetID)
+}
+
+func (service *TargetService) ListTargets(ctx context.Context, principal access.Principal, afterID string, pageSize int) (TargetPage, error) {
+	if service == nil || service.store == nil || pageSize < 1 || pageSize > 100 {
+		return TargetPage{}, ErrInvalidTargetRegistration
+	}
+	if err := access.Authorize(principal, access.PermissionReadTargets, service.now()); err != nil {
+		return TargetPage{}, err
+	}
+	lister, ok := service.store.(TargetProjectionLister)
+	if !ok {
+		return TargetPage{}, fmt.Errorf("target projection persistence is unavailable")
+	}
+	return lister.ListTargets(ctx, afterID, pageSize)
 }
 
 func (service *TargetService) DiscoverTarget(ctx context.Context, principal access.Principal, meta CommandMeta, targetID string, expectedRevision int64) (TargetRegistrationResult, error) {

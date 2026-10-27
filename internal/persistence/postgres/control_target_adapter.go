@@ -66,5 +66,24 @@ func (adapter ControlTargetAdapter) GetTarget(ctx context.Context, targetID stri
 	return control.TargetRegistrationResult{TargetID: projection.ID, Revision: projection.Revision, AcceptedAt: projection.AsOf}, projection.State, nil
 }
 
+func (adapter ControlTargetAdapter) ListTargets(ctx context.Context, afterID string, pageSize int) (control.TargetPage, error) {
+	if adapter.Pool == nil || pageSize < 1 || pageSize > 100 {
+		return control.TargetPage{}, fmt.Errorf("target projection persistence is unavailable")
+	}
+	projections, err := ListTargetProjections(ctx, adapter.Pool, afterID, pageSize+1)
+	if err != nil {
+		return control.TargetPage{}, err
+	}
+	page := control.TargetPage{Items: make([]control.TargetProjection, 0, min(len(projections), pageSize))}
+	for _, projection := range projections[:min(len(projections), pageSize)] {
+		page.Items = append(page.Items, control.TargetProjection{TargetID: projection.ID, State: projection.State, Revision: projection.Revision, AsOf: projection.AsOf})
+	}
+	if len(projections) > pageSize {
+		page.NextTargetID = page.Items[len(page.Items)-1].TargetID
+	}
+	return page, nil
+}
+
 var _ control.TargetRegistrationStore = ControlTargetAdapter{}
 var _ control.TargetProjectionReader = ControlTargetAdapter{}
+var _ control.TargetProjectionLister = ControlTargetAdapter{}
