@@ -84,14 +84,61 @@ func TestGetTargetRouteAllowsViewerWithoutExistenceLeak(t *testing.T) {
 	}
 }
 
+func TestDiscoverTargetRouteRequiresPreconditionAndAdmin(t *testing.T) {
+	now := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	targetID := "10000000-0000-0000-0000-000000000001"
+	registrar := &recordingTargetRegistrar{targetID: targetID, discovery: control.TargetRegistrationResult{TargetID: targetID, CommandID: "10000000-0000-0000-0000-000000000002", Revision: 1, AcceptedAt: now}}
+	verifier := tokenVerifierFunc(func(_ context.Context, token string) (access.Principal, error) {
+		role := access.RoleViewer
+		if token == "admin" {
+			role = access.RoleAdmin
+		}
+		return access.Principal{Subject: "user", Roles: []access.Role{role}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}, nil
+	})
+	router := NewRouterWithTargets(verifier, func() time.Time { return now }, registrar)
+	request := httptest.NewRequest(http.MethodPost, "/v1/targets/"+targetID+":discover", nil)
+	request.Header.Set("Authorization", "Bearer admin")
+	request.Header.Set(idempotencyHeader, "target-discovery-request")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusPreconditionRequired || registrar.discoveryCalls != 0 {
+		t.Fatalf("missing precondition status=%d calls=%d", recorder.Code, registrar.discoveryCalls)
+	}
+	request.Header.Set("If-Match", "\"rev-0\"")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusAccepted || registrar.discoveryCalls != 1 {
+		t.Fatalf("accepted status=%d calls=%d body=%s", recorder.Code, registrar.discoveryCalls, recorder.Body.String())
+	}
+	denied := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/v1/targets/"+targetID+":discover", nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	request.Header.Set(idempotencyHeader, "target-discovery-request")
+	request.Header.Set("If-Match", "\"rev-0\"")
+	router.ServeHTTP(denied, request)
+	if denied.Code != http.StatusForbidden || registrar.discoveryCalls != 1 {
+		t.Fatalf("viewer status=%d calls=%d", denied.Code, registrar.discoveryCalls)
+	}
+}
+
 type recordingTargetRegistrar struct {
-	calls      int
-	meta       control.CommandMeta
-	targetID   string
-	acceptedAt time.Time
-	readCalls  int
-	result     control.TargetRegistrationResult
-	state      string
+	calls          int
+	meta           control.CommandMeta
+	targetID       string
+	acceptedAt     time.Time
+	readCalls      int
+	result         control.TargetRegistrationResult
+	state          string
+	discovery      control.TargetRegistrationResult
+	discoveryCalls int
+}
+
+func (registrar *recordingTargetRegistrar) DiscoverTarget(_ context.Context, _ access.Principal, _ control.CommandMeta, targetID string, revision int64) (control.TargetRegistrationResult, error) {
+	registrar.discoveryCalls++
+	if targetID != registrar.targetID || revision != 0 {
+		return control.TargetRegistrationResult{}, control.ErrTargetRevisionConflict
+	}
+	return registrar.discovery, nil
 }
 
 func (registrar *recordingTargetRegistrar) GetTarget(_ context.Context, _ access.Principal, targetID string) (control.TargetRegistrationResult, string, error) {

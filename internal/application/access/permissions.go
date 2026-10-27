@@ -10,6 +10,7 @@ type Permission string
 const (
 	PermissionReadTargets       Permission = "read_targets"
 	PermissionRegisterTargets   Permission = "register_targets"
+	PermissionDiscoverTargets   Permission = "discover_targets"
 	PermissionInitiateArtifacts Permission = "initiate_artifacts"
 	PermissionCreateCampaigns   Permission = "create_campaigns"
 	PermissionOperateCampaigns  Permission = "operate_campaigns"

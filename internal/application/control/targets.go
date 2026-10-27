@@ -14,11 +14,12 @@ import (
 var (
 	ErrInvalidTargetRegistration = errors.New("invalid target registration command")
 	ErrTargetNotFound            = errors.New("target projection not found")
+	ErrTargetRevisionConflict    = errors.New("target revision conflict")
 )
 
 type CommandMeta struct {
 	ClaimID, CommandID, CorrelationID, OwnerToken string
-	OutboxEventID, DecisionInputID                string
+	OutboxEventID, DecisionInputID, WorkID        string
 	Route, IdempotencyKey                         string
 	CanonicalRequest                              []byte
 }
@@ -37,6 +38,10 @@ type TargetRegistrationResult struct {
 
 type TargetRegistrationStore interface {
 	RegisterTarget(context.Context, access.Principal, CommandMeta, string, inventory.Registration) (TargetRegistrationResult, error)
+}
+
+type TargetDiscoveryStore interface {
+	DiscoverTarget(context.Context, access.Principal, CommandMeta, string, int64) (TargetRegistrationResult, error)
 }
 
 type TargetProjectionReader interface {
@@ -81,4 +86,18 @@ func (service *TargetService) GetTarget(ctx context.Context, principal access.Pr
 		return TargetRegistrationResult{}, "", fmt.Errorf("target projection persistence is unavailable")
 	}
 	return reader.GetTarget(ctx, targetID)
+}
+
+func (service *TargetService) DiscoverTarget(ctx context.Context, principal access.Principal, meta CommandMeta, targetID string, expectedRevision int64) (TargetRegistrationResult, error) {
+	if service == nil || service.store == nil || meta.ClaimID == "" || meta.CommandID == "" || meta.CorrelationID == "" || meta.OwnerToken == "" || meta.OutboxEventID == "" || meta.DecisionInputID == "" || meta.WorkID == "" || meta.Route != "/v1/targets/{target_id}:discover" || meta.IdempotencyKey == "" || len(meta.CanonicalRequest) == 0 || targetID == "" || expectedRevision < 0 {
+		return TargetRegistrationResult{}, ErrInvalidTargetRegistration
+	}
+	if err := access.Authorize(principal, access.PermissionDiscoverTargets, service.now()); err != nil {
+		return TargetRegistrationResult{}, err
+	}
+	store, ok := service.store.(TargetDiscoveryStore)
+	if !ok {
+		return TargetRegistrationResult{}, fmt.Errorf("target discovery persistence is unavailable")
+	}
+	return store.DiscoverTarget(ctx, principal, meta, targetID, expectedRevision)
 }
