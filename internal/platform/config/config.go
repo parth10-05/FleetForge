@@ -64,10 +64,9 @@ type Common struct {
 
 type API struct {
 	Common
-	Address       string
-	EventHMACKey  []byte
-	CursorHMACKey []byte
-	LocalIdentity LocalIdentity
+	Address, ObjectStoreAddress                     string
+	EventHMACKey, CursorHMACKey, ObjectStoreHMACKey []byte
+	LocalIdentity                                   LocalIdentity
 }
 type LocalIdentity struct {
 	Issuer, Audience string
@@ -169,11 +168,19 @@ func LoadAPI() (API, error) {
 	if err != nil {
 		return API{}, err
 	}
+	objectStoreAddress, err := requiredAddress(os.LookupEnv, objectStoreAddressKey)
+	if err != nil {
+		return API{}, err
+	}
+	objectStoreKey, err := requiredHMACKey(os.LookupEnv, objectStoreHMACSecretKey)
+	if err != nil {
+		return API{}, err
+	}
 	identity, err := loadLocalIdentity(os.LookupEnv)
 	if err != nil {
 		return API{}, err
 	}
-	return API{Common: common, Address: address, EventHMACKey: key, CursorHMACKey: cursorKey, LocalIdentity: identity}, nil
+	return API{Common: common, Address: address, EventHMACKey: key, CursorHMACKey: cursorKey, ObjectStoreAddress: objectStoreAddress, ObjectStoreHMACKey: objectStoreKey, LocalIdentity: identity}, nil
 }
 
 func loadLocalIdentity(lookup lookupEnv) (LocalIdentity, error) {

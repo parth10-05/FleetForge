@@ -29,6 +29,22 @@ type ArtifactInitiation struct {
 	SizeBytes       int     `json:"size_bytes"`
 }
 
+// ArtifactInitiationEnvelope defines model for artifactInitiationEnvelope.
+type ArtifactInitiationEnvelope struct {
+	AcceptedAt time.Time          `json:"accepted_at"`
+	CommandId  openapi_types.UUID `json:"command_id"`
+	Resource   ResourceReference  `json:"resource"`
+	Revision   *int               `json:"revision,omitempty"`
+	Upload     ArtifactUpload     `json:"upload"`
+}
+
+// ArtifactUpload defines model for artifactUpload.
+type ArtifactUpload struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	Grant     string    `json:"grant"`
+	Url       string    `json:"url"`
+}
+
 // AttentionResolution defines model for attentionResolution.
 type AttentionResolution struct {
 	Action     string  `json:"action"`

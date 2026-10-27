@@ -75,6 +75,10 @@ func (service *ArtifactService) InitiateArtifact(ctx context.Context, principal 
 	if service == nil || service.initiator == nil || service.issuer == nil || service.container == "" || meta.ClaimID == "" || meta.CommandID == "" || meta.CorrelationID == "" || meta.OwnerToken == "" || meta.OutboxEventID == "" || meta.DecisionInputID == "" || meta.Route != "/v1/artifacts:initiate" || meta.IdempotencyKey == "" || len(meta.CanonicalRequest) == 0 || command.ArtifactID == "" || command.GrantID == "" || command.FirmwareVersion == "" || command.ExpiresAt.IsZero() {
 		return ArtifactInitiationResult{}, artifactapp.UploadReceipt{}, fmt.Errorf("invalid artifact initiation command")
 	}
+	now := service.now().UTC()
+	if !command.ExpiresAt.After(now) || command.ExpiresAt.After(now.Add(5*time.Minute)) {
+		return ArtifactInitiationResult{}, artifactapp.UploadReceipt{}, fmt.Errorf("invalid artifact initiation command")
+	}
 	if err := access.Authorize(principal, access.PermissionInitiateArtifacts, service.now()); err != nil {
 		return ArtifactInitiationResult{}, artifactapp.UploadReceipt{}, err
 	}

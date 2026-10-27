@@ -28,6 +28,12 @@ func NewRouterWithTargetsAndCursor(verifier access.TokenVerifier, now func() tim
 // NewRouterWithResources registers the available human control API resources.
 // Internal service routes remain outside it.
 func NewRouterWithResources(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar, artifacts artifactReader, cursorKey []byte) http.Handler {
+	return NewRouterWithResourcesAndUpload(verifier, now, targets, artifacts, cursorKey, "")
+}
+
+// NewRouterWithResourcesAndUpload additionally mounts artifact initiation when
+// the independent local upload endpoint has been configured.
+func NewRouterWithResourcesAndUpload(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar, artifacts artifactReader, cursorKey []byte, uploadURL string) http.Handler {
 	if now == nil {
 		now = time.Now
 	}
@@ -46,6 +52,9 @@ func NewRouterWithResources(verifier access.TokenVerifier, now func() time.Time,
 	}
 	if artifacts != nil {
 		mux.Handle("GET /v1/artifacts/{artifact_id}", withAuthentication(verifier)(requirePermission(access.PermissionReadArtifacts, now)(getArtifactHandler(artifacts))))
+		if initiator, ok := artifacts.(artifactInitiator); ok && uploadURL != "" {
+			mux.Handle("POST /v1/artifacts:initiate", withAuthentication(verifier)(requirePermission(access.PermissionInitiateArtifacts, now)(initiateArtifactHandler(initiator, uploadURL, now))))
+		}
 	}
 	mux.Handle("/v1/", withAuthentication(verifier)(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, Problem{

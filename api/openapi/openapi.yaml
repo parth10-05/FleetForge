@@ -109,7 +109,7 @@ paths:
       responses:
         '201':
           description: Artifact upload grant accepted.
-          content: {application/json: {schema: {$ref: '#/components/schemas/commandEnvelope'}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/artifactInitiationEnvelope'}}}
         '400': {$ref: '#/components/responses/badRequest'}
         '401': {$ref: '#/components/responses/unauthorized'}
         '403': {$ref: '#/components/responses/forbidden'}
@@ -383,6 +383,22 @@ components:
         media_type: {type: string, minLength: 1, maxLength: 256}
         firmware_version: {type: string, minLength: 1, maxLength: 256}
         display_label: {type: string, maxLength: 256}
+    artifactInitiationEnvelope:
+      allOf:
+        - {$ref: '#/components/schemas/commandEnvelope'}
+        - type: object
+          additionalProperties: false
+          required: [upload]
+          properties:
+            upload: {$ref: '#/components/schemas/artifactUpload'}
+    artifactUpload:
+      type: object
+      additionalProperties: false
+      required: [url, grant, expires_at]
+      properties:
+        url: {type: string, format: uri, maxLength: 1024}
+        grant: {type: string, minLength: 1, maxLength: 4096}
+        expires_at: {type: string, format: date-time}
     artifact:
       type: object
       additionalProperties: false

@@ -18,6 +18,7 @@ import (
 	"github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/buildinfo"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
+	"github.com/parth10-05/fleetforge/internal/platform/localartifactissuer"
 	"github.com/parth10-05/fleetforge/internal/platform/localoidc"
 )
 
@@ -47,7 +48,8 @@ func run() error {
 	verifier := localoidc.Verifier{Issuer: cfg.LocalIdentity.Issuer, Audience: cfg.LocalIdentity.Audience, Key: cfg.LocalIdentity.Key, RecentAuth: cfg.LocalIdentity.RecentAuth, Now: time.Now}
 	mux := http.NewServeMux()
 	mux.Handle("/", health.Routes())
-	mux.Handle("/v1/", controlhttp.NewRouterWithResources(verifier, time.Now, control.NewTargetService(postgres.ControlTargetAdapter{Pool: pool}, time.Now), control.NewArtifactService(postgres.ControlArtifactAdapter{Pool: pool}, time.Now), cfg.CursorHMACKey))
+	artifactService := control.NewArtifactService(postgres.ControlArtifactAdapter{Pool: pool}, time.Now).WithInitiation(postgres.ControlArtifactAdapter{Pool: pool}, localartifactissuer.New(cfg.ObjectStoreHMACKey, nil), "artifacts")
+	mux.Handle("/v1/", controlhttp.NewRouterWithResourcesAndUpload(verifier, time.Now, control.NewTargetService(postgres.ControlTargetAdapter{Pool: pool}, time.Now), artifactService, cfg.CursorHMACKey, "http://"+cfg.ObjectStoreAddress+"/v1/objects/upload"))
 	mux.Handle("/v1/events/synthetic", eventhinthttp.New(cfg.EventHMACKey, postgres.EventHintStore{Pool: pool}, time.Now).Routes())
 	server := newServer(cfg.Address, mux)
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
