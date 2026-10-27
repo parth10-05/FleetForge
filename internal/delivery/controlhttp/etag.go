@@ -7,7 +7,7 @@ import (
 )
 
 func revisionETag(revision int64) (string, error) {
-	if revision < 1 {
+	if revision < 0 {
 		return "", fmt.Errorf("invalid revision")
 	}
 	return fmt.Sprintf("\"rev-%d\"", revision), nil
@@ -18,7 +18,7 @@ func parseRevisionETag(value string) (int64, error) {
 		return 0, fmt.Errorf("invalid revision ETag")
 	}
 	revision, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(value, "\"rev-"), "\""), 10, 64)
-	if err != nil || revision < 1 || value != fmt.Sprintf("\"rev-%d\"", revision) {
+	if err != nil || revision < 0 || value != fmt.Sprintf("\"rev-%d\"", revision) {
 		return 0, fmt.Errorf("invalid revision ETag")
 	}
 	return revision, nil

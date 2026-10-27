@@ -299,7 +299,7 @@ components:
       required: true
       schema:
         type: string
-        pattern: '^"rev-[1-9][0-9]*"$'
+        pattern: '^"rev-(0|[1-9][0-9]*)"$'
     pageSize:
       name: page_size
       in: query
@@ -342,7 +342,7 @@ components:
       properties:
         command_id: {type: string, format: uuid}
         resource: {$ref: '#/components/schemas/resourceReference'}
-        revision: {type: integer, minimum: 1}
+        revision: {type: integer, minimum: 0}
         accepted_at: {type: string, format: date-time}
     targetRegistration:
       type: object
@@ -363,7 +363,7 @@ components:
       required: [id, revision, as_of, state]
       properties:
         id: {type: string, format: uuid}
-        revision: {type: integer, minimum: 1}
+        revision: {type: integer, minimum: 0}
         as_of: {type: string, format: date-time}
         state: {type: string}
     targetPage:
@@ -406,7 +406,7 @@ components:
       required: [id, revision, as_of, state]
       properties:
         id: {type: string, format: uuid}
-        revision: {type: integer, minimum: 1}
+        revision: {type: integer, minimum: 0}
         as_of: {type: string, format: date-time}
         state: {type: string}
     attentionResolution:

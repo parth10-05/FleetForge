@@ -23,6 +23,9 @@ func NewRouterWithTargets(verifier access.TokenVerifier, now func() time.Time, t
 	mux := http.NewServeMux()
 	if targets != nil {
 		mux.Handle("POST /v1/targets", withAuthentication(verifier)(requirePermission(access.PermissionRegisterTargets, now)(registerTargetHandler(targets))))
+		if reader, ok := targets.(targetReader); ok {
+			mux.Handle("GET /v1/targets/{target_id}", withAuthentication(verifier)(requirePermission(access.PermissionReadTargets, now)(getTargetHandler(reader))))
+		}
 	}
 	mux.Handle("/v1/", withAuthentication(verifier)(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, Problem{

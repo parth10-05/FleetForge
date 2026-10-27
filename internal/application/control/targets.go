@@ -11,7 +11,10 @@ import (
 	"github.com/parth10-05/fleetforge/internal/domain/inventory"
 )
 
-var ErrInvalidTargetRegistration = errors.New("invalid target registration command")
+var (
+	ErrInvalidTargetRegistration = errors.New("invalid target registration command")
+	ErrTargetNotFound            = errors.New("target projection not found")
+)
 
 type CommandMeta struct {
 	ClaimID, CommandID, CorrelationID, OwnerToken string

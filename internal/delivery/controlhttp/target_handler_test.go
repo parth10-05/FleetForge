@@ -49,11 +49,57 @@ func TestRegisterTargetRouteRequiresAdminAndWritesCommandEnvelope(t *testing.T) 
 	}
 }
 
+func TestGetTargetRouteAllowsViewerWithoutExistenceLeak(t *testing.T) {
+	now := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	targetID := "10000000-0000-0000-0000-000000000001"
+	registrar := &recordingTargetRegistrar{acceptedAt: now, targetID: targetID, result: control.TargetRegistrationResult{TargetID: targetID, Revision: 0, AcceptedAt: now}, state: "REGISTERED"}
+	verifier := tokenVerifierFunc(func(_ context.Context, token string) (access.Principal, error) {
+		role := access.RoleViewer
+		if token == "none" {
+			role = "unknown"
+		}
+		return access.Principal{Subject: "user", Roles: []access.Role{role}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}, nil
+	})
+	router := NewRouterWithTargets(verifier, func() time.Time { return now }, registrar)
+	request := httptest.NewRequest(http.MethodGet, "/v1/targets/"+targetID, nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || recorder.Header().Get("ETag") != "\"rev-0\"" || registrar.readCalls != 1 {
+		t.Fatalf("status=%d etag=%q calls=%d body=%s", recorder.Code, recorder.Header().Get("ETag"), registrar.readCalls, recorder.Body.String())
+	}
+	denied := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/v1/targets/"+targetID, nil)
+	request.Header.Set("Authorization", "Bearer none")
+	router.ServeHTTP(denied, request)
+	if denied.Code != http.StatusForbidden || registrar.readCalls != 1 {
+		t.Fatalf("unknown role status=%d calls=%d", denied.Code, registrar.readCalls)
+	}
+	notFound := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/v1/targets/10000000-0000-0000-0000-000000000002", nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	router.ServeHTTP(notFound, request)
+	if notFound.Code != http.StatusNotFound || registrar.readCalls != 2 {
+		t.Fatalf("not found status=%d calls=%d", notFound.Code, registrar.readCalls)
+	}
+}
+
 type recordingTargetRegistrar struct {
 	calls      int
 	meta       control.CommandMeta
 	targetID   string
 	acceptedAt time.Time
+	readCalls  int
+	result     control.TargetRegistrationResult
+	state      string
+}
+
+func (registrar *recordingTargetRegistrar) GetTarget(_ context.Context, _ access.Principal, targetID string) (control.TargetRegistrationResult, string, error) {
+	registrar.readCalls++
+	if targetID != registrar.targetID {
+		return control.TargetRegistrationResult{}, "", control.ErrTargetNotFound
+	}
+	return registrar.result, registrar.state, nil
 }
 
 func (registrar *recordingTargetRegistrar) RegisterTarget(_ context.Context, _ access.Principal, meta control.CommandMeta, command control.RegisterTargetCommand) (control.TargetRegistrationResult, error) {

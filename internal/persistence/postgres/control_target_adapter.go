@@ -58,6 +58,9 @@ func (adapter ControlTargetAdapter) GetTarget(ctx context.Context, targetID stri
 	}
 	projection, err := GetTargetProjection(ctx, adapter.Pool, targetID)
 	if err != nil {
+		if errors.Is(err, ErrTargetProjectionNotFound) {
+			return control.TargetRegistrationResult{}, "", control.ErrTargetNotFound
+		}
 		return control.TargetRegistrationResult{}, "", err
 	}
 	return control.TargetRegistrationResult{TargetID: projection.ID, Revision: projection.Revision, AcceptedAt: projection.AsOf}, projection.State, nil

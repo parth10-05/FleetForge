@@ -15,6 +15,10 @@ type targetRegistrar interface {
 	RegisterTarget(context.Context, access.Principal, control.CommandMeta, control.RegisterTargetCommand) (control.TargetRegistrationResult, error)
 }
 
+type targetReader interface {
+	GetTarget(context.Context, access.Principal, string) (control.TargetRegistrationResult, string, error)
+}
+
 func registerTargetHandler(registrar targetRegistrar) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		key, err := idempotencyKey(request.Header.Get(idempotencyHeader))
@@ -50,6 +54,43 @@ func registerTargetHandler(registrar targetRegistrar) http.Handler {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(writer).Encode(CommandEnvelope{CommandId: uuid.MustParse(result.CommandID), Resource: ResourceReference{Kind: "target", Id: uuid.MustParse(result.TargetID), Href: "/v1/targets/" + result.TargetID}, Revision: nil, AcceptedAt: result.AcceptedAt})
+	})
+}
+
+func getTargetHandler(reader targetReader) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		principal, ok := principalFromContext(request.Context())
+		if !ok {
+			writeUnauthorized(writer, correlationID(request.Context()))
+			return
+		}
+		targetID := request.PathValue("target_id")
+		if _, err := uuid.Parse(targetID); err != nil {
+			writeControlProblem(writer, request, http.StatusNotFound, "not_found")
+			return
+		}
+		result, state, err := reader.GetTarget(request.Context(), principal, targetID)
+		if errors.Is(err, control.ErrTargetNotFound) {
+			writeControlProblem(writer, request, http.StatusNotFound, "not_found")
+			return
+		}
+		if err != nil {
+			writeControlProblem(writer, request, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		etag, err := revisionETag(result.Revision)
+		if err != nil {
+			writeControlProblem(writer, request, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		targetUUID, err := uuid.Parse(result.TargetID)
+		if err != nil {
+			writeControlProblem(writer, request, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set("ETag", etag)
+		_ = json.NewEncoder(writer).Encode(Target{Id: targetUUID, Revision: int(result.Revision), AsOf: result.AcceptedAt, State: state})
 	})
 }
 

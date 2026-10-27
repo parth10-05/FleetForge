@@ -36,6 +36,17 @@ func TestControlTargetRoutePersistsAtomicRegistration(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
+	readRequest := httptest.NewRequest(http.MethodGet, "/v1/targets/"+envelope.Resource.Id.String(), nil)
+	readRequest.Header.Set("Authorization", "Bearer admin-token")
+	readRecorder := httptest.NewRecorder()
+	router.ServeHTTP(readRecorder, readRequest)
+	if readRecorder.Code != http.StatusOK || readRecorder.Header().Get("ETag") != "\"rev-0\"" {
+		t.Fatalf("read status=%d etag=%q body=%s", readRecorder.Code, readRecorder.Header().Get("ETag"), readRecorder.Body.String())
+	}
+	var target controlhttp.Target
+	if err := json.Unmarshal(readRecorder.Body.Bytes(), &target); err != nil || target.Id != envelope.Resource.Id || target.Revision != 0 {
+		t.Fatalf("target=%+v err=%v", target, err)
+	}
 	// Map order differs but the semantic request and canonical idempotency hash do not.
 	replayRequest := httptest.NewRequest(http.MethodPost, "/v1/targets", strings.NewReader(`{"display_name":"rack-a","endpoint_reference":"https://simulator.example","target_key":"rack-a","credential_reference":"synthetic-test:rack-a","labels":{"rack":"a","site":"west"}}`))
 	replayRequest.Header.Set("Authorization", "Bearer admin-token")
