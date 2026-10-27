@@ -29,6 +29,10 @@ type CampaignCreationStore interface {
 	CreateCampaign(context.Context, access.Principal, CommandMeta, CreateCampaignCommand) (CampaignCreationResult, error)
 }
 
+type CampaignValidationStore interface {
+	ValidateCampaign(context.Context, access.Principal, CommandMeta, string, int64) (CampaignCreationResult, error)
+}
+
 type CampaignService struct {
 	store CampaignCreationStore
 	now   func() time.Time
@@ -52,4 +56,20 @@ func (service *CampaignService) CreateCampaign(ctx context.Context, principal ac
 		return CampaignCreationResult{}, err
 	}
 	return service.store.CreateCampaign(ctx, principal, meta, command)
+}
+
+// ValidateCampaign queues bounded planning work; it never selects targets in
+// the request path or claims the campaign has reached VALIDATING/READY.
+func (service *CampaignService) ValidateCampaign(ctx context.Context, principal access.Principal, meta CommandMeta, campaignID string, expectedRevision int64) (CampaignCreationResult, error) {
+	if service == nil || meta.ClaimID == "" || meta.CommandID == "" || meta.CorrelationID == "" || meta.OwnerToken == "" || meta.OutboxEventID == "" || meta.DecisionInputID == "" || meta.WorkID == "" || meta.Route != "/v1/campaigns/{campaign_id}:validate" || meta.IdempotencyKey == "" || len(meta.CanonicalRequest) == 0 || campaignID == "" || expectedRevision < 0 {
+		return CampaignCreationResult{}, ErrInvalidCampaignCreation
+	}
+	store, ok := service.store.(CampaignValidationStore)
+	if !ok {
+		return CampaignCreationResult{}, fmt.Errorf("campaign validation persistence is unavailable")
+	}
+	if err := access.Authorize(principal, access.PermissionOperateCampaigns, service.now()); err != nil {
+		return CampaignCreationResult{}, err
+	}
+	return store.ValidateCampaign(ctx, principal, meta, campaignID, expectedRevision)
 }
