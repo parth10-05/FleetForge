@@ -22,6 +22,12 @@ func NewRouterWithTargets(verifier access.TokenVerifier, now func() time.Time, t
 
 // NewRouterWithTargetsAndCursor additionally enables signed target pagination.
 func NewRouterWithTargetsAndCursor(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar, cursorKey []byte) http.Handler {
+	return NewRouterWithResources(verifier, now, targets, nil, cursorKey)
+}
+
+// NewRouterWithResources registers the available human control API resources.
+// Internal service routes remain outside it.
+func NewRouterWithResources(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar, artifacts artifactReader, cursorKey []byte) http.Handler {
 	if now == nil {
 		now = time.Now
 	}
@@ -37,6 +43,9 @@ func NewRouterWithTargetsAndCursor(verifier access.TokenVerifier, now func() tim
 		if discoverer, ok := targets.(targetDiscoverer); ok {
 			mux.Handle("POST /v1/targets/", withAuthentication(verifier)(requirePermission(access.PermissionDiscoverTargets, now)(discoverTargetHandler(discoverer))))
 		}
+	}
+	if artifacts != nil {
+		mux.Handle("GET /v1/artifacts/{artifact_id}", withAuthentication(verifier)(requirePermission(access.PermissionReadArtifacts, now)(getArtifactHandler(artifacts))))
 	}
 	mux.Handle("/v1/", withAuthentication(verifier)(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, Problem{

@@ -9,6 +9,7 @@ type Permission string
 
 const (
 	PermissionReadTargets       Permission = "read_targets"
+	PermissionReadArtifacts     Permission = "read_artifacts"
 	PermissionRegisterTargets   Permission = "register_targets"
 	PermissionDiscoverTargets   Permission = "discover_targets"
 	PermissionInitiateArtifacts Permission = "initiate_artifacts"
@@ -32,7 +33,7 @@ func permitted(principal Principal, permission Permission) bool {
 		return true
 	}
 	switch permission {
-	case PermissionReadTargets:
+	case PermissionReadTargets, PermissionReadArtifacts:
 		return principal.HasRole(RoleViewer) || principal.HasRole(RoleOperator)
 	case PermissionCreateCampaigns, PermissionOperateCampaigns:
 		return principal.HasRole(RoleOperator)
