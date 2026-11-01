@@ -123,6 +123,22 @@ stale mutation behavior; ETags; pagination no gaps/duplicates; artifact and
 campaign state guards; pause/attention P05 fencing preservation; transactional
 audit and safe denial history.
 
+### Campaign-validation finalization contract
+
+`CAMPAIGN_VALIDATE` has one explicit recovery-safe persistence boundary. The
+worker may read the immutable draft and compute preflight/selection outside a
+transaction, but its finalization must use transaction-scoped PostgreSQL
+helpers and one serializable transaction to recheck the claimed lease token and
+expected campaign revision, persist the candidate, immutable plan snapshot,
+waves, memberships and enrollments, transition `VALIDATING` to `READY`, append
+audit/outbox evidence, and complete the same due-work row. A failure rolls back
+all of those effects. Correctable validation failures instead atomically return
+the campaign to `DRAFT`, record bounded failure evidence, and complete the
+claimed work. Transient or serialization failures leave the campaign unchanged
+and release the work through the existing retry fence. Existing public helpers
+remain wrappers around these transaction-scoped primitives; they must not be
+blindly chained by a worker.
+
 ### Run 8 — deterministic CLI demo
 
 **Files:** `cmd/fleetforge-demo/main.go`, `scripts/demo/run-v1.ps1`,
