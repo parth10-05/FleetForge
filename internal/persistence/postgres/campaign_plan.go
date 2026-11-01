@@ -37,8 +37,8 @@ type CampaignPlanPersistenceRequest struct {
 	Plan             campaignplan.Plan
 }
 
-// PersistCampaignPlan transitions a DRAFT campaign into VALIDATING and stores
-// the complete immutable candidate-backed plan. It performs no enrollment,
+// PersistCampaignPlan stores the complete immutable candidate-backed plan for
+// a VALIDATING campaign. It performs no enrollment,
 // outbox publication, worker claim, or external I/O; READY remains exclusively
 // owned by AcquireReadinessEnrollment after its P02 trust recheck.
 func PersistCampaignPlan(ctx context.Context, pool *pgxpool.Pool, request CampaignPlanPersistenceRequest) error {
@@ -105,17 +105,14 @@ func PersistCampaignPlan(ctx context.Context, pool *pgxpool.Pool, request Campai
 	if err := tx.QueryRow(ctx, `SELECT state,revision,artifact_id::text FROM campaigns WHERE id=$1::uuid FOR UPDATE`, request.CampaignID).Scan(&state, &revision, &artifactID); err != nil {
 		return fmt.Errorf("lock campaign plan aggregate: %w", err)
 	}
-	if state != "DRAFT" || revision != request.ExpectedRevision {
+	if state != "VALIDATING" || revision != request.ExpectedRevision {
 		return ErrCampaignPlanConflict
 	}
 	var snapshotHash, artifactVersionID, artifactDigest, verificationPolicy string
 	if err := tx.QueryRow(ctx, `SELECT c.snapshot_hash,c.artifact_version_id,o.sha256_digest,o.verification_policy_version FROM preflight_candidates c JOIN artifact_object_versions o ON o.artifact_id=c.artifact_id WHERE c.id=$1::uuid AND c.artifact_id=$2::uuid AND c.state='PASSED' FOR SHARE OF c,o`, request.CandidateID, artifactID).Scan(&snapshotHash, &artifactVersionID, &artifactDigest, &verificationPolicy); err != nil {
 		return fmt.Errorf("load passed candidate for campaign plan: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE campaigns SET state='VALIDATING',revision=revision+1,updated_at=now() WHERE id=$1::uuid AND revision=$2 AND state='DRAFT'`, request.CampaignID, request.ExpectedRevision); err != nil {
-		return fmt.Errorf("begin campaign validation: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO campaign_plan_snapshots (campaign_id,candidate_id,draft_revision,policy_json,effective_plan_json,seed,policy_version,algorithm_version,plan_version,artifact_version_id,artifact_digest,verification_policy_version,target_snapshot_hash,plan_hash) VALUES ($1::uuid,$2::uuid,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, request.CampaignID, request.CandidateID, request.ExpectedRevision, string(request.Plan.PolicyJSON), string(effective), request.Plan.Seed, campaignplan.PolicyVersionV1, request.Plan.Algorithm, request.Plan.Version, artifactVersionID, artifactDigest, verificationPolicy, snapshotHash, request.Plan.Hash.String()); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO campaign_plan_snapshots (campaign_id,candidate_id,draft_revision,policy_json,effective_plan_json,seed,policy_version,algorithm_version,plan_version,artifact_version_id,artifact_digest,verification_policy_version,target_snapshot_hash,plan_hash) VALUES ($1::uuid,$2::uuid,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, request.CampaignID, request.CandidateID, request.ExpectedRevision-1, string(request.Plan.PolicyJSON), string(effective), request.Plan.Seed, campaignplan.PolicyVersionV1, request.Plan.Algorithm, request.Plan.Version, artifactVersionID, artifactDigest, verificationPolicy, snapshotHash, request.Plan.Hash.String()); err != nil {
 		return fmt.Errorf("insert immutable campaign plan snapshot: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO campaign_waves (id,campaign_id,ordinal,cohort) VALUES ($1::uuid,$2::uuid,1,'CANARY'),($3::uuid,$2::uuid,2,'LATER_WAVE')`, request.CanaryWaveID, request.CampaignID, request.LaterWaveID); err != nil {

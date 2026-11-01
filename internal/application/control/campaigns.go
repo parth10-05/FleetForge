@@ -58,8 +58,8 @@ func (service *CampaignService) CreateCampaign(ctx context.Context, principal ac
 	return service.store.CreateCampaign(ctx, principal, meta, command)
 }
 
-// ValidateCampaign queues bounded planning work; it never selects targets in
-// the request path or claims the campaign has reached VALIDATING/READY.
+// ValidateCampaign begins asynchronous validation. It never selects targets
+// in the request path or claims the campaign has reached READY.
 func (service *CampaignService) ValidateCampaign(ctx context.Context, principal access.Principal, meta CommandMeta, campaignID string, expectedRevision int64) (CampaignCreationResult, error) {
 	if service == nil || meta.ClaimID == "" || meta.CommandID == "" || meta.CorrelationID == "" || meta.OwnerToken == "" || meta.OutboxEventID == "" || meta.DecisionInputID == "" || meta.WorkID == "" || meta.Route != "/v1/campaigns/{campaign_id}:validate" || meta.IdempotencyKey == "" || len(meta.CanonicalRequest) == 0 || campaignID == "" || expectedRevision < 0 {
 		return CampaignCreationResult{}, ErrInvalidCampaignCreation
