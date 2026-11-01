@@ -18,6 +18,10 @@ type campaignCreator interface {
 	CreateCampaign(context.Context, access.Principal, control.CommandMeta, control.CreateCampaignCommand) (control.CampaignCreationResult, error)
 }
 
+type campaignValidator interface {
+	ValidateCampaign(context.Context, access.Principal, control.CommandMeta, string, int64) (control.CampaignCreationResult, error)
+}
+
 func createCampaignHandler(creator campaignCreator) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, err := idempotencyKey(r.Header.Get(idempotencyHeader))
@@ -71,5 +75,48 @@ func createCampaignHandler(creator campaignCreator) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(CommandEnvelope{CommandId: uuid.MustParse(result.CommandID), Resource: ResourceReference{Kind: "campaign", Id: id, Href: "/v1/campaigns/" + result.CampaignID}, AcceptedAt: result.AcceptedAt})
+	})
+}
+
+func validateCampaignHandler(validator campaignValidator) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key, err := idempotencyKey(r.Header.Get(idempotencyHeader))
+		if err != nil {
+			writeControlProblem(w, r, http.StatusBadRequest, "invalid_idempotency_key")
+			return
+		}
+		if r.Header.Get("If-Match") == "" {
+			writeControlProblem(w, r, http.StatusPreconditionRequired, "precondition_required")
+			return
+		}
+		revision, err := parseRevisionETag(r.Header.Get("If-Match"))
+		if err != nil {
+			writeControlProblem(w, r, http.StatusBadRequest, "invalid_precondition")
+			return
+		}
+		principal, ok := principalFromContext(r.Context())
+		if !ok {
+			writeUnauthorized(w, correlationID(r.Context()))
+			return
+		}
+		campaignID := r.PathValue("campaign_id")
+		if _, err := uuid.Parse(campaignID); err != nil {
+			writeControlProblem(w, r, http.StatusNotFound, "not_found")
+			return
+		}
+		canonical, _ := json.Marshal(map[string]string{"campaign_id": campaignID, "if_match": r.Header.Get("If-Match")})
+		result, err := validator.ValidateCampaign(r.Context(), principal, control.CommandMeta{ClaimID: uuid.NewString(), CommandID: uuid.NewString(), CorrelationID: correlationID(r.Context()), OwnerToken: uuid.NewString(), OutboxEventID: uuid.NewString(), DecisionInputID: uuid.NewString(), WorkID: uuid.NewString(), Route: "/v1/campaigns/{campaign_id}:validate", IdempotencyKey: key, CanonicalRequest: canonical}, campaignID, revision)
+		if err != nil {
+			writeControlProblem(w, r, http.StatusPreconditionFailed, "revision_conflict")
+			return
+		}
+		id, err := uuid.Parse(result.CampaignID)
+		if err != nil {
+			writeControlProblem(w, r, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(CommandEnvelope{CommandId: uuid.MustParse(result.CommandID), Resource: ResourceReference{Kind: "campaign", Id: id, Href: "/v1/campaigns/" + result.CampaignID}, Revision: ptr(int(result.Revision)), AcceptedAt: result.AcceptedAt})
 	})
 }

@@ -53,6 +53,42 @@ func TestCreateCampaignRouteRequiresOperatorAndCanonicalizesDraft(t *testing.T) 
 	}
 }
 
+func TestValidateCampaignHandlerRequiresRevisionAndQueuesWork(t *testing.T) {
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	campaignID := "10000000-0000-0000-0000-000000000001"
+	validator := validateCampaignFunc(func(_ context.Context, _ access.Principal, meta control.CommandMeta, id string, revision int64) (control.CampaignCreationResult, error) {
+		if id != campaignID || revision != 3 || meta.Route != "/v1/campaigns/{campaign_id}:validate" || meta.WorkID == "" {
+			t.Fatalf("unexpected validation command: id=%q revision=%d meta=%+v", id, revision, meta)
+		}
+		return control.CampaignCreationResult{CampaignID: id, CommandID: meta.CommandID, Revision: 4, AcceptedAt: now}, nil
+	})
+	handler := validateCampaignHandler(validator)
+	request := httptest.NewRequest(http.MethodPost, "/v1/campaigns/"+campaignID+":validate", nil)
+	request.SetPathValue("campaign_id", campaignID)
+	request.Header.Set(idempotencyHeader, "campaign-validate-1")
+	request.Header.Set("If-Match", "\"rev-3\"")
+	request = request.WithContext(context.WithValue(request.Context(), principalKey{}, access.Principal{Subject: "operator", Roles: []access.Role{access.RoleOperator}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	missing := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/v1/campaigns/"+campaignID+":validate", nil)
+	request.SetPathValue("campaign_id", campaignID)
+	request.Header.Set(idempotencyHeader, "campaign-validate-1")
+	handler.ServeHTTP(missing, request)
+	if missing.Code != http.StatusPreconditionRequired {
+		t.Fatalf("missing If-Match status=%d", missing.Code)
+	}
+}
+
+type validateCampaignFunc func(context.Context, access.Principal, control.CommandMeta, string, int64) (control.CampaignCreationResult, error)
+
+func (f validateCampaignFunc) ValidateCampaign(ctx context.Context, principal access.Principal, meta control.CommandMeta, campaignID string, revision int64) (control.CampaignCreationResult, error) {
+	return f(ctx, principal, meta, campaignID, revision)
+}
+
 type recordingCampaignCreator struct {
 	calls   int
 	command control.CreateCampaignCommand
