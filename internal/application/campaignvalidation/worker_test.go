@@ -16,7 +16,7 @@ func TestWorkerCompletesOrRetriesClaimedWork(t *testing.T) {
 	}{{"complete", nil, 1, 0}, {"retry", errors.New("blocked"), 0, 1}} {
 		t.Run(test.name, func(t *testing.T) {
 			finisher := &workerFinisher{}
-			worker := NewWorker(workerClaimer{work: &Work{ID: "work", CampaignID: "campaign", LeaseToken: "lease", ExpectedRevision: 1}}, finisher, workerProcessor{err: test.err}, func() time.Time { return now })
+			worker := NewWorker(workerClaimer{work: &Work{ID: "work", CommandID: "command", CampaignID: "campaign", LeaseToken: "lease", ExpectedRevision: 1}}, finisher, workerProcessor{err: test.err}, func() time.Time { return now })
 			ran, err := worker.RunOnce(context.Background(), ClaimRequest{Owner: "owner", LeaseToken: "token", Now: now, LeaseExpiresAt: now.Add(time.Minute)})
 			if err != nil || !ran || finisher.complete != test.complete || finisher.retry != test.retry {
 				t.Fatalf("ran=%v err=%v complete=%d retry=%d", ran, err, finisher.complete, finisher.retry)

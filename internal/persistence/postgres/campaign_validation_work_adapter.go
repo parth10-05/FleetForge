@@ -23,7 +23,7 @@ func (adapter CampaignValidationWorkAdapter) ClaimCampaignValidationWork(ctx con
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	work := &app.Work{}
-	err = tx.QueryRow(ctx, `SELECT id::text,subject_id::text,expected_revision FROM due_work WHERE delivery_state='PENDING' AND not_before <= $1 AND subject_type='CAMPAIGN' AND work_type='CAMPAIGN_VALIDATE' ORDER BY not_before,created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, request.Now.UTC()).Scan(&work.ID, &work.CampaignID, &work.ExpectedRevision)
+	err = tx.QueryRow(ctx, `SELECT id::text,command_id::text,subject_id::text,expected_revision FROM due_work WHERE delivery_state='PENDING' AND not_before <= $1 AND subject_type='CAMPAIGN' AND work_type='CAMPAIGN_VALIDATE' ORDER BY not_before,created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, request.Now.UTC()).Scan(&work.ID, &work.CommandID, &work.CampaignID, &work.ExpectedRevision)
 	if err == pgx.ErrNoRows {
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit empty campaign validation claim: %w", err)

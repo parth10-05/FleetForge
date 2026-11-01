@@ -9,8 +9,8 @@ import (
 const WorkType = "CAMPAIGN_VALIDATE"
 
 type Work struct {
-	ID, CampaignID, LeaseToken string
-	ExpectedRevision           int64
+	ID, CommandID, CampaignID, LeaseToken string
+	ExpectedRevision                      int64
 }
 type ClaimRequest struct {
 	Owner, LeaseToken   string
@@ -50,7 +50,7 @@ func (w *Worker) RunOnce(ctx context.Context, r ClaimRequest) (bool, error) {
 	if work == nil {
 		return false, nil
 	}
-	if work.ID == "" || work.CampaignID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 {
+	if work.ID == "" || work.CommandID == "" || work.CampaignID == "" || work.LeaseToken == "" || work.ExpectedRevision < 0 {
 		return false, fmt.Errorf("invalid claimed campaign validation work")
 	}
 	now := w.now().UTC()
