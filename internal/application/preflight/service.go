@@ -58,7 +58,10 @@ func New(targets TargetSelector, artifacts ArtifactReader, candidates CandidateW
 
 // Evaluate computes and persists one immutable passed snapshot. The service
 // holds no database lock and performs no network or object-store I/O itself.
-func (service *Service) Evaluate(ctx context.Context, request Request) (Result, error) {
+// EvaluateSnapshot computes one immutable passed snapshot without writing it.
+// Callers that need atomic composition with other durable effects use this
+// method, keeping evaluation outside their final transaction.
+func (service *Service) EvaluateSnapshot(ctx context.Context, request Request) (Result, error) {
 	if service == nil || service.targets == nil || service.artifacts == nil || service.candidates == nil || request.CandidateID == "" || request.ArtifactID.IsZero() || request.Maximum <= 0 || request.Maximum > 100 {
 		return Result{}, fmt.Errorf("invalid preflight request")
 	}
@@ -102,8 +105,17 @@ func (service *Service) Evaluate(ctx context.Context, request Request) (Result, 
 	if err != nil {
 		return Result{}, fmt.Errorf("encode preflight report: %w", err)
 	}
-	if err := service.candidates.Persist(ctx, request.CandidateID, snapshot, report); err != nil {
+	return Result{Snapshot: snapshot, Report: report}, nil
+}
+
+// Evaluate preserves the existing persisted-candidate contract.
+func (service *Service) Evaluate(ctx context.Context, request Request) (Result, error) {
+	result, err := service.EvaluateSnapshot(ctx, request)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := service.candidates.Persist(ctx, request.CandidateID, result.Snapshot, result.Report); err != nil {
 		return Result{}, fmt.Errorf("persist preflight candidate: %w", err)
 	}
-	return Result{Snapshot: snapshot, Report: report}, nil
+	return result, nil
 }
