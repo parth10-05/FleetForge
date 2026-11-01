@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/parth10-05/fleetforge/internal/application/access"
@@ -104,7 +105,7 @@ func getTargetHandler(reader targetReader) http.Handler {
 	})
 }
 
-func listTargetsHandler(lister targetLister, cursorKey []byte) http.Handler {
+func listTargetsHandler(lister targetLister, cursorKey []byte, now func() time.Time) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		query := request.URL.Query()
 		for key, values := range query {
@@ -125,7 +126,7 @@ func listTargetsHandler(lister targetLister, cursorKey []byte) http.Handler {
 		afterID := ""
 		if cursor := query.Get("cursor"); cursor != "" {
 			var err error
-			afterID, err = decodeTargetCursor(cursorKey, cursor, pageSize)
+			afterID, err = decodeTargetCursor(cursorKey, cursor, pageSize, now())
 			if err != nil {
 				writeControlProblem(writer, request, http.StatusBadRequest, "invalid_request")
 				return
@@ -152,7 +153,7 @@ func listTargetsHandler(lister targetLister, cursorKey []byte) http.Handler {
 		}
 		response := TargetPage{Items: items}
 		if page.NextTargetID != "" {
-			next, err := encodeTargetCursor(cursorKey, page.NextTargetID, pageSize)
+			next, err := encodeTargetCursor(cursorKey, page.NextTargetID, pageSize, now())
 			if err != nil {
 				writeControlProblem(writer, request, http.StatusInternalServerError, "internal_error")
 				return

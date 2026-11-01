@@ -7,20 +7,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
+
+const targetCursorTTL = 15 * time.Minute
 
 type targetCursor struct {
 	Version  int    `json:"v"`
 	Route    string `json:"r"`
 	ID       string `json:"id"`
 	PageSize int    `json:"s"`
+	Expires  int64  `json:"e"`
 }
 
-func encodeTargetCursor(key []byte, id string, pageSize int) (string, error) {
-	if len(key) < 32 || id == "" || pageSize < 1 || pageSize > 100 {
+func encodeTargetCursor(key []byte, id string, pageSize int, now time.Time) (string, error) {
+	if len(key) < 32 || id == "" || pageSize < 1 || pageSize > 100 || now.IsZero() {
 		return "", fmt.Errorf("invalid cursor")
 	}
-	payload, err := json.Marshal(targetCursor{Version: 1, Route: "/v1/targets", ID: id, PageSize: pageSize})
+	payload, err := json.Marshal(targetCursor{Version: 1, Route: "/v1/targets", ID: id, PageSize: pageSize, Expires: now.UTC().Add(targetCursorTTL).Unix()})
 	if err != nil {
 		return "", err
 	}
@@ -29,8 +33,8 @@ func encodeTargetCursor(key []byte, id string, pageSize int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-func decodeTargetCursor(key []byte, value string, pageSize int) (string, error) {
-	if len(key) < 32 || pageSize < 1 || pageSize > 100 {
+func decodeTargetCursor(key []byte, value string, pageSize int, now time.Time) (string, error) {
+	if len(key) < 32 || pageSize < 1 || pageSize > 100 || now.IsZero() {
 		return "", fmt.Errorf("invalid cursor")
 	}
 	parts := strings.Split(value, ".")
@@ -51,7 +55,7 @@ func decodeTargetCursor(key []byte, value string, pageSize int) (string, error) 
 		return "", fmt.Errorf("invalid cursor")
 	}
 	var cursor targetCursor
-	if json.Unmarshal(payload, &cursor) != nil || cursor.Version != 1 || cursor.Route != "/v1/targets" || cursor.ID == "" || cursor.PageSize != pageSize {
+	if json.Unmarshal(payload, &cursor) != nil || cursor.Version != 1 || cursor.Route != "/v1/targets" || cursor.ID == "" || cursor.PageSize != pageSize || cursor.Expires <= now.UTC().Unix() {
 		return "", fmt.Errorf("invalid cursor")
 	}
 	return cursor.ID, nil

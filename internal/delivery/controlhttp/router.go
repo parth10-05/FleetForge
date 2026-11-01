@@ -46,7 +46,7 @@ func NewRouterWithResourcesUploadAndCampaigns(verifier access.TokenVerifier, now
 	if targets != nil {
 		mux.Handle("POST /v1/targets", withAuthentication(verifier)(requirePermission(access.PermissionRegisterTargets, now)(registerTargetHandler(targets))))
 		if lister, ok := targets.(targetLister); ok && len(cursorKey) >= 32 {
-			mux.Handle("GET /v1/targets", withAuthentication(verifier)(requirePermission(access.PermissionReadTargets, now)(listTargetsHandler(lister, cursorKey))))
+			mux.Handle("GET /v1/targets", withAuthentication(verifier)(requirePermission(access.PermissionReadTargets, now)(listTargetsHandler(lister, cursorKey, now))))
 		}
 		if reader, ok := targets.(targetReader); ok {
 			mux.Handle("GET /v1/targets/{target_id}", withAuthentication(verifier)(requirePermission(access.PermissionReadTargets, now)(getTargetHandler(reader))))
