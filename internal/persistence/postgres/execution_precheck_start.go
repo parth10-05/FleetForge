@@ -52,7 +52,7 @@ FOR UPDATE OF d,tu,ct,c`, work.DueWorkID, work.CommandID, work.DeliveryGeneratio
 	}
 	newRevision := revision + 1
 	if _, err = tx.Exec(ctx, `INSERT INTO decision_inputs (id,aggregate_type,aggregate_id,aggregate_revision,decision_sequence,logical_time,reducer_version,policy_version,normalized_facts,result,reason_code)
-VALUES (md5($1)::uuid,'TARGET_UPDATE',$2::uuid,$3,0,$4,'target-update/v1','campaign-policy/v1',jsonb_build_object('work_type',$5,'next_work_type','PRECHECK'),'PRECHECK','target.precheck.eligible')`, "fleetforge.precheck.decision/v1:"+work.DueWorkID, updateID, newRevision, now.UTC(), work.WorkType); err != nil {
+VALUES (md5($1)::uuid,'TARGET_UPDATE',$2::uuid,$3,0,$4,'target-update/v1','campaign-policy/v1',jsonb_build_object('work_type',$5::text,'next_work_type','PRECHECK'),'PRECHECK','target.precheck.eligible')`, "fleetforge.precheck.decision/v1:"+work.DueWorkID, updateID, newRevision, now.UTC(), work.WorkType); err != nil {
 		return classifyDueWorkError(err, "record precheck decision")
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,command_id,correlation_id,causation_id,action,reason_code)

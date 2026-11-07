@@ -53,7 +53,11 @@ func TestControlArtifactInitiationRoutePersistsAtomicReplay(t *testing.T) {
 		if table != "firmware_artifacts" {
 			query += " WHERE aggregate_id=$1::uuid"
 		}
-		if err := pool.QueryRow(ctx, query, response.Resource.Id.String()).Scan(&count); err != nil || count != 1 {
+		args := []any{response.Resource.Id.String()}
+		if table == "firmware_artifacts" {
+			args = nil
+		}
+		if err := pool.QueryRow(ctx, query, args...).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("%s count=%d err=%v", table, count, err)
 		}
 	}

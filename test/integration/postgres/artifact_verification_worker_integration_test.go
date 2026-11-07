@@ -17,7 +17,7 @@ import (
 
 func TestArtifactVerificationWorkerStreamsBoundVersionAndCompletesLease(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
-	now := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Add(time.Second)
 	const artifactID = "00000000-0000-0000-2621-000000000001"
 	digest, err := value.ParseSHA256Digest("sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 	if err != nil {
