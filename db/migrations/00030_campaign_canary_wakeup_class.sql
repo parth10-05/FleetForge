@@ -1,6 +1,7 @@
 -- +goose Up
 -- CANARY_START is consumed by the update-step wakeup handler, which atomically
 -- advances it to PRECHECK.  Keep the database trigger and repair path aligned.
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION create_initial_work_wakeup() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
     wakeup_class varchar(32);
@@ -27,6 +28,7 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+-- +goose StatementEnd
 
 UPDATE outbox_events o
 SET queue_class = 'update-step'
