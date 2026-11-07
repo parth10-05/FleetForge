@@ -40,10 +40,6 @@ func TestArtifactVerificationWorkerStreamsBoundVersionAndCompletesLease(t *testi
 	if err := persistence.BindUploadedArtifactObject(ctx, pool, persistence.ArtifactBindingRequest{ArtifactID: artifactID, Object: object}); err != nil {
 		t.Fatal(err)
 	}
-	scheduled, err := persistence.StartAndScheduleArtifactVerification(ctx, pool, persistence.ArtifactVerificationStartRequest{ArtifactID: artifactID, WorkID: "00000000-0000-0000-2621-000000000002", CommandID: "00000000-0000-0000-2621-000000000003", NotBefore: now})
-	if err != nil || !scheduled {
-		t.Fatalf("schedule=%v err=%v", scheduled, err)
-	}
 	verification := persistence.ArtifactVerificationAdapter{Pool: pool}
 	service := app.NewWithCompletion(nil, nil, store, nil, func() time.Time { return now }).WithVerification(verification, verification)
 	work := persistence.ArtifactVerificationWorkAdapter{Pool: pool}

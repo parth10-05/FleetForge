@@ -64,6 +64,24 @@ func StartCampaign(ctx context.Context, pool *pgxpool.Pool, request StartCampaig
 		return fmt.Errorf("begin campaign start: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // transaction is committed below
+	if err := startCampaignTx(ctx, tx, request); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: serialization during campaign start", ErrCampaignStartConflict)
+		}
+		return fmt.Errorf("commit campaign start: %w", err)
+	}
+	return nil
+}
+
+// startCampaignTx preserves the public StartCampaign semantics while allowing
+// an API command to complete its idempotency record in the same transaction.
+func startCampaignTx(ctx context.Context, tx pgx.Tx, request StartCampaignRequest) error {
+	if err := validateStartCampaignRequest(request); err != nil {
+		return err
+	}
 
 	var state, policyVersion, planHash string
 	var revision, epoch int64
@@ -135,12 +153,6 @@ VALUES ($1::uuid,'CAMPAIGN',$2::uuid,$3,'campaign.canary_started',$4,$5)`, reque
 VALUES ($1::uuid,$2::uuid,'TARGET_UPDATE',$3::uuid,'CANARY_START',1,$4,$5,$6)`, intent.DueWorkID, intent.CommandID, intent.TargetUpdateID, request.Now, update.revision, update.epoch); err != nil {
 			return fmt.Errorf("schedule canary due work: %w", err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		if isSerialization(err) {
-			return fmt.Errorf("%w: serialization during campaign start", ErrCampaignStartConflict)
-		}
-		return fmt.Errorf("commit campaign start: %w", err)
 	}
 	return nil
 }

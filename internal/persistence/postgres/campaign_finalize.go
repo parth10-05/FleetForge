@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/parth10-05/fleetforge/internal/domain/campaignplan"
 	"github.com/parth10-05/fleetforge/internal/domain/value"
 )
+
+var ErrCanaryEvaluationPending = errors.New("canary evaluation pending")
 
 // FinalizeCanaryRequest identifies the immutable finalization inputs. The
 // finalizer derives the evaluation from persisted facts in its transaction;
@@ -67,7 +70,7 @@ func FinalizeCanary(ctx context.Context, pool *pgxpool.Pool, r FinalizeCanaryReq
 		return fmt.Errorf("evaluate canary finalization evidence: %w", err)
 	}
 	if decision.State == campaignplan.EvaluationPending {
-		return fmt.Errorf("canary evaluation is pending: %s", decision.Reason)
+		return fmt.Errorf("%w: %s", ErrCanaryEvaluationPending, decision.Reason)
 	}
 	first, err := value.ParseCommandID(r.TerminalCommandID)
 	if err != nil {

@@ -49,7 +49,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.Handle("/", health.Routes())
 	artifactService := control.NewArtifactService(postgres.ControlArtifactAdapter{Pool: pool}, time.Now).WithInitiation(postgres.ControlArtifactAdapter{Pool: pool}, localartifactissuer.New(cfg.ObjectStoreHMACKey, nil), "artifacts")
-	mux.Handle("/v1/", controlhttp.NewRouterWithResourcesUploadAndCampaigns(verifier, time.Now, control.NewTargetService(postgres.ControlTargetAdapter{Pool: pool}, time.Now), artifactService, control.NewCampaignService(postgres.ControlCampaignAdapter{Pool: pool}, time.Now), cfg.CursorHMACKey, "http://"+cfg.ObjectStoreAddress+"/v1/objects/upload"))
+	mux.Handle("/v1/", controlhttp.NewRouterWithResourcesUploadAndCampaigns(verifier, time.Now, control.NewTargetService(postgres.ControlTargetAdapter{Pool: pool}, time.Now), artifactService, control.NewCampaignService(postgres.ControlCampaignAdapter{Pool: pool}, time.Now), cfg.CursorHMACKey, "http://"+cfg.ObjectStoreAddress+"/v1/objects/upload", control.NewAttentionService(postgres.ControlAttentionAdapter{Pool: pool}, time.Now)))
 	mux.Handle("/v1/events/synthetic", eventhinthttp.New(cfg.EventHMACKey, postgres.EventHintStore{Pool: pool}, time.Now).Routes())
 	server := newServer(cfg.Address, mux)
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

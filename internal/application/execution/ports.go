@@ -10,9 +10,9 @@ import (
 )
 
 type WorkFence struct {
-	DueWorkID, CommandID, LeaseToken     string
-	DeliveryGeneration, ExpectedRevision int64
-	ExpectedCommandEpoch                 *int64
+	DueWorkID, CommandID, LeaseToken, WorkType string
+	DeliveryGeneration, ExpectedRevision       int64
+	ExpectedCommandEpoch                       *int64
 }
 type ObjectIdentity struct {
 	Provider, Container, ObjectKey, ObjectVersion, SHA256 string
@@ -168,14 +168,14 @@ type VerifiedPrincipal struct {
 	Verified                   bool
 }
 type AdminResolutionCommand struct {
-	Principal                                      VerifiedPrincipal
-	AccessPrincipal                                access.Principal
-	Work                                           WorkFence
-	AttemptID, Action, Reason, EvidenceFingerprint string
-	ReservationDisposition                         string
-	JournalConfirmedAbsent, LateCallerExcluded     bool
-	LateCallerExclusionMethod, ProofReference      string
-	Now                                            time.Time
+	Principal                                                  VerifiedPrincipal
+	AccessPrincipal                                            access.Principal
+	Work                                                       WorkFence
+	AttemptID, Action, Reason, ReasonCode, EvidenceFingerprint string
+	ReservationDisposition                                     string
+	JournalConfirmedAbsent, LateCallerExcluded                 bool
+	LateCallerExclusionMethod, ProofReference                  string
+	Now                                                        time.Time
 }
 type ResolutionResult struct{ TargetUpdateID string }
 

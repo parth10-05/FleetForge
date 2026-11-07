@@ -12,7 +12,9 @@ import (
 	"time"
 
 	artifactapp "github.com/parth10-05/fleetforge/internal/application/artifacts"
+	validationapp "github.com/parth10-05/fleetforge/internal/application/campaignvalidation"
 	"github.com/parth10-05/fleetforge/internal/application/lifecycle"
+	preflightapp "github.com/parth10-05/fleetforge/internal/application/preflight"
 	"github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/buildinfo"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
@@ -48,6 +50,18 @@ func run() error {
 	service := artifactapp.NewWithCompletion(nil, nil, store, nil, nil).WithVerification(verification, verification)
 	work := postgres.ArtifactVerificationWorkAdapter{Pool: pool}
 	worker := artifactapp.NewWorker(service, work, work, nil)
+	preflight := postgres.PreflightAdapter{Pool: pool}
+	validation := validationapp.NewWorker(
+		postgres.CampaignValidationWorkAdapter{Pool: pool},
+		postgres.CampaignValidationWorkAdapter{Pool: pool},
+		validationapp.NewValidationProcessor(
+			postgres.CampaignValidationInputAdapter{Pool: pool},
+			preflightapp.New(preflight, preflight, nil),
+			postgres.CampaignValidationFinalizer{Pool: pool},
+			nil,
+		),
+		nil,
+	)
 	controller := lifecycle.NewController()
 	slog.Info("orchestrator worker started", "role", "orchestrator-worker", "environment", cfg.Environment, "version", buildinfo.Current().Version)
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -57,6 +71,15 @@ func run() error {
 	for {
 		if err := runVerificationOnce(shutdownContext, worker, cfg.Owner); err != nil {
 			slog.Warn("artifact verification work cycle failed", "error", err.Error())
+		}
+		if err := runCampaignValidationOnce(shutdownContext, validation, cfg.Owner); err != nil {
+			slog.Warn("campaign validation work cycle failed", "error", err.Error())
+		}
+		if _, err := postgres.FinalizeEligibleCanaryOnce(shutdownContext, pool, time.Now().UTC()); err != nil {
+			slog.Warn("campaign canary finalization cycle failed", "error", err.Error())
+		}
+		if _, err := postgres.CompleteEligibleCampaignOnce(shutdownContext, pool, time.Now().UTC()); err != nil {
+			slog.Warn("campaign completion cycle failed", "error", err.Error())
 		}
 		select {
 		case <-shutdownContext.Done():
@@ -81,6 +104,16 @@ func runVerificationOnce(ctx context.Context, worker *artifactapp.Worker, owner 
 		return err
 	}
 	return worker.RunOnce(ctx, artifactapp.VerificationWorkClaimRequest{Owner: owner, LeaseToken: token, Now: now, LeaseExpiresAt: now.Add(time.Minute)})
+}
+
+func runCampaignValidationOnce(ctx context.Context, worker *validationapp.Worker, owner string) error {
+	now := time.Now().UTC()
+	token, err := leaseToken()
+	if err != nil {
+		return err
+	}
+	_, err = worker.RunOnce(ctx, validationapp.ClaimRequest{Owner: owner, LeaseToken: token, Now: now, LeaseExpiresAt: now.Add(time.Minute)})
+	return err
 }
 
 func leaseToken() (string, error) {

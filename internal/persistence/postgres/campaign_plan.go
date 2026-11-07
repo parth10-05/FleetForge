@@ -37,29 +37,62 @@ type CampaignPlanPersistenceRequest struct {
 	Plan             campaignplan.Plan
 }
 
+type preparedCampaignPlanPersistence struct {
+	request     CampaignPlanPersistenceRequest
+	members     []CampaignPlanMember
+	assignments map[string]campaignplan.Assignment
+	policyHash  value.SHA256Digest
+	effective   []byte
+}
+
 // PersistCampaignPlan stores the complete immutable candidate-backed plan for
 // a VALIDATING campaign. It performs no enrollment,
 // outbox publication, worker claim, or external I/O; READY remains exclusively
 // owned by AcquireReadinessEnrollment after its P02 trust recheck.
 func PersistCampaignPlan(ctx context.Context, pool *pgxpool.Pool, request CampaignPlanPersistenceRequest) error {
-	if pool == nil || request.ExpectedRevision < 0 || request.Plan.Version != campaignplan.PlanVersionV1 || request.Plan.Hash.IsZero() || len(request.Members) == 0 || len(request.Members) != len(request.Plan.Assignments) {
+	if pool == nil {
 		return fmt.Errorf("invalid campaign plan persistence request")
 	}
+	prepared, err := prepareCampaignPlanPersistence(request)
+	if err != nil {
+		return err
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return fmt.Errorf("begin campaign plan persistence: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := persistCampaignPlanTx(ctx, tx, prepared); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: campaign plan serialization", ErrCampaignPlanConflict)
+		}
+		return fmt.Errorf("commit campaign plan persistence: %w", err)
+	}
+	return nil
+}
+
+func prepareCampaignPlanPersistence(request CampaignPlanPersistenceRequest) (preparedCampaignPlanPersistence, error) {
+	if request.ExpectedRevision < 0 || request.Plan.Version != campaignplan.PlanVersionV1 || request.Plan.Hash.IsZero() || len(request.Members) == 0 || len(request.Members) != len(request.Plan.Assignments) {
+		return preparedCampaignPlanPersistence{}, fmt.Errorf("invalid campaign plan persistence request")
+	}
 	if _, err := uuidParameter(request.CampaignID); err != nil {
-		return fmt.Errorf("campaign plan campaign id: %w", err)
+		return preparedCampaignPlanPersistence{}, fmt.Errorf("campaign plan campaign id: %w", err)
 	}
 	if _, err := uuidParameter(request.CandidateID); err != nil {
-		return fmt.Errorf("campaign plan candidate id: %w", err)
+		return preparedCampaignPlanPersistence{}, fmt.Errorf("campaign plan candidate id: %w", err)
 	}
 	for _, raw := range []string{request.PolicyVersionID, request.CanaryWaveID, request.LaterWaveID} {
 		if _, err := uuidParameter(raw); err != nil {
-			return fmt.Errorf("campaign plan identity: %w", err)
+			return preparedCampaignPlanPersistence{}, fmt.Errorf("campaign plan identity: %w", err)
 		}
 	}
 	assignments := make(map[string]campaignplan.Assignment, len(request.Plan.Assignments))
 	for _, assignment := range request.Plan.Assignments {
 		if _, exists := assignments[assignment.TargetID]; exists || assignment.TargetID == "" {
-			return fmt.Errorf("invalid campaign plan assignment")
+			return preparedCampaignPlanPersistence{}, fmt.Errorf("invalid campaign plan assignment")
 		}
 		assignments[assignment.TargetID] = assignment
 	}
@@ -67,25 +100,25 @@ func PersistCampaignPlan(ctx context.Context, pool *pgxpool.Pool, request Campai
 	sort.Slice(members, func(i, j int) bool { return members[i].TargetID < members[j].TargetID })
 	for index, member := range members {
 		if _, err := uuidParameter(member.TargetID); err != nil {
-			return fmt.Errorf("campaign plan target id: %w", err)
+			return preparedCampaignPlanPersistence{}, fmt.Errorf("campaign plan target id: %w", err)
 		}
 		if _, err := uuidParameter(member.CampaignTargetID); err != nil {
-			return fmt.Errorf("campaign plan membership id: %w", err)
+			return preparedCampaignPlanPersistence{}, fmt.Errorf("campaign plan membership id: %w", err)
 		}
 		if _, err := uuidParameter(member.TargetUpdateID); err != nil {
-			return fmt.Errorf("campaign plan update id: %w", err)
+			return preparedCampaignPlanPersistence{}, fmt.Errorf("campaign plan update id: %w", err)
 		}
 		if index > 0 && members[index-1].TargetID == member.TargetID {
-			return fmt.Errorf("duplicate campaign plan member")
+			return preparedCampaignPlanPersistence{}, fmt.Errorf("duplicate campaign plan member")
 		}
 		if _, exists := assignments[member.TargetID]; !exists {
-			return fmt.Errorf("member absent from plan")
+			return preparedCampaignPlanPersistence{}, fmt.Errorf("member absent from plan")
 		}
 	}
 	policyHash := sha256.Sum256(request.Plan.PolicyJSON)
 	policyDigest, err := value.ParseSHA256Digest("sha256:" + hex.EncodeToString(policyHash[:]))
 	if err != nil {
-		return fmt.Errorf("hash canonical policy: %w", err)
+		return preparedCampaignPlanPersistence{}, fmt.Errorf("hash canonical policy: %w", err)
 	}
 	effective, err := json.Marshal(struct {
 		Canary      uint64                    `json:"canary"`
@@ -93,13 +126,19 @@ func PersistCampaignPlan(ctx context.Context, pool *pgxpool.Pool, request Campai
 		Assignments []campaignplan.Assignment `json:"assignments"`
 	}{request.Plan.EffectiveCanary, request.Plan.EffectiveLater, request.Plan.Assignments})
 	if err != nil || len(effective) > 32*1024 {
-		return fmt.Errorf("encode effective campaign plan")
+		return preparedCampaignPlanPersistence{}, fmt.Errorf("encode effective campaign plan")
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
-	if err != nil {
-		return fmt.Errorf("begin campaign plan persistence: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	return preparedCampaignPlanPersistence{request: request, members: members, assignments: assignments, policyHash: policyDigest, effective: effective}, nil
+}
+
+// persistCampaignPlanTx stores the immutable plan inside a caller-owned
+// serializable transaction. It intentionally does not transition the campaign.
+func persistCampaignPlanTx(ctx context.Context, tx pgx.Tx, prepared preparedCampaignPlanPersistence) error {
+	request := prepared.request
+	members := prepared.members
+	assignments := prepared.assignments
+	policyDigest := prepared.policyHash
+	effective := prepared.effective
 	var state, artifactID string
 	var revision int64
 	if err := tx.QueryRow(ctx, `SELECT state,revision,artifact_id::text FROM campaigns WHERE id=$1::uuid FOR UPDATE`, request.CampaignID).Scan(&state, &revision, &artifactID); err != nil {
@@ -141,12 +180,6 @@ func PersistCampaignPlan(ctx context.Context, pool *pgxpool.Pool, request Campai
 	}
 	if candidateCount != len(members) {
 		return ErrCampaignPlanConflict
-	}
-	if err := tx.Commit(ctx); err != nil {
-		if isSerialization(err) {
-			return fmt.Errorf("%w: campaign plan serialization", ErrCampaignPlanConflict)
-		}
-		return fmt.Errorf("commit campaign plan persistence: %w", err)
 	}
 	return nil
 }

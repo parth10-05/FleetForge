@@ -56,6 +56,9 @@ func TestWakeupPrecheckStartHandlerCannotSubmitFirmware(t *testing.T) {
 	if !handler.Supports(orchestration.Envelope{QueueClass: orchestration.QueueUpdateStep, WorkType: "CANARY_START"}) {
 		t.Fatal("canary start wakeup was not supported")
 	}
+	if !handler.Supports(orchestration.Envelope{QueueClass: orchestration.QueueUpdateStep, WorkType: "LATER_WAVE_START"}) {
+		t.Fatal("later-wave start wakeup was not supported")
+	}
 	if handler.Supports(orchestration.Envelope{QueueClass: orchestration.QueueUpdateStep, WorkType: "SUBMIT"}) {
 		t.Fatal("submit wakeup must not have a precheck-start route")
 	}

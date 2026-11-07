@@ -2,6 +2,7 @@ package controlhttp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,6 +84,150 @@ func TestValidateCampaignHandlerRequiresRevisionAndQueuesWork(t *testing.T) {
 	}
 }
 
+func TestValidateCampaignHandlerMapsConflictsWithoutMaskingThemAsPreconditions(t *testing.T) {
+	campaignID := "10000000-0000-0000-0000-000000000001"
+	validator := validateCampaignFunc(func(context.Context, access.Principal, control.CommandMeta, string, int64) (control.CampaignCreationResult, error) {
+		return control.CampaignCreationResult{}, control.ErrCampaignCommandConflict
+	})
+	handler := validateCampaignHandler(validator)
+	request := httptest.NewRequest(http.MethodPost, "/v1/campaigns/"+campaignID+":validate", nil)
+	request.SetPathValue("campaign_id", campaignID)
+	request.Header.Set(idempotencyHeader, "campaign-validate-1")
+	request.Header.Set("If-Match", "\"rev-3\"")
+	request = request.WithContext(context.WithValue(request.Context(), principalKey{}, access.Principal{Subject: "operator", Roles: []access.Role{access.RoleOperator}, AuthenticatedAt: time.Now().UTC(), ExpiresAt: time.Now().Add(time.Hour), IssuerClass: "local"}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCampaignRouterRegistersValidationOnlyForValidationCapableService(t *testing.T) {
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	campaignID := "10000000-0000-0000-0000-000000000001"
+	service := &recordingCampaignCreator{}
+	verifier := tokenVerifierFunc(func(context.Context, string) (access.Principal, error) {
+		return access.Principal{Subject: "operator", Roles: []access.Role{access.RoleOperator}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}, nil
+	})
+	router := NewRouterWithResourcesUploadAndCampaigns(verifier, func() time.Time { return now }, nil, nil, service, nil, "")
+	request := httptest.NewRequest(http.MethodPost, "/v1/campaigns/"+campaignID+":validate", nil)
+	request.Header.Set("Authorization", "Bearer operator")
+	request.Header.Set(idempotencyHeader, "campaign-validate-1")
+	request.Header.Set("If-Match", "\"rev-3\"")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusAccepted || service.validateCalls != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", recorder.Code, service.validateCalls, recorder.Body.String())
+	}
+}
+
+func TestCampaignRouterReturnsRevisionedProjection(t *testing.T) {
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	campaignID := "10000000-0000-0000-0000-000000000001"
+	service := &recordingCampaignCreator{}
+	verifier := tokenVerifierFunc(func(context.Context, string) (access.Principal, error) {
+		return access.Principal{Subject: "viewer", Roles: []access.Role{access.RoleViewer}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}, nil
+	})
+	router := NewRouterWithResourcesUploadAndCampaigns(verifier, func() time.Time { return now }, nil, nil, service, nil, "")
+	request := httptest.NewRequest(http.MethodGet, "/v1/campaigns/"+campaignID, nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || recorder.Header().Get("ETag") != "\"rev-3\"" {
+		t.Fatalf("status=%d etag=%q body=%s", recorder.Code, recorder.Header().Get("ETag"), recorder.Body.String())
+	}
+}
+
+func TestCampaignTargetsRouteBindsCursorToCampaign(t *testing.T) {
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	campaignID := "10000000-0000-0000-0000-000000000001"
+	key := []byte("01234567890123456789012345678901")
+	service := &recordingCampaignCreator{}
+	verifier := tokenVerifierFunc(func(context.Context, string) (access.Principal, error) {
+		return access.Principal{Subject: "viewer", Roles: []access.Role{access.RoleViewer}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}, nil
+	})
+	router := NewRouterWithResourcesUploadAndCampaigns(verifier, func() time.Time { return now }, nil, nil, service, key, "")
+	request := httptest.NewRequest(http.MethodGet, "/v1/campaigns/"+campaignID+"/targets?page_size=1", nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	var page TargetPage
+	if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &page) != nil || page.NextCursor == nil {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/campaigns/10000000-0000-0000-0000-000000000099/targets?page_size=1&cursor="+*page.NextCursor, nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("cross-campaign cursor status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCampaignAuditRouteBindsCursorToCampaign(t *testing.T) {
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	campaignID := "10000000-0000-0000-0000-000000000001"
+	key := []byte("01234567890123456789012345678901")
+	service := &recordingCampaignCreator{}
+	verifier := tokenVerifierFunc(func(context.Context, string) (access.Principal, error) {
+		return access.Principal{Subject: "viewer", Roles: []access.Role{access.RoleViewer}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}, nil
+	})
+	router := NewRouterWithResourcesUploadAndCampaigns(verifier, func() time.Time { return now }, nil, nil, service, key, "")
+	request := httptest.NewRequest(http.MethodGet, "/v1/campaigns/"+campaignID+"/audit?page_size=1", nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	var page AuditPage
+	if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &page) != nil || page.NextCursor == nil {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "/v1/campaigns/10000000-0000-0000-0000-000000000099/audit?page_size=1&cursor="+*page.NextCursor, nil)
+	request.Header.Set("Authorization", "Bearer viewer")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("cross-campaign cursor status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCampaignRouterStartsWithRevisionAndIdempotency(t *testing.T) {
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	campaignID := "10000000-0000-0000-0000-000000000001"
+	service := &recordingCampaignCreator{}
+	verifier := tokenVerifierFunc(func(context.Context, string) (access.Principal, error) {
+		return access.Principal{Subject: "operator", Roles: []access.Role{access.RoleOperator}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}, nil
+	})
+	router := NewRouterWithResourcesUploadAndCampaigns(verifier, func() time.Time { return now }, nil, nil, service, nil, "")
+	request := httptest.NewRequest(http.MethodPost, "/v1/campaigns/"+campaignID+":start", nil)
+	request.Header.Set("Authorization", "Bearer operator")
+	request.Header.Set(idempotencyHeader, "campaign-start-001")
+	request.Header.Set("If-Match", "\"rev-3\"")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusAccepted || service.startCalls != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", recorder.Code, service.startCalls, recorder.Body.String())
+	}
+}
+
+func TestCampaignRouterPausesWithRevisionAndIdempotency(t *testing.T) {
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	campaignID := "10000000-0000-0000-0000-000000000001"
+	service := &recordingCampaignCreator{}
+	verifier := tokenVerifierFunc(func(context.Context, string) (access.Principal, error) {
+		return access.Principal{Subject: "operator", Roles: []access.Role{access.RoleOperator}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}, nil
+	})
+	router := NewRouterWithResourcesUploadAndCampaigns(verifier, func() time.Time { return now }, nil, nil, service, nil, "")
+	request := httptest.NewRequest(http.MethodPost, "/v1/campaigns/"+campaignID+":pause", nil)
+	request.Header.Set("Authorization", "Bearer operator")
+	request.Header.Set(idempotencyHeader, "campaign-pause-001")
+	request.Header.Set("If-Match", "\"rev-3\"")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusAccepted || service.pauseCalls != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", recorder.Code, service.pauseCalls, recorder.Body.String())
+	}
+}
+
 type validateCampaignFunc func(context.Context, access.Principal, control.CommandMeta, string, int64) (control.CampaignCreationResult, error)
 
 func (f validateCampaignFunc) ValidateCampaign(ctx context.Context, principal access.Principal, meta control.CommandMeta, campaignID string, revision int64) (control.CampaignCreationResult, error) {
@@ -90,12 +235,56 @@ func (f validateCampaignFunc) ValidateCampaign(ctx context.Context, principal ac
 }
 
 type recordingCampaignCreator struct {
-	calls   int
-	command control.CreateCampaignCommand
+	calls         int
+	validateCalls int
+	startCalls    int
+	pauseCalls    int
+	command       control.CreateCampaignCommand
 }
 
 func (creator *recordingCampaignCreator) CreateCampaign(_ context.Context, _ access.Principal, meta control.CommandMeta, command control.CreateCampaignCommand) (control.CampaignCreationResult, error) {
 	creator.calls++
 	creator.command = command
 	return control.CampaignCreationResult{CampaignID: command.CampaignID, CommandID: meta.CommandID, AcceptedAt: time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)}, nil
+}
+
+func (creator *recordingCampaignCreator) ValidateCampaign(_ context.Context, _ access.Principal, meta control.CommandMeta, campaignID string, revision int64) (control.CampaignCreationResult, error) {
+	creator.validateCalls++
+	return control.CampaignCreationResult{CampaignID: campaignID, CommandID: meta.CommandID, Revision: revision + 1, AcceptedAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}, nil
+}
+
+func (creator *recordingCampaignCreator) StartCampaign(_ context.Context, _ access.Principal, meta control.CommandMeta, campaignID string, revision int64) (control.CampaignCreationResult, error) {
+	creator.startCalls++
+	return control.CampaignCreationResult{CampaignID: campaignID, CommandID: meta.CommandID, Revision: revision + 1, AcceptedAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}, nil
+}
+
+func (creator *recordingCampaignCreator) PauseCampaign(_ context.Context, _ access.Principal, meta control.CommandMeta, campaignID string, revision int64) (control.CampaignCreationResult, error) {
+	creator.pauseCalls++
+	return control.CampaignCreationResult{CampaignID: campaignID, CommandID: meta.CommandID, Revision: revision + 1, AcceptedAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}, nil
+}
+
+func (creator *recordingCampaignCreator) GetCampaign(_ context.Context, _ access.Principal, campaignID string) (control.CampaignProjection, error) {
+	return control.CampaignProjection{CampaignID: campaignID, State: "READY", Revision: 3, AsOf: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}, nil
+}
+
+func (creator *recordingCampaignCreator) ListCampaignTargets(_ context.Context, _ access.Principal, _ string, afterID string, pageSize int) (control.CampaignTargetPage, error) {
+	items := []control.TargetProjection{{TargetID: "10000000-0000-0000-0000-000000000010", State: "PENDING", Revision: 1, AsOf: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}}
+	if afterID != "" {
+		return control.CampaignTargetPage{}, nil
+	}
+	if pageSize == 1 {
+		return control.CampaignTargetPage{Items: items, NextTargetID: items[0].TargetID}, nil
+	}
+	return control.CampaignTargetPage{Items: items}, nil
+}
+
+func (creator *recordingCampaignCreator) ListCampaignAudit(_ context.Context, _ access.Principal, _ string, _, afterSequence int64, pageSize int) (control.CampaignAuditPage, error) {
+	if afterSequence >= 0 {
+		return control.CampaignAuditPage{}, nil
+	}
+	items := []control.CampaignAuditRecord{{Action: "CAMPAIGN_DRAFT_CREATED", Outcome: "campaign.draft.created", OccurredAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}}
+	if pageSize == 1 {
+		return control.CampaignAuditPage{Items: items, NextAggregateRevision: 0, NextEventSequence: 0, HasNext: true}, nil
+	}
+	return control.CampaignAuditPage{Items: items}, nil
 }

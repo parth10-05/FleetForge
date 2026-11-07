@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/parth10-05/fleetforge/internal/domain/artifact"
 	"github.com/parth10-05/fleetforge/internal/domain/value"
@@ -49,14 +48,8 @@ func TestArtifactBindingAndVerificationPersistOneImmutableResult(t *testing.T) {
 	if err := persistence.BindUploadedArtifactObject(ctx, pool, persistence.ArtifactBindingRequest{ArtifactID: artifactID, Object: object}); err != nil {
 		t.Fatal(err)
 	}
-	start := persistence.ArtifactVerificationStartRequest{ArtifactID: artifactID, WorkID: "00000000-0000-0000-2401-000000000002", CommandID: "00000000-0000-0000-2401-000000000003", NotBefore: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}
-	scheduled, err := persistence.StartAndScheduleArtifactVerification(ctx, pool, start)
-	if err != nil || !scheduled {
-		t.Fatalf("start scheduled=%v err=%v", scheduled, err)
-	}
-	repeated, err := persistence.StartAndScheduleArtifactVerification(ctx, pool, start)
-	if err != nil || repeated {
-		t.Fatalf("repeat start scheduled=%v err=%v", repeated, err)
+	if err := persistence.BindUploadedArtifactObject(ctx, pool, persistence.ArtifactBindingRequest{ArtifactID: artifactID, Object: object}); err != nil {
+		t.Fatalf("repeated binding: %v", err)
 	}
 	wrongObject, err := artifact.NewObjectIdentity(artifact.ObjectProviderLocalV1, "artifacts", "artifacts/v1/substituted.bin", object.VersionID(), object.Size(), digest)
 	if err != nil {

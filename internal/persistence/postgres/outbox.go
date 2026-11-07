@@ -332,7 +332,7 @@ func queueClassForWorkType(workType string) string {
 		return string(orchestration.QueueDiscovery)
 	case strings.Contains(workType, "ARTIFACT"):
 		return string(orchestration.QueueArtifactVerification)
-	case workType == "SUBMIT" || workType == "UPDATE_STEP":
+	case workType == "CANARY_START" || workType == "LATER_WAVE_START" || workType == "SUBMIT" || workType == "UPDATE_STEP":
 		return string(orchestration.QueueUpdateStep)
 	case strings.Contains(workType, "RECONCIL"):
 		return string(orchestration.QueueReconciliation)

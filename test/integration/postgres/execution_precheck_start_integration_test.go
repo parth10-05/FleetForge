@@ -23,7 +23,7 @@ VALUES ($1::uuid,$2::uuid,'TARGET_UPDATE',$3::uuid,'CANARY_START',1,$4,0,7,'CLAI
 		t.Fatal(err)
 	}
 	epoch := int64(7)
-	work := execution.WorkFence{DueWorkID: workID, CommandID: commandID, LeaseToken: lease, ExpectedRevision: 0, ExpectedCommandEpoch: &epoch}
+	work := execution.WorkFence{DueWorkID: workID, CommandID: commandID, LeaseToken: lease, WorkType: "CANARY_START", ExpectedRevision: 0, ExpectedCommandEpoch: &epoch}
 	if err := persistence.StartFirmwarePrecheck(ctx, pool, work, now); err != nil {
 		t.Fatal(err)
 	}

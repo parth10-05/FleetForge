@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/parth10-05/fleetforge/internal/application/access"
 	"github.com/parth10-05/fleetforge/internal/application/control"
 )
@@ -20,6 +21,9 @@ func (adapter ControlCampaignAdapter) ValidateCampaign(ctx context.Context, prin
 	claim := IdempotencyClaim{ID: meta.ClaimID, ActorID: principal.Subject, Route: meta.Route, RawKey: meta.IdempotencyKey, RequestBody: meta.CanonicalRequest, CommandID: meta.CommandID, OwnerToken: meta.OwnerToken, TTL: 30 * time.Minute}
 	if err := ClaimIdempotencyKey(ctx, adapter.Pool, claim); err != nil {
 		if !errors.Is(err, ErrIdempotencyInProgress) {
+			if errors.Is(err, ErrIdempotencyConflict) {
+				return control.CampaignCreationResult{}, control.ErrCampaignCommandConflict
+			}
 			return control.CampaignCreationResult{}, err
 		}
 		_, reference, found, replayErr := GetCompletedIdempotencyRecord(ctx, adapter.Pool, principal.Subject, meta.Route, meta.IdempotencyKey)
@@ -27,7 +31,7 @@ func (adapter ControlCampaignAdapter) ValidateCampaign(ctx context.Context, prin
 			if replayErr != nil {
 				return control.CampaignCreationResult{}, replayErr
 			}
-			return control.CampaignCreationResult{}, ErrIdempotencyInProgress
+			return control.CampaignCreationResult{}, control.ErrCampaignCommandConflict
 		}
 		return adapter.campaignValidationReplay(ctx, reference)
 	}
@@ -35,10 +39,13 @@ func (adapter ControlCampaignAdapter) ValidateCampaign(ctx context.Context, prin
 	var commandEpoch int64
 	var frozenPolicy, frozenTargets *string
 	if err := adapter.Pool.QueryRow(ctx, "SELECT state,policy_version_id::text,command_epoch,frozen_policy_hash,frozen_target_snapshot_hash FROM campaigns WHERE id=$1::uuid AND revision=$2", campaignID, expectedRevision).Scan(&state, &policyVersionID, &commandEpoch, &frozenPolicy, &frozenTargets); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return control.CampaignCreationResult{}, control.ErrCampaignRevisionConflict
+		}
 		return control.CampaignCreationResult{}, fmt.Errorf("load campaign validation intent: %w", err)
 	}
 	if state != "DRAFT" {
-		return control.CampaignCreationResult{}, ErrRevisionConflict
+		return control.CampaignCreationResult{}, control.ErrCampaignRevisionConflict
 	}
 	reference, err := (ResponseReference{Operation: "campaign-validate", ResourceID: campaignID, Revision: expectedRevision + 1, CommandID: meta.CommandID}).Encode()
 	if err != nil {
@@ -47,6 +54,12 @@ func (adapter ControlCampaignAdapter) ValidateCampaign(ctx context.Context, prin
 	facts, _ := json.Marshal(map[string]any{"campaign_id": campaignID, "work_id": meta.WorkID})
 	mutation := AggregateMutation{AggregateType: "CAMPAIGN", AggregateID: campaignID, ExpectedRevision: expectedRevision, NewState: "VALIDATING", CommandEpoch: commandEpoch, PolicyVersionID: policyVersionID, FrozenPolicyHash: frozenPolicy, FrozenTargetSnapshotHash: frozenTargets, ActorID: principal.Subject, CommandID: &meta.CommandID, CorrelationID: meta.CorrelationID, CausationID: meta.CommandID, Action: "CAMPAIGN_VALIDATION_REQUESTED", ReasonCode: "campaign.validation.requested", OutboxEventID: meta.OutboxEventID, OutboxEventType: "campaign.validation_requested", OutboxSchemaVersion: 1, OutboxPayload: facts, DecisionInputID: meta.DecisionInputID, DecisionLogicalTime: time.Now().UTC(), ReducerVersion: "control-api/v1", DecisionPolicyVersion: "campaign-validation/v1", NormalizedFacts: facts, DecisionResult: "VALIDATION_QUEUED", DueWorkID: meta.WorkID, DueWorkCommandID: meta.CommandID, DueWorkSubjectType: "CAMPAIGN", DueWorkSubjectID: campaignID, DueWorkWorkType: campaignValidationWorkType, DueWorkSchemaVersion: 1, DueWorkNotBefore: time.Now().UTC(), DueWorkExpRevision: expectedRevision + 1}
 	if err := ApplyVersionedIdempotentAggregateMutation(ctx, adapter.Pool, IdempotentAggregateMutation{Completion: IdempotencyCompletion{ActorID: principal.Subject, Route: meta.Route, RawKey: meta.IdempotencyKey, ResponseStatus: 202, ResponseReference: reference}, OwnerToken: meta.OwnerToken, Mutation: mutation}); err != nil {
+		if errors.Is(err, ErrRevisionConflict) {
+			return control.CampaignCreationResult{}, control.ErrCampaignRevisionConflict
+		}
+		if errors.Is(err, ErrIdempotencyConflict) || errors.Is(err, ErrIdempotencyInProgress) {
+			return control.CampaignCreationResult{}, control.ErrCampaignCommandConflict
+		}
 		return control.CampaignCreationResult{}, err
 	}
 	return adapter.campaignValidationReplay(ctx, reference)

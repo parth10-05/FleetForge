@@ -13,6 +13,19 @@ const (
 	BearerAuthScopes = "bearerAuth.Scopes"
 )
 
+// Defines values for AttentionResolutionAction.
+const (
+	ADOPT             AttentionResolutionAction = "ADOPT"
+	RETRYPROVENABSENT AttentionResolutionAction = "RETRY_PROVEN_ABSENT"
+	TERMINAL          AttentionResolutionAction = "TERMINAL"
+)
+
+// Defines values for AttentionResolutionReservationDisposition.
+const (
+	QUARANTINE AttentionResolutionReservationDisposition = "QUARANTINE"
+	RELEASE    AttentionResolutionReservationDisposition = "RELEASE"
+)
+
 // Artifact defines model for artifact.
 type Artifact struct {
 	AsOf  time.Time          `json:"as_of"`
@@ -47,11 +60,21 @@ type ArtifactUpload struct {
 
 // AttentionResolution defines model for attentionResolution.
 type AttentionResolution struct {
-	Action     string  `json:"action"`
-	Reason     string  `json:"reason"`
-	ReasonCode string  `json:"reason_code"`
-	Reference  *string `json:"reference,omitempty"`
+	Action                    AttentionResolutionAction                  `json:"action"`
+	JournalConfirmedAbsent    *bool                                      `json:"journal_confirmed_absent,omitempty"`
+	LateCallerExcluded        *bool                                      `json:"late_caller_excluded,omitempty"`
+	LateCallerExclusionMethod *string                                    `json:"late_caller_exclusion_method,omitempty"`
+	Reason                    string                                     `json:"reason"`
+	ReasonCode                string                                     `json:"reason_code"`
+	Reference                 *string                                    `json:"reference,omitempty"`
+	ReservationDisposition    *AttentionResolutionReservationDisposition `json:"reservation_disposition,omitempty"`
 }
+
+// AttentionResolutionAction defines model for AttentionResolution.Action.
+type AttentionResolutionAction string
+
+// AttentionResolutionReservationDisposition defines model for AttentionResolution.ReservationDisposition.
+type AttentionResolutionReservationDisposition string
 
 // AuditPage defines model for auditPage.
 type AuditPage struct {

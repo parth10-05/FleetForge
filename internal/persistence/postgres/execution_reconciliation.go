@@ -108,9 +108,27 @@ func (adapter ExecutionAdapter) ResolveAttention(ctx context.Context, command ex
 		return execution.ResolutionResult{}, fmt.Errorf("begin attention resolution: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	result, err := resolveAttentionTx(ctx, tx, command)
+	if err != nil {
+		return execution.ResolutionResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return execution.ResolutionResult{}, classifyDueWorkError(err, "commit attention resolution")
+	}
+	return result, nil
+}
+
+// resolveAttentionTx performs the fenced state transition without committing.
+// It is shared by the worker-facing resolver and the API command so the latter
+// can complete its idempotency record in the same transaction.
+func resolveAttentionTx(ctx context.Context, tx pgx.Tx, command execution.AdminResolutionCommand) (execution.ResolutionResult, error) {
+	reasonCode := command.ReasonCode
+	if reasonCode == "" {
+		reasonCode = command.Reason
+	}
 	var updateID, admissionID, state, status string
 	var revision, epoch int64
-	err = tx.QueryRow(ctx, `SELECT a.target_update_id::text,a.submission_admission_id::text,tu.state,a.status,tu.revision,a.captured_command_epoch
+	err := tx.QueryRow(ctx, `SELECT a.target_update_id::text,a.submission_admission_id::text,tu.state,a.status,tu.revision,a.captured_command_epoch
 FROM firmware_update_attempts a JOIN target_updates tu ON tu.id=a.target_update_id
 WHERE a.id=$1::uuid FOR UPDATE OF a,tu`, command.AttemptID).Scan(&updateID, &admissionID, &state, &status, &revision, &epoch)
 	if err == pgx.ErrNoRows {
@@ -127,10 +145,7 @@ WHERE a.id=$1::uuid FOR UPDATE OF a,tu`, command.AttemptID).Scan(&updateID, &adm
 FROM ambiguity_resolutions WHERE attempt_id=$1::uuid AND command_id=$2::uuid`, command.AttemptID, command.Work.CommandID).Scan(
 			&persistedFingerprint, &action, &reason, &principal, &issuerClass, &journalConfirmedAbsent, &lateCallerExcluded, &lateCallerExclusionMethod, &proofReference, &reservationDisposition,
 		)
-		if err == nil && persistedFingerprint == command.EvidenceFingerprint && action == command.Action && reason == command.Reason && principal == command.Principal.Subject && issuerClass == command.Principal.IssuerClass && journalConfirmedAbsent == command.JournalConfirmedAbsent && lateCallerExcluded == command.LateCallerExcluded && nullableStringEqual(lateCallerExclusionMethod, command.LateCallerExclusionMethod) && nullableStringEqual(proofReference, command.ProofReference) && nullableStringEqual(reservationDisposition, command.ReservationDisposition) {
-			if err = tx.Commit(ctx); err != nil {
-				return execution.ResolutionResult{}, classifyDueWorkError(err, "commit idempotent attention resolution")
-			}
+		if err == nil && persistedFingerprint == command.EvidenceFingerprint && action == command.Action && reason == reasonCode && principal == command.Principal.Subject && issuerClass == command.Principal.IssuerClass && journalConfirmedAbsent == command.JournalConfirmedAbsent && lateCallerExcluded == command.LateCallerExcluded && nullableStringEqual(lateCallerExclusionMethod, command.LateCallerExclusionMethod) && nullableStringEqual(proofReference, command.ProofReference) && nullableStringEqual(reservationDisposition, command.ReservationDisposition) {
 			return execution.ResolutionResult{TargetUpdateID: updateID}, nil
 		}
 		return execution.ResolutionResult{}, fmt.Errorf("%w: attention resolution fence changed", ErrLeaseConflict)
@@ -139,9 +154,9 @@ FROM ambiguity_resolutions WHERE attempt_id=$1::uuid AND command_id=$2::uuid`, c
 	if err != nil {
 		return execution.ResolutionResult{}, err
 	}
-	evidence, _ := json.Marshal(map[string]any{"action": command.Action, "reason": command.Reason, "principal": command.Principal.Subject, "issuer_class": command.Principal.IssuerClass, "proof_reference": command.ProofReference, "late_caller_exclusion_method": command.LateCallerExclusionMethod, "reservation_disposition": command.ReservationDisposition})
+	evidence, _ := json.Marshal(map[string]any{"action": command.Action, "reason": command.Reason, "reason_code": reasonCode, "principal": command.Principal.Subject, "issuer_class": command.Principal.IssuerClass, "proof_reference": command.ProofReference, "late_caller_exclusion_method": command.LateCallerExclusionMethod, "reservation_disposition": command.ReservationDisposition})
 	if _, err = tx.Exec(ctx, `INSERT INTO ambiguity_resolutions (id,attempt_id,target_update_revision,outcome,evidence_summary,evidence_fingerprint,journal_confirmed_absent,late_caller_excluded,late_caller_exclusion_method,proof_reference,actor_id,command_id,reason_code)
-VALUES (md5($1)::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::uuid,$13)`, "fleetforge.admin-resolution/v1:"+command.AttemptID+":"+command.Work.CommandID, command.AttemptID, revision, outcome, evidence, command.EvidenceFingerprint, command.JournalConfirmedAbsent, command.LateCallerExcluded, nullableExecutionString(command.LateCallerExclusionMethod), nullableExecutionString(command.ProofReference), command.Principal.Subject, command.Work.CommandID, command.Reason); err != nil {
+VALUES (md5($1)::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::uuid,$13)`, "fleetforge.admin-resolution/v1:"+command.AttemptID+":"+command.Work.CommandID, command.AttemptID, revision, outcome, evidence, command.EvidenceFingerprint, command.JournalConfirmedAbsent, command.LateCallerExcluded, nullableExecutionString(command.LateCallerExclusionMethod), nullableExecutionString(command.ProofReference), command.Principal.Subject, command.Work.CommandID, reasonCode); err != nil {
 		return execution.ResolutionResult{}, fmt.Errorf("persist administrator resolution: %w", err)
 	}
 	if _, err = tx.Exec(ctx, `UPDATE firmware_update_attempts SET status=$2,resolved_at=$3 WHERE id=$1::uuid AND status IN ('AMBIGUOUS','NEEDS_ATTENTION')`, command.AttemptID, nextStatus, command.Now.UTC()); err != nil {
@@ -167,9 +182,6 @@ VALUES (md5($1)::uuid,$2::uuid,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::uuid,$13
 VALUES (md5($1)::uuid,md5($2)::uuid,'TARGET_UPDATE',$3::uuid,$4,1,$5,$6,$7)`, "fleetforge.execution.work/v1:"+command.AttemptID+":"+nextWork, "fleetforge.execution.command/v1:"+command.AttemptID+":"+nextWork, updateID, nextWork, command.Now.UTC(), revision+1, epoch); err != nil {
 			return execution.ResolutionResult{}, fmt.Errorf("schedule adopted observation: %w", err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return execution.ResolutionResult{}, classifyDueWorkError(err, "commit attention resolution")
 	}
 	return execution.ResolutionResult{TargetUpdateID: updateID}, nil
 }

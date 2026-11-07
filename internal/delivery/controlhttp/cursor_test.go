@@ -25,3 +25,19 @@ func TestTargetCursorRejectsTampering(t *testing.T) {
 		t.Fatal("accepted expired cursor")
 	}
 }
+
+func TestCampaignAuditCursorBindsAuditRoute(t *testing.T) {
+	key := []byte("abcdefghijklmnopqrstuvwxyz012345")
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	campaignID := "00000000-0000-0000-0000-000000000001"
+	cursor, err := encodeCampaignAuditCursor(key, campaignID, 7, 3, 25, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision, sequence, err := decodeCampaignAuditCursor(key, cursor, campaignID, 25, now); err != nil || revision != 7 || sequence != 3 {
+		t.Fatalf("revision=%d sequence=%d err=%v", revision, sequence, err)
+	}
+	if _, err := decodeCampaignTargetCursor(key, cursor, campaignID, 25, now); err == nil {
+		t.Fatal("accepted an audit cursor at the target route")
+	}
+}

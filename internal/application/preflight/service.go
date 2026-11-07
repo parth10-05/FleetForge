@@ -62,7 +62,7 @@ func New(targets TargetSelector, artifacts ArtifactReader, candidates CandidateW
 // Callers that need atomic composition with other durable effects use this
 // method, keeping evaluation outside their final transaction.
 func (service *Service) EvaluateSnapshot(ctx context.Context, request Request) (Result, error) {
-	if service == nil || service.targets == nil || service.artifacts == nil || service.candidates == nil || request.CandidateID == "" || request.ArtifactID.IsZero() || request.Maximum <= 0 || request.Maximum > 100 {
+	if service == nil || service.targets == nil || service.artifacts == nil || request.CandidateID == "" || request.ArtifactID.IsZero() || request.Maximum <= 0 || request.Maximum > 100 {
 		return Result{}, fmt.Errorf("invalid preflight request")
 	}
 	selector, err := inventory.ParseSelector(request.Selector)
@@ -110,6 +110,9 @@ func (service *Service) EvaluateSnapshot(ctx context.Context, request Request) (
 
 // Evaluate preserves the existing persisted-candidate contract.
 func (service *Service) Evaluate(ctx context.Context, request Request) (Result, error) {
+	if service == nil || service.candidates == nil {
+		return Result{}, fmt.Errorf("invalid preflight request")
+	}
 	result, err := service.EvaluateSnapshot(ctx, request)
 	if err != nil {
 		return Result{}, err

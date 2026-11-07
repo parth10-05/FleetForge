@@ -430,10 +430,14 @@ components:
       additionalProperties: false
       required: [action, reason_code, reason]
       properties:
-        action: {type: string, minLength: 1, maxLength: 64}
+        action: {type: string, enum: [ADOPT, RETRY_PROVEN_ABSENT, TERMINAL]}
         reason_code: {type: string, minLength: 1, maxLength: 64}
         reason: {type: string, minLength: 1, maxLength: 1024}
         reference: {type: string, maxLength: 256}
+        reservation_disposition: {type: string, enum: [QUARANTINE, RELEASE]}
+        journal_confirmed_absent: {type: boolean}
+        late_caller_excluded: {type: boolean}
+        late_caller_exclusion_method: {type: string, maxLength: 128}
     auditRecord:
       type: object
       additionalProperties: false

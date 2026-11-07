@@ -38,7 +38,7 @@ func NewRouterWithResourcesAndUpload(verifier access.TokenVerifier, now func() t
 }
 
 // NewRouterWithResourcesUploadAndCampaigns mounts the available public control resources.
-func NewRouterWithResourcesUploadAndCampaigns(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar, artifacts artifactReader, campaigns campaignCreator, cursorKey []byte, uploadURL string) http.Handler {
+func NewRouterWithResourcesUploadAndCampaigns(verifier access.TokenVerifier, now func() time.Time, targets targetRegistrar, artifacts artifactReader, campaigns campaignCreator, cursorKey []byte, uploadURL string, attention ...attentionResolver) http.Handler {
 	if now == nil {
 		now = time.Now
 	}
@@ -63,6 +63,31 @@ func NewRouterWithResourcesUploadAndCampaigns(verifier access.TokenVerifier, now
 	}
 	if campaigns != nil {
 		mux.Handle("POST /v1/campaigns", withAuthentication(verifier)(requirePermission(access.PermissionCreateCampaigns, now)(createCampaignHandler(campaigns))))
+		if reader, ok := campaigns.(campaignReader); ok {
+			mux.Handle("GET /v1/campaigns/{campaign_id}", withAuthentication(verifier)(requirePermission(access.PermissionReadTargets, now)(getCampaignHandler(reader))))
+		}
+		if lister, ok := campaigns.(campaignTargetLister); ok && len(cursorKey) >= 32 {
+			mux.Handle("GET /v1/campaigns/{campaign_id}/targets", withAuthentication(verifier)(requirePermission(access.PermissionReadTargets, now)(listCampaignTargetsHandler(lister, cursorKey, now))))
+		}
+		if lister, ok := campaigns.(campaignAuditLister); ok && len(cursorKey) >= 32 {
+			mux.Handle("GET /v1/campaigns/{campaign_id}/audit", withAuthentication(verifier)(requirePermission(access.PermissionReadTargets, now)(listCampaignAuditHandler(lister, cursorKey, now))))
+		}
+		actions := map[string]http.Handler{}
+		if validator, ok := campaigns.(campaignValidator); ok {
+			actions["validate"] = validateCampaignHandler(validator)
+		}
+		if starter, ok := campaigns.(campaignStarter); ok {
+			actions["start"] = startCampaignHandler(starter)
+		}
+		if pauser, ok := campaigns.(campaignPauser); ok {
+			actions["pause"] = pauseCampaignHandler(pauser)
+		}
+		if len(actions) > 0 {
+			mux.Handle("POST /v1/campaigns/", withAuthentication(verifier)(requirePermission(access.PermissionOperateCampaigns, now)(campaignActionRoute(actions))))
+		}
+	}
+	if len(attention) == 1 && attention[0] != nil {
+		mux.Handle("POST /v1/target-updates/", withAuthentication(verifier)(requirePermission(access.PermissionResolveAttention, now)(resolveAttentionRoute(attention[0]))))
 	}
 	mux.Handle("/v1/", withAuthentication(verifier)(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, Problem{
