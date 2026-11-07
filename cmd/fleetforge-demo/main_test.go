@@ -41,7 +41,7 @@ func TestWriteScenarioRunIDUsesOnlyOwnedChildFile(t *testing.T) {
 	if err := writeScenarioRunID(root, scenarioPath, output); err != nil {
 		t.Fatal(err)
 	}
-	if raw, err := os.ReadFile(output); err != nil || len(raw) != 65 {
+	if raw, err := os.ReadFile(output); err != nil || len(raw) != len("run-")+64+1 {
 		t.Fatalf("run ID err=%v bytes=%d", err, len(raw))
 	}
 	if err := writeScenarioRunID(root, scenarioPath, filepath.Join(filepath.Dir(root), "outside-run-id")); err == nil {
