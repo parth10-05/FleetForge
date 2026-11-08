@@ -463,13 +463,15 @@ func waitForComposedDiscovery(t *testing.T, demo *composedDemo, want int) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	var good, failed, pending, claimed, completed int
+	var failureKinds string
 	err := demo.pool.QueryRow(t.Context(), `SELECT
 	(SELECT count(*) FROM target_discovery_heads WHERE last_good_id IS NOT NULL),
 	(SELECT count(*) FROM device_observations WHERE kind='DISCOVERY_FAILURE'),
 	(SELECT count(*) FROM due_work WHERE work_type='DISCOVER' AND delivery_state='PENDING'),
 	(SELECT count(*) FROM due_work WHERE work_type='DISCOVER' AND delivery_state='CLAIMED'),
-	(SELECT count(*) FROM due_work WHERE work_type='DISCOVER' AND delivery_state='COMPLETED')`).Scan(&good, &failed, &pending, &claimed, &completed)
-	t.Fatalf("composed discovery timed out good=%d failed=%d pending=%d claimed=%d completed=%d err=%v", good, failed, pending, claimed, completed, err)
+	(SELECT count(*) FROM due_work WHERE work_type='DISCOVER' AND delivery_state='COMPLETED'),
+	COALESCE((SELECT string_agg(error_kind || ':' || count::text, ',' ORDER BY error_kind) FROM (SELECT normalized_data->>'error_kind' AS error_kind,count(*) FROM device_observations WHERE kind='DISCOVERY_FAILURE' GROUP BY normalized_data->>'error_kind') failures), '')`).Scan(&good, &failed, &pending, &claimed, &completed, &failureKinds)
+	t.Fatalf("composed discovery timed out good=%d failed=%d pending=%d claimed=%d completed=%d kinds=%s err=%v", good, failed, pending, claimed, completed, failureKinds, err)
 }
 
 func waitForCampaignState(t *testing.T, demo *composedDemo, token, campaignID, expected string, timeout time.Duration) string {
