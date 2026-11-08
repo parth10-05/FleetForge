@@ -513,8 +513,8 @@ func waitForCampaignState(t *testing.T, demo *composedDemo, token, campaignID, e
 	(SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=c.id),
 	(SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=c.id AND tu.state='SUCCEEDED'),
 	(SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=c.id AND tu.state IN ('SUCCEEDED','FAILED_TERMINAL','SKIPPED','CANCELLED','NEEDS_ATTENTION')),
-	(SELECT count(*) FROM due_work dw WHERE dw.delivery_state='PENDING' AND dw.aggregate_id=c.id),
-	(SELECT count(*) FROM due_work dw WHERE dw.delivery_state='CLAIMED' AND dw.aggregate_id=c.id)
+	(SELECT count(*) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='PENDING' AND ct.campaign_id=c.id),
+	(SELECT count(*) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='CLAIMED' AND ct.campaign_id=c.id)
 FROM campaigns c WHERE c.id=$1::uuid`, campaignID).Scan(&state, &updates, &succeeded, &terminal, &pendingWork, &claimedWork)
 	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d pending_work=%d claimed_work=%d err=%v", expected, state, updates, succeeded, terminal, pendingWork, claimedWork, err)
 	return ""
