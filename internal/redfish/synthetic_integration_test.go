@@ -39,7 +39,7 @@ func TestAuthenticatedDiscoveryAgainstSyntheticSimulator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := NewClient(ClientConfig{HTTPClient: server.Client(), AllowedCIDRs: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}})
+	client := NewClient(ClientConfig{AllowedCIDRs: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}})
 	capabilities, err := client.DiscoverServiceAuthenticated(context.Background(), address, authenticator)
 	if err != nil {
 		t.Fatal(err)
