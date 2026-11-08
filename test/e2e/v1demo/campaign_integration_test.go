@@ -216,7 +216,7 @@ func TestPublicCampaignValidatesAndStarts(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM campaign_targets WHERE campaign_id=$1::uuid", campaign.Resource.Id.String()).Scan(&campaignTargets); err != nil || campaignTargets != len(targetIDs) {
 		t.Fatalf("campaign targets=%d err=%v", campaignTargets, err)
 	}
-	if err := pool.QueryRow(ctx, "SELECT target_count FROM preflight_candidates WHERE artifact_id=$1::uuid", artifactResult.Resource.Id.String()).Scan(&planTargets); err != nil || planTargets != len(targetIDs) {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM preflight_candidate_targets WHERE candidate_id=(SELECT candidate_id FROM campaign_plan_snapshots WHERE campaign_id=$1::uuid)", campaign.Resource.Id.String()).Scan(&planTargets); err != nil || planTargets != len(targetIDs) {
 		t.Fatalf("preflight targets=%d err=%v", planTargets, err)
 	}
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM campaign_plan_snapshots WHERE campaign_id=$1::uuid", campaign.Resource.Id.String()).Scan(&immutablePlans); err != nil || immutablePlans != 1 {
