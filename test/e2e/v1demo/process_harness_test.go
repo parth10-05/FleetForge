@@ -83,7 +83,7 @@ func TestComposedBinariesResolveRecentAdminAttentionWithReplayFence(t *testing.T
 func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expectedState, invariant string) {
 	t.Helper()
 	demo := startComposedDemo(t, fixtureName)
-	token, err := demo.issuer.Mint(localoidc.MintRequest{Subject: "p06-composed-admin", Roles: []access.Role{access.RoleAdmin}, TTL: time.Minute})
+	token, err := demo.issuer.Mint(localoidc.MintRequest{Subject: "p06-composed-admin", Roles: []access.Role{access.RoleAdmin}, TTL: 5 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,17 @@ func waitForCampaignState(t *testing.T, demo *composedDemo, token, campaignID, e
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for campaign state %s", expected)
+	var state string
+	var updates, succeeded, terminal, pendingWork, claimedWork int
+	err := demo.pool.QueryRow(t.Context(), `SELECT
+	c.state,
+	(SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=c.id),
+	(SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=c.id AND tu.state='SUCCEEDED'),
+	(SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=c.id AND tu.state IN ('SUCCEEDED','FAILED_TERMINAL','SKIPPED','CANCELLED','NEEDS_ATTENTION')),
+	(SELECT count(*) FROM due_work dw WHERE dw.delivery_state='PENDING' AND dw.aggregate_id=c.id),
+	(SELECT count(*) FROM due_work dw WHERE dw.delivery_state='CLAIMED' AND dw.aggregate_id=c.id)
+FROM campaigns c WHERE c.id=$1::uuid`, campaignID).Scan(&state, &updates, &succeeded, &terminal, &pendingWork, &claimedWork)
+	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d pending_work=%d claimed_work=%d err=%v", expected, state, updates, succeeded, terminal, pendingWork, claimedWork, err)
 	return ""
 }
 
