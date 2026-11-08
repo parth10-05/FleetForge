@@ -519,7 +519,7 @@ func waitForCampaignState(t *testing.T, demo *composedDemo, token, campaignID, e
 	(SELECT count(*) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='CLAIMED' AND ct.campaign_id=c.id),
 	COALESCE((SELECT string_agg(dw.work_type || ':' || COALESCE(dw.lease_owner,''), ',' ORDER BY dw.work_type,dw.lease_owner) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='CLAIMED' AND ct.campaign_id=c.id), '')
 FROM campaigns c WHERE c.id=$1::uuid`, campaignID).Scan(&state, &updates, &succeeded, &terminal, &pendingWork, &claimedWork, &claimedBy)
-	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d pending_work=%d claimed_work=%d claimed_by=%s wakeup=%s err=%v", expected, state, updates, succeeded, terminal, pendingWork, claimedWork, claimedBy, wakeupFailureKind(demo.root), err)
+	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d pending_work=%d claimed_work=%d claimed_by=%s wakeup=%s precheck=%s err=%v", expected, state, updates, succeeded, terminal, pendingWork, claimedWork, claimedBy, wakeupFailureKind(demo.root), precheckFailureKind(demo.root), err)
 	return ""
 }
 
@@ -569,6 +569,30 @@ func wakeupFailureKind(root string) string {
 		return "wakeup_failure"
 	default:
 		return "unknown"
+	}
+}
+
+func precheckFailureKind(root string) string {
+	raw, err := os.ReadFile(filepath.Join(root, "precheck-worker.log"))
+	if err != nil {
+		return "unavailable"
+	}
+	log := string(raw)
+	switch {
+	case strings.Contains(log, "load precheck command"):
+		return "command"
+	case strings.Contains(log, "load fenced precheck"):
+		return "fence"
+	case strings.Contains(log, "collect target precheck"):
+		return "target"
+	case strings.Contains(log, "persist firmware admission"):
+		return "admission"
+	case strings.Contains(log, "invalid frozen campaign policy"):
+		return "policy"
+	case strings.Contains(log, "firmware precheck cycle failed"):
+		return "unknown"
+	default:
+		return "none"
 	}
 }
 
