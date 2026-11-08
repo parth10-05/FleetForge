@@ -509,15 +509,17 @@ func waitForCampaignState(t *testing.T, demo *composedDemo, token, campaignID, e
 	}
 	var state string
 	var updates, succeeded, terminal, pendingWork, claimedWork int
+	var claimedBy string
 	err := demo.pool.QueryRow(t.Context(), `SELECT
 	c.state,
 	(SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=c.id),
 	(SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=c.id AND tu.state='SUCCEEDED'),
 	(SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=c.id AND tu.state IN ('SUCCEEDED','FAILED_TERMINAL','SKIPPED','CANCELLED','NEEDS_ATTENTION')),
 	(SELECT count(*) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='PENDING' AND ct.campaign_id=c.id),
-	(SELECT count(*) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='CLAIMED' AND ct.campaign_id=c.id)
-FROM campaigns c WHERE c.id=$1::uuid`, campaignID).Scan(&state, &updates, &succeeded, &terminal, &pendingWork, &claimedWork)
-	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d pending_work=%d claimed_work=%d wakeup=%s err=%v", expected, state, updates, succeeded, terminal, pendingWork, claimedWork, wakeupFailureKind(demo.root), err)
+	(SELECT count(*) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='CLAIMED' AND ct.campaign_id=c.id),
+	COALESCE((SELECT string_agg(dw.work_type || ':' || COALESCE(dw.lease_owner,''), ',' ORDER BY dw.work_type,dw.lease_owner) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='CLAIMED' AND ct.campaign_id=c.id), '')
+FROM campaigns c WHERE c.id=$1::uuid`, campaignID).Scan(&state, &updates, &succeeded, &terminal, &pendingWork, &claimedWork, &claimedBy)
+	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d pending_work=%d claimed_work=%d claimed_by=%s wakeup=%s err=%v", expected, state, updates, succeeded, terminal, pendingWork, claimedWork, claimedBy, wakeupFailureKind(demo.root), err)
 	return ""
 }
 
