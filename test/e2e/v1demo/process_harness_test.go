@@ -41,7 +41,7 @@ type composedDemo struct {
 
 func TestComposedBinariesServeAuthenticatedAPI(t *testing.T) {
 	demo := startComposedDemo(t, "healthy.json")
-	token, err := demo.issuer.Mint(localoidc.MintRequest{Subject: "p06-composed-admin", Roles: []access.Role{access.RoleAdmin}, TTL: time.Minute})
+	token, err := demo.issuer.Mint(localoidc.MintRequest{Subject: "p06-composed-admin", Roles: []access.Role{access.RoleAdmin}, TTL: 5 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 		err := demo.pool.QueryRow(t.Context(), "SELECT state FROM firmware_artifacts WHERE id=$1::uuid", artifact.Resource.Id.String()).Scan(&state)
 		return state == "VERIFIED", err
 	})
-	operator, err := demo.issuer.Mint(localoidc.MintRequest{Subject: "p06-composed-operator", Roles: []access.Role{access.RoleOperator}, TTL: time.Minute})
+	operator, err := demo.issuer.Mint(localoidc.MintRequest{Subject: "p06-composed-operator", Roles: []access.Role{access.RoleOperator}, TTL: 5 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
