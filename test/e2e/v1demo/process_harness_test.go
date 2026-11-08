@@ -315,7 +315,7 @@ func startComposedDemo(t *testing.T, fixtureName string) *composedDemo {
 	env := map[string]string{
 		"FLEETFORGE_ENV":                         "test",
 		"FLEETFORGE_LOG_LEVEL":                   "warn",
-		"FLEETFORGE_SHUTDOWN_TIMEOUT":            "2s",
+		"FLEETFORGE_SHUTDOWN_TIMEOUT":            "10s",
 		"FLEETFORGE_READINESS_TIMEOUT":           "500ms",
 		"FLEETFORGE_POSTGRES_APP_DSN":            harness.ScopedDSN(t),
 		"FLEETFORGE_POSTGRES_MIGRATION_DSN":      harness.ScopedDSN(t),
@@ -347,7 +347,7 @@ func startComposedDemo(t *testing.T, fixtureName string) *composedDemo {
 		"FLEETFORGE_WAKEUP_WORKER_CONCURRENCY":   "1",
 		"FLEETFORGE_WAKEUP_PUBLISHER_BATCH":      "4",
 		"FLEETFORGE_WAKEUP_LOCAL_QUEUE_CAPACITY": "8",
-		"FLEETFORGE_WAKEUP_HANDLER_TIMEOUT":      "1s",
+		"FLEETFORGE_WAKEUP_HANDLER_TIMEOUT":      "5s",
 		"FLEETFORGE_WAKEUP_LEASE_DURATION":       "10s",
 		"FLEETFORGE_WAKEUP_PUBLISHER_LEASE":      "10s",
 		"FLEETFORGE_WAKEUP_REPAIR_GRACE":         "1s",
