@@ -173,7 +173,7 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 		t.Fatal(err)
 	}
 	create := authenticatedRequest(t, http.MethodPost, demo.apiURL+"/v1/campaigns", campaignCreateBody(artifact.Resource.Id.String(), group), operator)
-	create.Header.Set("Idempotency-Key", group+"-create")
+	create.Header.Set("Idempotency-Key", group+"-campaign-create")
 	response, err = demo.client.Do(create)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 	}
 	readyETag := waitForCampaignState(t, demo, operator, campaign.Resource.Id.String(), "READY", 30*time.Second)
 	start := authenticatedRequest(t, http.MethodPost, demo.apiURL+"/v1/campaigns/"+campaign.Resource.Id.String()+":start", "", operator)
-	start.Header.Set("Idempotency-Key", group+"-start")
+	start.Header.Set("Idempotency-Key", group+"-campaign-start")
 	start.Header.Set("If-Match", readyETag)
 	response, err = demo.client.Do(start)
 	if err != nil {
