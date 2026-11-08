@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -516,7 +517,7 @@ func waitForCampaignState(t *testing.T, demo *composedDemo, token, campaignID, e
 	(SELECT count(*) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='PENDING' AND ct.campaign_id=c.id),
 	(SELECT count(*) FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE dw.delivery_state='CLAIMED' AND ct.campaign_id=c.id)
 FROM campaigns c WHERE c.id=$1::uuid`, campaignID).Scan(&state, &updates, &succeeded, &terminal, &pendingWork, &claimedWork)
-	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d pending_work=%d claimed_work=%d err=%v", expected, state, updates, succeeded, terminal, pendingWork, claimedWork, err)
+	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d pending_work=%d claimed_work=%d wakeup=%s err=%v", expected, state, updates, succeeded, terminal, pendingWork, claimedWork, wakeupFailureKind(demo.root), err)
 	return ""
 }
 
@@ -545,6 +546,28 @@ func readSimulatorMetrics(t *testing.T, demo *composedDemo) simulatorMetrics {
 		t.Fatal(err)
 	}
 	return metrics
+}
+
+func wakeupFailureKind(root string) string {
+	raw, err := os.ReadFile(filepath.Join(root, "wakeup-worker.log"))
+	if err != nil {
+		return "unavailable"
+	}
+	log := string(raw)
+	switch {
+	case strings.Contains(log, "context deadline exceeded"):
+		return "deadline"
+	case strings.Contains(log, "active enrollment unavailable"):
+		return "enrollment_fence"
+	case strings.Contains(log, "lease conflict"):
+		return "lease_conflict"
+	case strings.Contains(log, "lock firmware precheck start"):
+		return "precheck_lock"
+	case strings.Contains(log, "process wakeups"):
+		return "wakeup_failure"
+	default:
+		return "unknown"
+	}
 }
 
 func redactProcessOutput(string) string { return "child process output redacted" }
