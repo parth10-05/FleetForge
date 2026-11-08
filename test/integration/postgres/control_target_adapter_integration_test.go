@@ -53,7 +53,7 @@ func TestControlTargetAdapterQueuesDiscoveryAtomicallyAndReplays(t *testing.T) {
 	}{
 		{table: "audit_events", column: "aggregate_id", want: 2},
 		{table: "decision_inputs", column: "aggregate_id", want: 2},
-		{table: "outbox_events", column: "aggregate_id", want: 2},
+		{table: "outbox_events", column: "aggregate_id", want: 3},
 		{table: "due_work", column: "subject_id", want: 1},
 	} {
 		var count int

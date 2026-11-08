@@ -162,7 +162,8 @@ func TestSixTargetDiscoveryComponentIsReadOnly(t *testing.T) {
 	verificationService := appartifacts.NewWithCompletion(nil, nil, store, nil, func() time.Time { return now }).WithVerification(verification, verification)
 	verificationWork := postgres.ArtifactVerificationWorkAdapter{Pool: pool}
 	worker := appartifacts.NewWorker(verificationService, verificationWork, verificationWork, func() time.Time { return now })
-	if err := worker.RunOnce(ctx, appartifacts.VerificationWorkClaimRequest{Owner: "component-verifier", LeaseToken: "00000000-0000-0000-3006-000000000004", Now: now, LeaseExpiresAt: now.Add(time.Minute)}); err != nil {
+	claimNow := time.Now().UTC().Add(time.Second)
+	if err := worker.RunOnce(ctx, appartifacts.VerificationWorkClaimRequest{Owner: "component-verifier", LeaseToken: "00000000-0000-0000-3006-000000000004", Now: claimNow, LeaseExpiresAt: claimNow.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	var artifactState string

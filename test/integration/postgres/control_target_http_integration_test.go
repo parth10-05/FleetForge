@@ -83,7 +83,7 @@ func TestControlTargetListRouteUsesKeysetCursor(t *testing.T) {
 		request := httptest.NewRequest(http.MethodPost, "/v1/targets", strings.NewReader(`{"display_name":"`+name+`","endpoint_reference":"https://simulator.example","target_key":"`+name+`","credential_reference":"synthetic-test:`+name+`","labels":{"site":"west"}}`))
 		request.Header.Set("Authorization", "Bearer admin-token")
 		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("Idempotency-Key", "register-"+name)
+		request.Header.Set("Idempotency-Key", "register-target-"+name)
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusCreated {
