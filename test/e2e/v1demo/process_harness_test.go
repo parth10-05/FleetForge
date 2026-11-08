@@ -354,7 +354,11 @@ func startComposedDemo(t *testing.T, fixtureName string) *composedDemo {
 		"FLEETFORGE_WAKEUP_MAX_BACKOFF":          "1s",
 		"FLEETFORGE_WAKEUP_RETRY_ATTEMPTS":       "2",
 	}
-	for _, name := range []string{"local-object-store", "redfish-simulator", "orchestrator-worker", "discovery-worker", "wakeup-worker", "precheck-worker", "execution-worker", "observation-worker", "reconciliation-worker", "control-api"} {
+	for _, name := range []string{"local-object-store", "redfish-simulator"} {
+		startDemoProcess(t, repositoryRoot, root, name, env)
+	}
+	waitForReady(t, "http://"+addresses["simulator"]+"/health/ready")
+	for _, name := range []string{"orchestrator-worker", "discovery-worker", "wakeup-worker", "precheck-worker", "execution-worker", "observation-worker", "reconciliation-worker", "control-api"} {
 		startDemoProcess(t, repositoryRoot, root, name, env)
 	}
 	apiURL := "http://" + addresses["api"]
