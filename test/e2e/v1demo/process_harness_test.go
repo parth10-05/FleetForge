@@ -130,11 +130,7 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 			t.Fatalf("schedule discovery status=%d", response.StatusCode)
 		}
 	}
-	waitForCondition(t, 20*time.Second, func() (bool, error) {
-		var count int
-		err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FROM target_discovery_heads WHERE last_good_id IS NOT NULL").Scan(&count)
-		return count == len(fixture.Targets), err
-	})
+	waitForComposedDiscovery(t, demo, len(fixture.Targets))
 	artifactBytes := []byte("p06-healthy-firmware")
 	digest := sha256.Sum256(artifactBytes)
 	initiate := authenticatedRequest(t, http.MethodPost, demo.apiURL+"/v1/artifacts:initiate", `{"sha256":"`+hex.EncodeToString(digest[:])+`","size_bytes":20,"media_type":"application/octet-stream","firmware_version":"1.1"}`, token)
@@ -451,6 +447,29 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() (boo
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for bounded composed-runtime condition")
+}
+
+func waitForComposedDiscovery(t *testing.T, demo *composedDemo, want int) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		var count int
+		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FROM target_discovery_heads WHERE last_good_id IS NOT NULL").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == want {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	var good, failed, pending, claimed, completed int
+	err := demo.pool.QueryRow(t.Context(), `SELECT
+	(SELECT count(*) FROM target_discovery_heads WHERE last_good_id IS NOT NULL),
+	(SELECT count(*) FROM device_observations WHERE kind='DISCOVERY_FAILURE'),
+	(SELECT count(*) FROM due_work WHERE work_type='DISCOVER' AND delivery_state='PENDING'),
+	(SELECT count(*) FROM due_work WHERE work_type='DISCOVER' AND delivery_state='CLAIMED'),
+	(SELECT count(*) FROM due_work WHERE work_type='DISCOVER' AND delivery_state='COMPLETED')`).Scan(&good, &failed, &pending, &claimed, &completed)
+	t.Fatalf("composed discovery timed out good=%d failed=%d pending=%d claimed=%d completed=%d err=%v", good, failed, pending, claimed, completed, err)
 }
 
 func waitForCampaignState(t *testing.T, demo *composedDemo, token, campaignID, expected string, timeout time.Duration) string {
