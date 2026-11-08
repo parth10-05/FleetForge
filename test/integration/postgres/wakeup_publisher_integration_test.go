@@ -71,6 +71,19 @@ func TestDueWorkCreatesTypedWakeupAndConcurrentPublishersFenceIt(t *testing.T) {
 	}
 }
 
+func TestClaimWorkWakeupsCanSelectOnlyOwnedWorkTypes(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	now := time.Date(2026, 10, 5, 1, 30, 0, 0, time.UTC)
+	insertDueWork(t, pool, ctx, "00000000-0000-0000-1410-000000000001", "00000000-0000-0000-1410-000000000002", fixture.targetUpdateID, "PRECHECK", now.Add(-time.Minute))
+	insertDueWork(t, pool, ctx, "00000000-0000-0000-1410-000000000003", "00000000-0000-0000-1410-000000000004", fixture.targetUpdateID, "CANARY_START", now.Add(-time.Minute))
+
+	claimed, err := persistence.ClaimWorkWakeups(ctx, pool, persistence.ClaimOutboxRequest{Owner: "campaign-wakeup", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{"00000000-0000-0000-1410-000000000005"}, WorkTypes: []string{"CANARY_START"}})
+	if err != nil || len(claimed) != 1 || claimed[0].Envelope.WorkType != "CANARY_START" {
+		t.Fatalf("claimed=%#v err=%v", claimed, err)
+	}
+}
+
 func TestUnknownWakeupPublishRetriesSameIntentAndGeneration(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
 	fixture := seedOwnershipFixture(t, pool, ctx)

@@ -82,7 +82,7 @@ func cycle(ctx context.Context, pool *pgxpool.Pool, queue orchestration.WakeupPu
 		}
 		tokens[i] = token
 	}
-	if err := postgres.PublishClaimedWakeups(ctx, pool, queue, postgres.ClaimOutboxRequest{Owner: budget.Owner, Now: now, LeaseExpiresAt: now.Add(budget.PublisherLease), Tokens: tokens}, int64(budget.RetryAttempts), func(item postgres.ClaimedWakeup, at time.Time) time.Time {
+	if err := postgres.PublishClaimedWakeups(ctx, pool, queue, postgres.ClaimOutboxRequest{Owner: budget.Owner, Now: now, LeaseExpiresAt: now.Add(budget.PublisherLease), Tokens: tokens, WorkTypes: []string{"CANARY_START", "LATER_WAVE_START"}}, int64(budget.RetryAttempts), func(item postgres.ClaimedWakeup, at time.Time) time.Time {
 		next, err := orchestration.RetryAt(at, item.Envelope.CommandID, item.Attempts, time.Second, budget.MaxBackoff, "fleetforge.wakeup.retry/v1")
 		if err != nil {
 			return at.Add(time.Second)

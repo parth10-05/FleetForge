@@ -243,7 +243,7 @@ func TestPublicCampaignValidatesAndStarts(t *testing.T) {
 	}
 	defer queue.Close()
 	now = time.Now().UTC()
-	if err := persistence.PublishClaimedWakeups(ctx, pool, queue, persistence.ClaimOutboxRequest{Owner: "p06-acceptance", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{uuid.NewString()}}, 3, func(_ persistence.ClaimedWakeup, at time.Time) time.Time { return at.Add(time.Second) }); err != nil {
+	if err := persistence.PublishClaimedWakeups(ctx, pool, queue, persistence.ClaimOutboxRequest{Owner: "p06-acceptance", Now: now, LeaseExpiresAt: now.Add(time.Minute), Tokens: []string{uuid.NewString()}, WorkTypes: []string{"CANARY_START"}}, 3, func(_ persistence.ClaimedWakeup, at time.Time) time.Time { return at.Add(time.Second) }); err != nil {
 		t.Fatal(err)
 	}
 	wakeupStore := persistence.WakeupWorkAdapter{Pool: pool, Owner: "p06-acceptance", LeaseDuration: time.Minute, Now: time.Now, NewToken: func() (string, error) { return uuid.NewString(), nil }}

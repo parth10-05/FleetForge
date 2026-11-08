@@ -20,6 +20,9 @@ type ClaimOutboxRequest struct {
 	Owner               string
 	Now, LeaseExpiresAt time.Time
 	Tokens              []string
+	// WorkTypes limits ClaimWorkWakeups to the work types owned by the
+	// consuming binary. An empty slice preserves the generic claim behavior.
+	WorkTypes []string
 }
 type ClaimedOutboxEvent struct {
 	EventID, AggregateType, AggregateID, EventType, ClaimToken string
@@ -150,7 +153,8 @@ func ClaimWorkWakeups(ctx context.Context, pool *pgxpool.Pool, req ClaimOutboxRe
 	 d.id,d.work_type,d.subject_type,d.subject_id,d.expected_revision,d.expected_command_epoch,d.not_before
 FROM outbox_events o JOIN due_work d ON d.id=o.due_work_id AND d.command_id=o.command_id AND d.delivery_generation=o.delivery_generation
 WHERE o.delivery_state='PENDING' AND o.delivery_kind='WORK_WAKEUP' AND o.next_attempt_at <= $1
-ORDER BY o.next_attempt_at,o.created_at,o.event_id LIMIT $2 FOR UPDATE OF o SKIP LOCKED`, req.Now, len(req.Tokens))
+  AND (cardinality($3::text[]) = 0 OR d.work_type = ANY($3::text[]))
+ORDER BY o.next_attempt_at,o.created_at,o.event_id LIMIT $2 FOR UPDATE OF o SKIP LOCKED`, req.Now, len(req.Tokens), req.WorkTypes)
 	if err != nil {
 		return nil, classifyOutboxError(err, "lock wakeup intents")
 	}
