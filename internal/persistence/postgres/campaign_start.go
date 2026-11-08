@@ -191,7 +191,7 @@ ORDER BY ct.id,tu.id FOR UPDATE OF ct,tu`, campaignID)
 
 func lockActiveCanaryEnrollments(ctx context.Context, tx pgx.Tx, campaignID string, canaries map[string]lockedCanaryUpdate) error {
 	rows, err := tx.Query(ctx, `SELECT ct.id::text,e.campaign_id::text,e.state
-FROM campaign_targets ct LEFT JOIN target_enrollments e ON e.campaign_target_id=ct.id
+FROM campaign_targets ct JOIN target_enrollments e ON e.campaign_target_id=ct.id
 WHERE ct.campaign_id=$1::uuid AND ct.cohort='CANARY' ORDER BY ct.id,e.id FOR UPDATE OF e`, campaignID)
 	if err != nil {
 		return fmt.Errorf("lock canary enrollments: %w", err)

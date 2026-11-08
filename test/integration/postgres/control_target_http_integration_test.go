@@ -80,7 +80,7 @@ func TestControlTargetListRouteUsesKeysetCursor(t *testing.T) {
 	verifier := integrationVerifier{principal: access.Principal{Subject: "user:admin", Roles: []access.Role{access.RoleAdmin}, AuthenticatedAt: now, ExpiresAt: now.Add(time.Hour), IssuerClass: "local"}}
 	router := controlhttp.NewRouterWithTargetsAndCursor(verifier, func() time.Time { return now }, service, []byte("abcdefghijklmnopqrstuvwxyz012345"))
 	for _, name := range []string{"rack-a", "rack-b"} {
-		request := httptest.NewRequest(http.MethodPost, "/v1/targets", strings.NewReader(`{"display_name":"`+name+`","endpoint_reference":"https://simulator.example","target_key":"`+name+`","credential_reference":"synthetic-test:`+name+`","labels":{"site":"west"}}`))
+		request := httptest.NewRequest(http.MethodPost, "/v1/targets", strings.NewReader(`{"display_name":"`+name+`","endpoint_reference":"https://simulator.example","target_key":"`+name+`","credential_reference":"synthetic-test:`+name+`","labels":{"site":"west","rack":"`+name+`"}}`))
 		request.Header.Set("Authorization", "Bearer admin-token")
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Idempotency-Key", "register-target-"+name)
