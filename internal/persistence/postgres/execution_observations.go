@@ -48,13 +48,13 @@ FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID, work.DeliveryGeneration
 		return fmt.Errorf("invalid observation lifecycle route %s/%s/%s", workType, state, decision.NextWorkType)
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO device_observations (id,target_id,target_update_id,kind,observed_at,received_at,normalized_data,raw_object_reference)
-VALUES (md5($1)::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::jsonb,$8)`, "fleetforge.execution-observation/v1:"+work.DueWorkID+":"+fmt.Sprint(work.DeliveryGeneration), decision.Observation.TargetID, updateID, decision.Observation.Kind, decision.Observation.ObservedAt.UTC(), decision.Observation.ReceivedAt.UTC(), decision.Observation.Data, decision.Observation.ResourcePath)
+VALUES (md5($1)::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::jsonb,$8)`, observationIDSeed(work), decision.Observation.TargetID, updateID, decision.Observation.Kind, decision.Observation.ObservedAt.UTC(), decision.Observation.ReceivedAt.UTC(), decision.Observation.Data, decision.Observation.ResourcePath)
 	if err != nil {
 		return fmt.Errorf("persist execution observation: %w", err)
 	}
 	if workType == "HEALTH_OBSERVE" && decision.NextWorkType == "SUCCEEDED" {
 		if _, err = tx.Exec(ctx, `INSERT INTO campaign_health_evidence (id,campaign_target_id,check_name,scheduled_at,observed_at,passed,observation_id)
-VALUES (md5($1)::uuid,$2::uuid,'boot',$3,$3,true,md5($4)::uuid) ON CONFLICT (campaign_target_id,check_name,scheduled_at) DO NOTHING`, "fleetforge.execution-health/v1:"+attemptID+":"+fmt.Sprint(work.DeliveryGeneration), campaignTargetID, decision.Observation.ObservedAt.UTC(), "fleetforge.execution-observation/v1:"+work.DueWorkID+":"+fmt.Sprint(work.DeliveryGeneration)); err != nil {
+VALUES (md5($1)::uuid,$2::uuid,'boot',$3,$3,true,md5($4)::uuid) ON CONFLICT (campaign_target_id,check_name,scheduled_at) DO NOTHING`, "fleetforge.execution-health/v1:"+attemptID+":"+fmt.Sprint(work.DeliveryGeneration), campaignTargetID, decision.Observation.ObservedAt.UTC(), observationIDSeed(work)); err != nil {
 			return fmt.Errorf("persist required boot health evidence: %w", err)
 		}
 	}
@@ -100,6 +100,13 @@ func (adapter ExecutionAdapter) CommitObservation(ctx context.Context, work exec
 		now = adapter.Now().UTC()
 	}
 	return CommitObservation(ctx, adapter.Pool, work, decision, now)
+}
+
+// observationIDSeed distinguishes separate fenced reads of the same retryable work.
+// A new lease means a new target observation; an uncommitted transaction still
+// rolls its row back with the lease unchanged.
+func observationIDSeed(work execution.WorkFence) string {
+	return "fleetforge.execution-observation/v1:" + work.DueWorkID + ":" + fmt.Sprint(work.DeliveryGeneration) + ":" + work.LeaseToken
 }
 
 func requeueObservation(ctx context.Context, tx pgx.Tx, work execution.WorkFence, now time.Time) error {
