@@ -521,7 +521,7 @@ func waitForCampaignState(t *testing.T, demo *composedDemo, token, campaignID, e
 FROM campaigns c WHERE c.id=$1::uuid`, campaignID).Scan(&state, &updates, &succeeded, &terminal, &pendingWork, &claimedWork, &claimedBy)
 	_ = demo.pool.QueryRow(t.Context(), `SELECT COALESCE(string_agg(tu.state || ':' || COALESCE(tu.resume_step,'') || ':' || COALESCE(a.status,'') || ':' || COALESCE(a.result_class,'') || ':fp=' || CASE WHEN a.response_fingerprint IS NULL THEN '0' ELSE '1' END || ':task=' || CASE WHEN a.remote_task_reference IS NULL THEN '0' ELSE '1' END, ',' ORDER BY tu.state,tu.id),'') FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id LEFT JOIN firmware_update_attempts a ON a.target_update_id=tu.id WHERE ct.campaign_id=$1::uuid`, campaignID).Scan(&attemptStates)
 	_ = demo.pool.QueryRow(t.Context(), `SELECT COALESCE(action || ':' || reason_code,'') FROM audit_events WHERE aggregate_type='TARGET_UPDATE' AND aggregate_id IN (SELECT tu.id FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid) ORDER BY created_at DESC,id DESC LIMIT 1`, campaignID).Scan(&lastTargetAudit)
-	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d states=%s attempts=%s last_target_audit=%s pending_work=%d claimed_work=%d claimed_by=%s wakeup=%s precheck=%s execution=%s err=%v", expected, state, updates, succeeded, terminal, updateStates, attemptStates, lastTargetAudit, pendingWork, claimedWork, claimedBy, wakeupFailureKind(demo.root), precheckFailureKind(demo.root), executionFailureKind(demo.root), err)
+	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d states=%s attempts=%s last_target_audit=%s pending_work=%d claimed_work=%d claimed_by=%s wakeup=%s precheck=%s execution=%s observation=%s err=%v", expected, state, updates, succeeded, terminal, updateStates, attemptStates, lastTargetAudit, pendingWork, claimedWork, claimedBy, wakeupFailureKind(demo.root), precheckFailureKind(demo.root), executionFailureKind(demo.root), observationFailureKind(demo.root), err)
 	return ""
 }
 
@@ -616,6 +616,26 @@ func executionFailureKind(root string) string {
 	case strings.Contains(log, "commit submit result"):
 		return "commit"
 	case strings.Contains(log, "firmware submit cycle failed"):
+		return "unknown"
+	default:
+		return "none"
+	}
+}
+
+func observationFailureKind(root string) string {
+	raw, err := os.ReadFile(filepath.Join(root, "observation-worker.log"))
+	if err != nil {
+		return "unavailable"
+	}
+	log := string(raw)
+	switch {
+	case strings.Contains(log, "load fenced observation attempt"):
+		return "attempt"
+	case strings.Contains(log, "collect Redfish task"):
+		return "task"
+	case strings.Contains(log, "commit observation"):
+		return "commit"
+	case strings.Contains(log, "observation cycle failed"):
 		return "unknown"
 	default:
 		return "none"
