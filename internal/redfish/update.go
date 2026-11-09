@@ -110,7 +110,11 @@ func (client *Client) SubmitFirmwareAuthenticated(ctx context.Context, address T
 		location := response.Header.Get("Location")
 		if location == "" && readOK {
 			var envelope map[string]any
-			if json.Unmarshal(body, &envelope) == nil { if value, ok := envelope["@odata.id"].(string); ok { location = value } }
+			if json.Unmarshal(body, &envelope) == nil {
+				if value, ok := envelope["@odata.id"].(string); ok {
+					location = value
+				}
+			}
 		}
 		reference, err := localTaskReference(address, location)
 		if err != nil && readOK {
