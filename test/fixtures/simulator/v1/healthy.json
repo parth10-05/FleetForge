@@ -13,5 +13,5 @@
   "topology": {"sites": ["iad", "sfo"]},
   "timing": {"upload_ms": 1, "task_step_ms": 2, "reboot_ms": 3, "inventory_visibility_ms": 4, "event_ms": 5},
   "faults": [],
-  "limits": {"callback_workers": 1, "subscriptions": 1, "body_bytes": 1024, "journal_entries": 1, "open_connections": 1, "events_per_second": 1}
+  "limits": {"callback_workers": 1, "subscriptions": 1, "body_bytes": 1024, "journal_entries": 100, "open_connections": 8, "events_per_second": 10}
 }
