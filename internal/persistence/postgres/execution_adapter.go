@@ -94,10 +94,13 @@ func admissionRequestFromExecution(command execution.AdmissionCommand) (Admissio
 	if err != nil {
 		return AdmissionRequest{}, fmt.Errorf("encode firmware precheck evidence: %w", err)
 	}
+	// The precheck command is already the identity of its due-work row. The
+	// admitted SUBMIT work needs its own stable command identity.
+	submissionCommandID := deterministicExecutionUUID(command.Work.CommandID + ":submit")
 	request := AdmissionRequest{
 		CampaignID: snapshot.CampaignID, CampaignTargetID: envelope.CampaignTargetID, TargetID: snapshot.TargetID, ArtifactID: snapshot.ArtifactID, TargetUpdateID: snapshot.TargetUpdateID,
 		ExpectedTargetRevision: command.Work.ExpectedRevision, CapturedCommandEpoch: snapshot.CommandEpoch, ExpectedTargetState: envelope.ExpectedTargetState, NextTargetState: envelope.NextTargetState, ResumeStep: envelope.ResumeStep,
-		CommandID: command.Work.CommandID, Step: envelope.Step, AdmissionID: command.AdmissionID, StepAttemptID: command.StepAttemptID,
+		CommandID: submissionCommandID, Step: envelope.Step, AdmissionID: command.AdmissionID, StepAttemptID: command.StepAttemptID,
 		Global: ScopeCapacity{Level: envelope.Global.Level, Key: envelope.Global.Key, Limit: envelope.Global.Limit}, Site: ScopeCapacity{Level: envelope.Site.Level, Key: envelope.Site.Key, Limit: envelope.Site.Limit}, Rack: ScopeCapacity{Level: envelope.Rack.Level, Key: envelope.Rack.Key, Limit: envelope.Rack.Limit}, ReservationIDs: envelope.ReservationIDs,
 		ActorID: envelope.ActorID, CorrelationID: envelope.CorrelationID, CausationID: envelope.CausationID, Action: envelope.Action, ReasonCode: envelope.ReasonCode, AuditEventSequence: envelope.AuditEventSequence,
 		OutboxEventID: envelope.OutboxEventID, OutboxEventType: envelope.OutboxEventType, OutboxSchemaVersion: envelope.OutboxSchemaVersion, OutboxPayload: json.RawMessage(envelope.OutboxPayload),
