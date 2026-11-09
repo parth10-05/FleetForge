@@ -629,6 +629,8 @@ func observationFailureKind(root string) string {
 	}
 	log := string(raw)
 	switch {
+	case strings.Contains(log, "observation worker stopped"):
+		return "startup"
 	case strings.Contains(log, "load fenced observation attempt"):
 		return "attempt"
 	case strings.Contains(log, "collect Redfish task"):
