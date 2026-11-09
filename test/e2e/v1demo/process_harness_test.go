@@ -602,14 +602,22 @@ func redactProcessOutput(string) string { return "child process output redacted"
 
 func executionFailureKind(root string) string {
 	raw, err := os.ReadFile(filepath.Join(root, "execution-worker.log"))
-	if err != nil { return "unavailable" }
+	if err != nil {
+		return "unavailable"
+	}
 	log := string(raw)
 	switch {
-	case strings.Contains(log, "open exact artifact"): return "artifact"
-	case strings.Contains(log, "load immutable attempt"): return "attempt"
-	case strings.Contains(log, "target returned result"): return "target_result"
-	case strings.Contains(log, "commit submit result"): return "commit"
-	case strings.Contains(log, "firmware submit cycle failed"): return "unknown"
-	default: return "none"
+	case strings.Contains(log, "open exact artifact"):
+		return "artifact"
+	case strings.Contains(log, "load immutable attempt"):
+		return "attempt"
+	case strings.Contains(log, "target returned result"):
+		return "target_result"
+	case strings.Contains(log, "commit submit result"):
+		return "commit"
+	case strings.Contains(log, "firmware submit cycle failed"):
+		return "unknown"
+	default:
+		return "none"
 	}
 }
