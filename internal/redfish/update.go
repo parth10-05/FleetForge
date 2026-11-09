@@ -113,6 +113,14 @@ func (client *Client) SubmitFirmwareAuthenticated(ctx context.Context, address T
 			if json.Unmarshal(body, &envelope) == nil { if value, ok := envelope["@odata.id"].(string); ok { location = value } }
 		}
 		reference, err := localTaskReference(address, location)
+		if err != nil && readOK {
+			var envelope map[string]any
+			if json.Unmarshal(body, &envelope) == nil {
+				if bodyLocation, ok := envelope["@odata.id"].(string); ok {
+					reference, err = localTaskReference(address, bodyLocation)
+				}
+			}
+		}
 		if err == nil && readOK {
 			return FirmwareSubmitResult{Class: FirmwareAccepted, RemoteTaskReference: reference, ResponseFingerprint: fingerprint, FinishedAt: finished}
 		}
