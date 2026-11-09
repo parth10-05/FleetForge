@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parth10-05/fleetforge/internal/application/execution"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
 
@@ -43,5 +44,13 @@ func TestPrecheckCommandUsesFrozenPolicyAndVerifiedObjectIdentity(t *testing.T) 
 	}
 	if command.AttemptID == "" || command.AdmissionID == "" || command.Envelope.DueWorkID == "" || command.AlreadyCurrentEnvelope.OutboxEventID == "" {
 		t.Fatalf("command missing deterministic workflow identities: %+v", command)
+	}
+	command.PrecheckEvidence = execution.PrecheckEvidence{CurrentVersion: "1.0", Capable: true, Healthy: true, Compatible: true, EvidenceFingerprint: digest, ObservedAt: now}
+	if _, err := adapter.AdmitSubmission(ctx, command); err != nil {
+		t.Fatalf("AdmitSubmission() error=%v", err)
+	}
+	var submitCommandID string
+	if err := pool.QueryRow(ctx, "SELECT command_id::text FROM due_work WHERE work_type='SUBMIT'").Scan(&submitCommandID); err != nil || submitCommandID == command.Work.CommandID {
+		t.Fatalf("submit command=%q precheck command=%q err=%v, want distinct command identities", submitCommandID, command.Work.CommandID, err)
 	}
 }
