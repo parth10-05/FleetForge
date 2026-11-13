@@ -56,7 +56,7 @@ func (adapter ExecutionAdapter) AdmitSubmission(ctx context.Context, command exe
 	if err != nil {
 		return execution.AdmissionResult{}, err
 	}
-	request.ClaimedWorkID, request.ClaimedLeaseToken, request.ClaimedDeliveryGeneration = command.Work.DueWorkID, command.Work.LeaseToken, command.Work.DeliveryGeneration
+	request.ClaimedWorkID, request.ClaimedCommandID, request.ClaimedLeaseToken, request.ClaimedDeliveryGeneration = command.Work.DueWorkID, command.Work.CommandID, command.Work.LeaseToken, command.Work.DeliveryGeneration
 	if err := AdmitOperation(ctx, adapter.Pool, request); err != nil {
 		return execution.AdmissionResult{}, fmt.Errorf("admit fenced firmware submission: %w", err)
 	}
@@ -72,7 +72,7 @@ func (adapter ExecutionAdapter) AdmitRetrySubmission(ctx context.Context, comman
 		return execution.AdmissionResult{}, err
 	}
 	request.RetryParentAttemptID = command.RetryParentAttemptID
-	request.ClaimedWorkID, request.ClaimedLeaseToken, request.ClaimedDeliveryGeneration = command.Work.DueWorkID, command.Work.LeaseToken, command.Work.DeliveryGeneration
+	request.ClaimedWorkID, request.ClaimedCommandID, request.ClaimedLeaseToken, request.ClaimedDeliveryGeneration = command.Work.DueWorkID, command.Work.CommandID, command.Work.LeaseToken, command.Work.DeliveryGeneration
 	if err := AdmitRetryOperation(ctx, adapter.Pool, request); err != nil {
 		return execution.AdmissionResult{}, fmt.Errorf("admit proof-backed retry: %w", err)
 	}

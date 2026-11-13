@@ -35,32 +35,32 @@ type ScopeCapacity struct {
 // AdmissionRequest contains caller-validated decision data and all
 // durable envelopes required to make an admission replayable and auditable.
 type AdmissionRequest struct {
-	CampaignID, CampaignTargetID, TargetID, ArtifactID, TargetUpdateID string
-	ExpectedTargetRevision, CapturedCommandEpoch                       int64
-	ExpectedTargetState, NextTargetState                               string
-	ResumeStep                                                         *string
-	CommandID, Step, AdmissionID, StepAttemptID                        string
-	Global, Site, Rack                                                 ScopeCapacity
-	ReservationIDs                                                     [3]string // GLOBAL, SITE, RACK
-	ActorID, CorrelationID, CausationID, Action, ReasonCode            string
-	AuditEventSequence                                                 int64
-	OutboxEventID, OutboxEventType                                     string
-	OutboxSchemaVersion                                                int
-	OutboxPayload                                                      json.RawMessage
-	DueWorkID, DueWorkWorkType                                         string
-	DueWorkSchemaVersion                                               int
-	DueWorkNotBefore                                                   time.Time
-	DecisionInputID                                                    string
-	DecisionSequence                                                   int64
-	DecisionLogicalTime                                                time.Time
-	ReducerVersion, DecisionPolicyVersion                              string
-	NormalizedFacts                                                    json.RawMessage
-	DecisionResult                                                     string
-	FirmwareAttempt                                                    *FirmwareAttemptRequest
-	PrecheckEvidence                                                   json.RawMessage
-	PrecheckObservedAt                                                 time.Time
-	RetryParentAttemptID, ClaimedWorkID, ClaimedLeaseToken             string
-	ClaimedDeliveryGeneration                                          int64
+	CampaignID, CampaignTargetID, TargetID, ArtifactID, TargetUpdateID       string
+	ExpectedTargetRevision, CapturedCommandEpoch                             int64
+	ExpectedTargetState, NextTargetState                                     string
+	ResumeStep                                                               *string
+	CommandID, Step, AdmissionID, StepAttemptID                              string
+	Global, Site, Rack                                                       ScopeCapacity
+	ReservationIDs                                                           [3]string // GLOBAL, SITE, RACK
+	ActorID, CorrelationID, CausationID, Action, ReasonCode                  string
+	AuditEventSequence                                                       int64
+	OutboxEventID, OutboxEventType                                           string
+	OutboxSchemaVersion                                                      int
+	OutboxPayload                                                            json.RawMessage
+	DueWorkID, DueWorkWorkType                                               string
+	DueWorkSchemaVersion                                                     int
+	DueWorkNotBefore                                                         time.Time
+	DecisionInputID                                                          string
+	DecisionSequence                                                         int64
+	DecisionLogicalTime                                                      time.Time
+	ReducerVersion, DecisionPolicyVersion                                    string
+	NormalizedFacts                                                          json.RawMessage
+	DecisionResult                                                           string
+	FirmwareAttempt                                                          *FirmwareAttemptRequest
+	PrecheckEvidence                                                         json.RawMessage
+	PrecheckObservedAt                                                       time.Time
+	RetryParentAttemptID, ClaimedWorkID, ClaimedCommandID, ClaimedLeaseToken string
+	ClaimedDeliveryGeneration                                                int64
 }
 
 // AdmitRetryOperation is the only persistence path that can create a child
@@ -76,6 +76,10 @@ func AdmitRetryOperation(ctx context.Context, pool *pgxpool.Pool, req AdmissionR
 		return fmt.Errorf("begin retry admission transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	claimedCommandID := req.ClaimedCommandID
+	if claimedCommandID == "" {
+		claimedCommandID = req.CommandID
+	}
 	var admissionID, parentID, updateID, targetID string
 	var revision, epoch, authorizations, children int64
 	err = tx.QueryRow(ctx, `SELECT s.id::text,a.id::text,tu.id::text,s.target_id::text,tu.revision,tu.command_epoch,s.retry_authorizations,
@@ -87,7 +91,7 @@ AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epo
 AND d.work_type='RETRY_PRECHECK' AND tu.state='RETRY_WAIT' AND a.id=$7::uuid AND a.status='PROVEN_ABSENT'
 AND c.state IN ('RUNNING_CANARY','RUNNING_WAVES') AND c.command_epoch=tu.command_epoch
 AND (a.result_class='PROVEN_PREWRITE_FAILURE' OR EXISTS (SELECT 1 FROM ambiguity_resolutions r WHERE r.attempt_id=a.id AND r.outcome='PROVEN_ABSENT' AND r.journal_confirmed_absent AND r.late_caller_excluded))
-FOR UPDATE OF d,tu,s,a,c`, req.ClaimedWorkID, req.CommandID, req.ClaimedDeliveryGeneration, req.ClaimedLeaseToken, req.ExpectedTargetRevision, req.CapturedCommandEpoch, req.RetryParentAttemptID).Scan(&admissionID, &parentID, &updateID, &targetID, &revision, &epoch, &authorizations, &children)
+FOR UPDATE OF d,tu,s,a,c`, req.ClaimedWorkID, claimedCommandID, req.ClaimedDeliveryGeneration, req.ClaimedLeaseToken, req.ExpectedTargetRevision, req.CapturedCommandEpoch, req.RetryParentAttemptID).Scan(&admissionID, &parentID, &updateID, &targetID, &revision, &epoch, &authorizations, &children)
 	if err != nil {
 		return fmt.Errorf("lock retry admission: %w", err)
 	}
@@ -128,7 +132,7 @@ VALUES ('TARGET_UPDATE',$1::uuid,$2,$3,$4,$5::uuid,$6::uuid,$7::uuid,$8,$9)`, up
 VALUES ($1::uuid,'TARGET_UPDATE',$2::uuid,$3,$4,$5,$6::jsonb)`, req.OutboxEventID, updateID, newRevision, req.OutboxEventType, req.OutboxSchemaVersion, req.OutboxPayload); err != nil {
 		return classifyAdmissionWrite(err, "insert retry admission outbox")
 	}
-	if _, err = tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$5 WHERE id=$1::uuid AND command_id=$2::uuid AND delivery_generation=$3 AND delivery_state='CLAIMED' AND lease_token=$4::uuid`, req.ClaimedWorkID, req.CommandID, req.ClaimedDeliveryGeneration, req.ClaimedLeaseToken, req.DecisionLogicalTime.UTC()); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$5 WHERE id=$1::uuid AND command_id=$2::uuid AND delivery_generation=$3 AND delivery_state='CLAIMED' AND lease_token=$4::uuid`, req.ClaimedWorkID, claimedCommandID, req.ClaimedDeliveryGeneration, req.ClaimedLeaseToken, req.DecisionLogicalTime.UTC()); err != nil {
 		return classifyAdmissionWrite(err, "complete retry precheck work")
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO due_work (id,command_id,subject_type,subject_id,work_type,schema_version,not_before,expected_revision,expected_command_epoch)
@@ -328,7 +332,11 @@ VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8,$9,$10
 		if r.ClaimedWorkID == "" || r.ClaimedLeaseToken == "" {
 			return fmt.Errorf("admission request contains incomplete claimed precheck work")
 		}
-		tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$5 WHERE id=$1::uuid AND command_id=$2::uuid AND delivery_generation=$3 AND delivery_state='CLAIMED' AND lease_token=$4::uuid AND work_type='PRECHECK'`, r.ClaimedWorkID, r.CommandID, r.ClaimedDeliveryGeneration, r.ClaimedLeaseToken, r.DecisionLogicalTime.UTC())
+		claimedCommandID := r.ClaimedCommandID
+		if claimedCommandID == "" {
+			claimedCommandID = r.CommandID
+		}
+		tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$5 WHERE id=$1::uuid AND command_id=$2::uuid AND delivery_generation=$3 AND delivery_state='CLAIMED' AND lease_token=$4::uuid AND work_type='PRECHECK'`, r.ClaimedWorkID, claimedCommandID, r.ClaimedDeliveryGeneration, r.ClaimedLeaseToken, r.DecisionLogicalTime.UTC())
 		if err != nil {
 			return classifyAdmissionWrite(err, "complete precheck work")
 		}
