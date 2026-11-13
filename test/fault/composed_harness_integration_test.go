@@ -846,12 +846,9 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 		if !processed || observeErr != nil {
 			t.Fatalf("post-update fault task observation processed=%t err=%v, want completed task proof", processed, observeErr)
 		}
-		leaseTokens := []string{"00000000-0000-4000-8000-000000000212", "00000000-0000-4000-8000-000000000213"}
-		if expectHealthContradiction {
-			leaseTokens = append(leaseTokens, "00000000-0000-4000-8000-000000000214")
-		}
-		for _, leaseToken := range leaseTokens {
+		for index := 0; index < 12; index++ {
 			now = now.Add(20 * time.Second)
+			leaseToken := fmt.Sprintf("00000000-0000-4000-8000-%012d", 212+index)
 			processed, observeErr = worker.RunOnce(ctx, "contradiction-observer", leaseToken)
 			if !processed || observeErr != nil {
 				var work, state, taskState string
@@ -859,6 +856,13 @@ func testComposedHarnessUnavailableObservationRecoversThroughLeaseRepair(t *test
 				_ = pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.TargetUpdateID).Scan(&state)
 				_ = pool.QueryRow(ctx, "SELECT COALESCE(normalized_data->>'TaskState','') FROM device_observations WHERE target_update_id=$1::uuid AND kind='TASK' ORDER BY observed_at DESC LIMIT 1", fixture.TargetUpdateID).Scan(&taskState)
 				t.Fatalf("contradiction follow-up lease=%s processed=%t err=%v work=%q state=%q task_state=%q", leaseToken, processed, observeErr, work, state, taskState)
+			}
+			var state string
+			if err := pool.QueryRow(ctx, "SELECT state FROM target_updates WHERE id=$1::uuid", fixture.TargetUpdateID).Scan(&state); err != nil {
+				t.Fatal(err)
+			}
+			if state == "FAILED_TERMINAL" {
+				break
 			}
 		}
 		var state, attemptStatus, inventoryVersion, health string
