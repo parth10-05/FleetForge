@@ -50,6 +50,10 @@ func TestPrecheckCommandUsesFrozenPolicyAndVerifiedObjectIdentity(t *testing.T) 
 	if _, err := adapter.AdmitSubmission(ctx, command); err != nil {
 		t.Fatalf("AdmitSubmission() error=%v", err)
 	}
+	var precheckState string
+	if err := pool.QueryRow(ctx, "SELECT delivery_state FROM due_work WHERE id=$1::uuid", work.DueWorkID).Scan(&precheckState); err != nil || precheckState != "COMPLETED" {
+		t.Fatalf("precheck delivery state=%q err=%v, want COMPLETED", precheckState, err)
+	}
 	var submitCommandID string
 	if err := pool.QueryRow(ctx, "SELECT command_id::text FROM due_work WHERE work_type='SUBMIT'").Scan(&submitCommandID); err != nil || submitCommandID == command.Work.CommandID {
 		t.Fatalf("submit command=%q precheck command=%q err=%v, want distinct command identities", submitCommandID, command.Work.CommandID, err)

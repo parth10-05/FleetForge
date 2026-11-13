@@ -56,6 +56,7 @@ func (adapter ExecutionAdapter) AdmitSubmission(ctx context.Context, command exe
 	if err != nil {
 		return execution.AdmissionResult{}, err
 	}
+	request.ClaimedWorkID, request.ClaimedLeaseToken, request.ClaimedDeliveryGeneration = command.Work.DueWorkID, command.Work.LeaseToken, command.Work.DeliveryGeneration
 	if err := AdmitOperation(ctx, adapter.Pool, request); err != nil {
 		return execution.AdmissionResult{}, fmt.Errorf("admit fenced firmware submission: %w", err)
 	}

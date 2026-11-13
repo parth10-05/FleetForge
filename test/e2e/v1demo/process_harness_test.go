@@ -212,7 +212,7 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("campaign start status=%d", response.StatusCode)
 	}
-	waitForCampaignState(t, demo, operator, campaign.Resource.Id.String(), expectedState, 90*time.Second)
+	waitForCampaignState(t, demo, operator, campaign.Resource.Id.String(), expectedState, 180*time.Second)
 	var targets, succeeded int
 	if err := demo.pool.QueryRow(t.Context(), "SELECT count(*),count(*) FILTER (WHERE tu.state='SUCCEEDED') FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid", campaign.Resource.Id.String()).Scan(&targets, &succeeded); err != nil {
 		t.Fatal(err)

@@ -324,6 +324,18 @@ VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8,$9,$10
 	if _, err = tx.Exec(ctx, "INSERT INTO outbox_events (event_id,aggregate_type,aggregate_id,aggregate_revision,event_type,schema_version,payload) VALUES ($1::uuid,'TARGET_UPDATE',$2::uuid,$3,$4,$5,$6)", r.OutboxEventID, r.TargetUpdateID, newRevision, r.OutboxEventType, r.OutboxSchemaVersion, r.OutboxPayload); err != nil {
 		return classifyAdmissionWrite(err, "insert admission outbox")
 	}
+	if r.ClaimedWorkID != "" || r.ClaimedLeaseToken != "" {
+		if r.ClaimedWorkID == "" || r.ClaimedLeaseToken == "" {
+			return fmt.Errorf("admission request contains incomplete claimed precheck work")
+		}
+		tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED',lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=$5 WHERE id=$1::uuid AND command_id=$2::uuid AND delivery_generation=$3 AND delivery_state='CLAIMED' AND lease_token=$4::uuid AND work_type='PRECHECK'`, r.ClaimedWorkID, r.CommandID, r.ClaimedDeliveryGeneration, r.ClaimedLeaseToken, r.DecisionLogicalTime.UTC())
+		if err != nil {
+			return classifyAdmissionWrite(err, "complete precheck work")
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("%w: precheck work no longer claimed", ErrRevisionConflict)
+		}
+	}
 	if _, err = tx.Exec(ctx, "INSERT INTO due_work (id,command_id,subject_type,subject_id,work_type,schema_version,not_before,expected_revision,expected_command_epoch) VALUES ($1::uuid,$2::uuid,'TARGET_UPDATE',$3::uuid,$4,$5,$6,$7,$8)", r.DueWorkID, r.CommandID, r.TargetUpdateID, r.DueWorkWorkType, r.DueWorkSchemaVersion, r.DueWorkNotBefore, newRevision, r.CapturedCommandEpoch); err != nil {
 		return classifyAdmissionWrite(err, "insert admission due work")
 	}
