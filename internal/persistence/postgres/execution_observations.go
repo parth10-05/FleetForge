@@ -26,15 +26,15 @@ func CommitObservation(ctx context.Context, pool *pgxpool.Pool, work execution.W
 		return fmt.Errorf("begin execution observation: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	var attemptID, updateID, campaignTargetID, workType, state string
+	var attemptID, admissionID, updateID, campaignTargetID, workType, state string
 	var epoch, revision int64
-	err = tx.QueryRow(ctx, `SELECT a.id::text,a.target_update_id::text,tu.campaign_target_id::text,d.work_type,tu.state,a.captured_command_epoch,tu.revision
+	err = tx.QueryRow(ctx, `SELECT a.id::text,s.id::text,a.target_update_id::text,tu.campaign_target_id::text,d.work_type,tu.state,a.captured_command_epoch,tu.revision
 FROM due_work d JOIN submission_admissions s ON s.target_update_id=d.subject_id
 JOIN firmware_update_attempts a ON a.id=s.active_attempt_id JOIN target_updates tu ON tu.id=d.subject_id
 WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED'
 AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6
-AND d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status='ACCEPTED'
-FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(&attemptID, &updateID, &campaignTargetID, &workType, &state, &epoch, &revision)
+	AND d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status='ACCEPTED'
+FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(&attemptID, &admissionID, &updateID, &campaignTargetID, &workType, &state, &epoch, &revision)
 	if err == pgx.ErrNoRows {
 		return fmt.Errorf("%w: claimed observation work no longer matches its fence", ErrLeaseConflict)
 	}
@@ -69,6 +69,11 @@ VALUES (md5($1)::uuid,$2::uuid,'boot',$3,$3,true,md5($4)::uuid) ON CONFLICT (cam
 	if tag.RowsAffected() != 1 {
 		return fmt.Errorf("%w: target update fence changed", ErrLeaseConflict)
 	}
+	if decision.NextWorkType == "SUCCEEDED" {
+		if err := releaseSuccessfulReservations(ctx, tx, admissionID, now.UTC()); err != nil {
+			return err
+		}
+	}
 	if decision.NextWorkType == "TERMINAL" {
 		if _, err := tx.Exec(ctx, `UPDATE firmware_update_attempts SET status='FAILED_TERMINAL',resolved_at=$2 WHERE id=$1::uuid AND status='ACCEPTED'`, attemptID, now.UTC()); err != nil {
 			return fmt.Errorf("mark terminal execution attempt: %w", err)
@@ -90,6 +95,50 @@ VALUES (md5($1)::uuid,md5($2)::uuid,'TARGET_UPDATE',$3::uuid,$4,1,$5,$6,$7)`, "f
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return classifyDueWorkError(err, "commit execution observation")
+	}
+	return nil
+}
+
+func releaseSuccessfulReservations(ctx context.Context, tx pgx.Tx, admissionID string, now time.Time) error {
+	rows, err := tx.Query(ctx, `SELECT scope_level,scope_key FROM operation_reservations
+WHERE admission_id=$1::uuid AND state='ACTIVE'
+ORDER BY CASE scope_level WHEN 'GLOBAL' THEN 1 WHEN 'SITE' THEN 2 WHEN 'RACK' THEN 3 ELSE 4 END,scope_key
+FOR UPDATE`, admissionID)
+	if err != nil {
+		return fmt.Errorf("lock successful reservations: %w", err)
+	}
+	type scope struct{ level, key string }
+	scopes := make([]scope, 0, 3)
+	for rows.Next() {
+		var item scope
+		if err := rows.Scan(&item.level, &item.key); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan successful reservation: %w", err)
+		}
+		scopes = append(scopes, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read successful reservations: %w", err)
+	}
+	rows.Close()
+	if len(scopes) != 3 || scopes[0].level != "GLOBAL" || scopes[1].level != "SITE" || scopes[2].level != "RACK" {
+		return fmt.Errorf("successful reservation invariant violated")
+	}
+	for _, item := range scopes {
+		tag, err := tx.Exec(ctx, `UPDATE scope_capacities SET active_reservation_count=active_reservation_count-1,updated_at=$3
+WHERE scope_level=$1 AND scope_key=$2 AND active_reservation_count > 0`, item.level, item.key, now)
+		if err != nil {
+			return fmt.Errorf("release successful capacity: %w", err)
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("successful capacity invariant violated")
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE operation_reservations
+SET state='RELEASED',released_at=$2,release_reason='OBSERVED_SUCCESS'
+WHERE admission_id=$1::uuid AND state='ACTIVE'`, admissionID, now); err != nil {
+		return fmt.Errorf("release successful reservations: %w", err)
 	}
 	return nil
 }
