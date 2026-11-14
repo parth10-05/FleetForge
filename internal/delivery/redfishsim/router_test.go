@@ -17,6 +17,16 @@ import (
 	"github.com/parth10-05/fleetforge/internal/simulator/scenario"
 )
 
+func TestRedfishTaskStateUsesRedfishVocabulary(t *testing.T) {
+	for state, want := range map[core.Lifecycle]string{
+		core.LifecycleRunning: "Running", core.LifecycleCompleted: "Completed", core.LifecycleHealthy: "Completed", core.LifecycleException: "Exception",
+	} {
+		if got := redfishTaskState(state); got != want {
+			t.Fatalf("redfishTaskState(%q)=%q, want %q", state, got, want)
+		}
+	}
+}
+
 func TestTargetRoutesRequireAuthAndExposeBoundedUpdate(t *testing.T) {
 	s := scenario.Scenario{SchemaVersion: scenario.SchemaVersionV1, ScenarioID: "routes-six", Seed: "1", Topology: scenario.Topology{Sites: []string{"a", "b"}}, Targets: []scenario.Target{{Index: 1, Site: "a", Rack: "r1", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}, {Index: 2, Site: "a", Rack: "r2", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}, {Index: 3, Site: "b", Rack: "r3", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}, {Index: 4, Site: "b", Rack: "r4", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}, {Index: 5, Site: "b", Rack: "r4", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}, {Index: 6, Site: "a", Rack: "r2", InitialVersion: "1", ExpectedVersion: "2", CapabilityProfile: "baseline"}}, Timing: scenario.Timing{UploadMS: 1}, Limits: scenario.Limits{CallbackWorkers: 1, Subscriptions: 1, BodyBytes: 1024, JournalEntries: 1, OpenConnections: 1, EventsPerSecond: 1}}
 	engine, err := core.Start(s, 8)
