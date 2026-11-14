@@ -153,7 +153,10 @@ type ObservationDecision struct {
 	Observation  Observation
 	NextWorkType string
 }
-type ReconciliationSnapshot struct{ Attempt AttemptSnapshot }
+type ReconciliationSnapshot struct {
+	Attempt         AttemptSnapshot
+	JournalTargetID string
+}
 type ReconciliationDecision struct {
 	Work                                                          WorkFence
 	Outcome                                                       string

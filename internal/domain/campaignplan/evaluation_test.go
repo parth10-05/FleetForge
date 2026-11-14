@@ -41,6 +41,16 @@ func TestEvaluateCanaryFailsClosedForAttentionAndDuration(t *testing.T) {
 	}
 }
 
+func TestEvaluateCanaryPausesForExhaustedFailureBudgetBeforeHealthGate(t *testing.T) {
+	input := validEvaluationInput()
+	input.Outcomes[0].UpdateState = "FAILED_TERMINAL"
+	input.Health = nil
+	decision, err := EvaluateCanary(input)
+	if err != nil || decision.State != EvaluationFailed || decision.Reason != reason.CodeCampaignBudgetThresholdReached {
+		t.Fatalf("failed canary decision = %#v, err=%v", decision, err)
+	}
+}
+
 func TestEvaluateCanaryBlocksOutsideFrozenMaintenanceWindow(t *testing.T) {
 	input := validEvaluationInput()
 	input.Policy.Maintenance = MaintenanceWindow{Timezone: "UTC", Weekdays: []int{6}, StartMinute: 120, EndMinute: 180}

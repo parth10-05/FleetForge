@@ -69,9 +69,6 @@ func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
 	if input.LogicalCut.Sub(input.StartedAt) > time.Duration(input.Policy.MaximumDurationSeconds)*time.Second {
 		return EvaluationDecision{State: EvaluationPaused, Reason: reason.CodeCampaignCanaryDurationExpired}, nil
 	}
-	if !maintenanceAllows(input.Policy.Maintenance, input.LogicalCut) {
-		return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignWaveBlocked}, nil
-	}
 	seen := make(map[string]struct{}, len(input.Outcomes))
 	failed, evaluated := uint64(0), uint64(0)
 	for _, outcome := range input.Outcomes {
@@ -100,9 +97,6 @@ func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
 	if evaluated != uint64(len(input.Outcomes)) {
 		return EvaluationDecision{}, ErrInvalidEvaluationInput
 	}
-	if !healthyAtCut(input, seen) {
-		return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryHealthBlocked, Failed: failed, Evaluated: evaluated}, nil
-	}
 	if input.Policy.FailureBudget.Numerator > uint64(1<<63-1) || input.Policy.FailureBudget.Denominator > uint64(1<<63-1) {
 		return EvaluationDecision{}, ErrInvalidEvaluationInput
 	}
@@ -116,6 +110,12 @@ func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
 	}
 	if !decision.AdmissionAllowed {
 		return EvaluationDecision{State: EvaluationFailed, Reason: reason.CodeCampaignBudgetThresholdReached, Failed: failed, Evaluated: evaluated}, nil
+	}
+	if !maintenanceAllows(input.Policy.Maintenance, input.LogicalCut) {
+		return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignWaveBlocked}, nil
+	}
+	if !healthyAtCut(input, seen) {
+		return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryHealthBlocked, Failed: failed, Evaluated: evaluated}, nil
 	}
 	return EvaluationDecision{State: EvaluationPassed, Reason: reason.CodeCampaignCanaryPassed, Failed: failed, Evaluated: evaluated}, nil
 }

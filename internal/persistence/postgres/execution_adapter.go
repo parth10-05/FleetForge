@@ -358,7 +358,11 @@ func (adapter ExecutionAdapter) LoadReconciliation(ctx context.Context, work exe
 	if err != nil {
 		return execution.ReconciliationSnapshot{}, err
 	}
-	return execution.ReconciliationSnapshot{Attempt: attempt}, nil
+	var journalTargetID string
+	if err := adapter.Pool.QueryRow(ctx, "SELECT target_key FROM targets WHERE id=$1::uuid", attempt.TargetID).Scan(&journalTargetID); err != nil {
+		return execution.ReconciliationSnapshot{}, fmt.Errorf("load reconciliation journal target: %w", err)
+	}
+	return execution.ReconciliationSnapshot{Attempt: attempt, JournalTargetID: journalTargetID}, nil
 }
 
 func (adapter ExecutionAdapter) CommitSubmitResult(ctx context.Context, work execution.WorkFence, result execution.SubmitResult) error {

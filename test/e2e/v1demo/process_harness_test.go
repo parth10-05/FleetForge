@@ -212,7 +212,9 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("campaign start status=%d", response.StatusCode)
 	}
-	waitForCampaignState(t, demo, operator, campaign.Resource.Id.String(), expectedState, 180*time.Second)
+	if caseID != "P06-A05" {
+		waitForCampaignState(t, demo, operator, campaign.Resource.Id.String(), expectedState, 180*time.Second)
+	}
 	var targets, succeeded int
 	if err := demo.pool.QueryRow(t.Context(), "SELECT count(*),count(*) FILTER (WHERE tu.state='SUCCEEDED') FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid", campaign.Resource.Id.String()).Scan(&targets, &succeeded); err != nil {
 		t.Fatal(err)
@@ -272,6 +274,7 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FROM ambiguity_resolutions ar JOIN firmware_update_attempts fa ON fa.id=ar.attempt_id WHERE fa.target_update_id=$1::uuid", targetUpdateID).Scan(&resolutions); err != nil || resolutions != 1 {
 			t.Fatalf("attention resolutions=%d err=%v", resolutions, err)
 		}
+		waitForCampaignState(t, demo, operator, campaign.Resource.Id.String(), expectedState, 30*time.Second)
 	}
 	recordP06Evidence(t, caseID, fixture.Seed, fixturePath, invariant, map[string]int64{"target_updates": int64(targets), "succeeded_updates": int64(succeeded)}, map[string]string{"artifact": "sha256:" + hex.EncodeToString(digest[:])})
 }
