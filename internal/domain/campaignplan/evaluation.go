@@ -44,11 +44,12 @@ type HealthSample struct {
 }
 
 type EvaluationInput struct {
-	Policy     Policy
-	StartedAt  time.Time
-	LogicalCut time.Time
-	Outcomes   []TargetOutcome
-	Health     []HealthSample
+	Policy         Policy
+	CandidateCount uint64
+	StartedAt      time.Time
+	LogicalCut     time.Time
+	Outcomes       []TargetOutcome
+	Health         []HealthSample
 }
 
 type EvaluationDecision struct {
@@ -62,7 +63,7 @@ type EvaluationDecision struct {
 // contains no clock, store, or device access and fails closed on every missing
 // fact. A PASSED result is the only result that can authorize the later wave.
 func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
-	if input.StartedAt.IsZero() || input.LogicalCut.IsZero() || input.LogicalCut.Before(input.StartedAt) || len(input.Outcomes) == 0 || input.Policy.Validate(uint64(len(input.Outcomes))) != nil {
+	if input.StartedAt.IsZero() || input.LogicalCut.IsZero() || input.LogicalCut.Before(input.StartedAt) || input.CandidateCount < uint64(len(input.Outcomes)) || len(input.Outcomes) == 0 || input.Policy.Validate(input.CandidateCount) != nil {
 		return EvaluationDecision{}, ErrInvalidEvaluationInput
 	}
 	if input.LogicalCut.Sub(input.StartedAt) > time.Duration(input.Policy.MaximumDurationSeconds)*time.Second {
