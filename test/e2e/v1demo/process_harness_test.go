@@ -583,6 +583,24 @@ func orchestratorFailureKind(root string) string {
 	}
 	log := string(raw)
 	switch {
+	case strings.Contains(log, "schedule later-wave intent"):
+		return "later_wave_schedule_failure"
+	case strings.Contains(log, "release later wave"):
+		return "later_wave_release_failure"
+	case strings.Contains(log, "lock later-wave target updates"):
+		return "later_wave_lock_failure"
+	case strings.Contains(log, "append canary terminal decision"):
+		return "canary_terminal_decision_failure"
+	case strings.Contains(log, "append canary terminal audit"):
+		return "canary_terminal_audit_failure"
+	case strings.Contains(log, "append canary finalization decision"):
+		return "canary_resolution_decision_failure"
+	case strings.Contains(log, "append canary finalization audit"):
+		return "canary_resolution_audit_failure"
+	case strings.Contains(log, "append canary finalization outbox"):
+		return "canary_outbox_failure"
+	case strings.Contains(log, "resolve campaign finalization"):
+		return "campaign_update_failure"
 	case strings.Contains(log, "campaign.canary_health_blocked"):
 		return "canary_health_blocked"
 	case strings.Contains(log, "campaign.canary_pending"):
