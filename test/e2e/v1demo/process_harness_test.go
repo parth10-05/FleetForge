@@ -583,6 +583,28 @@ func orchestratorFailureKind(root string) string {
 	}
 	log := string(raw)
 	switch {
+	case strings.Contains(log, "invalid canary finalization identity"):
+		return "canary_identity_failure"
+	case strings.Contains(log, "invalid canary finalization"):
+		return "canary_request_failure"
+	case strings.Contains(log, "begin canary finalization"):
+		return "canary_transaction_begin_failure"
+	case strings.Contains(log, "lock campaign finalization"):
+		return "canary_campaign_lock_failure"
+	case strings.Contains(log, "load canary finalization evidence"):
+		return "canary_evidence_load_failure"
+	case strings.Contains(log, "evaluate canary finalization evidence"):
+		return "canary_evidence_evaluation_failure"
+	case strings.Contains(log, "lock canary wave"):
+		return "canary_wave_lock_failure"
+	case strings.Contains(log, "resolve canary wave"):
+		return "canary_wave_resolution_failure"
+	case strings.Contains(log, "invalid later-wave intent identity"):
+		return "later_wave_identity_failure"
+	case strings.Contains(log, "campaign start conflict"):
+		return "canary_transition_conflict"
+	case strings.Contains(log, "commit canary finalization"):
+		return "canary_transaction_commit_failure"
 	case strings.Contains(log, "schedule later-wave intent"):
 		return "later_wave_schedule_failure"
 	case strings.Contains(log, "release later wave"):
