@@ -523,7 +523,7 @@ FROM campaigns c WHERE c.id=$1::uuid`, campaignID).Scan(&state, &updates, &succe
 	_ = demo.pool.QueryRow(t.Context(), `SELECT COALESCE(action || ':' || reason_code,'') FROM audit_events WHERE aggregate_type='TARGET_UPDATE' AND aggregate_id IN (SELECT tu.id FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid) ORDER BY created_at DESC,id DESC LIMIT 1`, campaignID).Scan(&lastTargetAudit)
 	_ = demo.pool.QueryRow(t.Context(), `SELECT COALESCE(string_agg(dw.work_type || ':' || dw.delivery_state || ':due=' || CASE WHEN dw.not_before <= now() THEN '1' ELSE '0' END || ':at=' || to_char(dw.not_before AT TIME ZONE 'UTC','HH24:MI:SS') || ':now=' || to_char(now() AT TIME ZONE 'UTC','HH24:MI:SS'), ',' ORDER BY dw.work_type,dw.id),'') FROM due_work dw JOIN target_updates tu ON tu.id=dw.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE ct.campaign_id=$1::uuid`, campaignID).Scan(&workRows)
 	_ = demo.pool.QueryRow(t.Context(), `SELECT COALESCE(normalized_data::text,'') FROM device_observations o JOIN target_updates tu ON tu.id=o.target_update_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id WHERE ct.campaign_id=$1::uuid AND o.kind='TASK' ORDER BY o.received_at DESC,o.id DESC LIMIT 1`, campaignID).Scan(&taskObservation)
-	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d states=%s attempts=%s last_target_audit=%s pending_work=%d claimed_work=%d claimed_by=%s work_rows=%s task_observation=%s wakeup=%s precheck=%s execution=%s observation=%s err=%v", expected, state, updates, succeeded, terminal, updateStates, attemptStates, lastTargetAudit, pendingWork, claimedWork, claimedBy, workRows, taskObservation, wakeupFailureKind(demo.root), precheckFailureKind(demo.root), executionFailureKind(demo.root), observationFailureKind(demo.root), err)
+	t.Fatalf("timed out waiting for campaign state %s state=%s updates=%d succeeded=%d terminal=%d states=%s attempts=%s last_target_audit=%s pending_work=%d claimed_work=%d claimed_by=%s work_rows=%s task_observation=%s orchestrator=%s wakeup=%s precheck=%s execution=%s observation=%s err=%v", expected, state, updates, succeeded, terminal, updateStates, attemptStates, lastTargetAudit, pendingWork, claimedWork, claimedBy, workRows, taskObservation, orchestratorFailureKind(demo.root), wakeupFailureKind(demo.root), precheckFailureKind(demo.root), executionFailureKind(demo.root), observationFailureKind(demo.root), err)
 	return ""
 }
 
@@ -573,6 +573,26 @@ func wakeupFailureKind(root string) string {
 		return "wakeup_failure"
 	default:
 		return "unknown"
+	}
+}
+
+func orchestratorFailureKind(root string) string {
+	raw, err := os.ReadFile(filepath.Join(root, "orchestrator-worker.log"))
+	if err != nil {
+		return "unavailable"
+	}
+	log := string(raw)
+	switch {
+	case strings.Contains(log, "campaign.canary_health_blocked"):
+		return "canary_health_blocked"
+	case strings.Contains(log, "campaign.canary_pending"):
+		return "canary_pending"
+	case strings.Contains(log, "campaign.wave_blocked"):
+		return "maintenance_blocked"
+	case strings.Contains(log, "campaign canary finalization cycle failed"):
+		return "canary_finalizer_failure"
+	default:
+		return "none"
 	}
 }
 
