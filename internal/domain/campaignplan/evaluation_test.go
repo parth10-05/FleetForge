@@ -44,6 +44,7 @@ func TestEvaluateCanaryFailsClosedForAttentionAndDuration(t *testing.T) {
 func TestEvaluateCanaryPausesForExhaustedFailureBudgetBeforeHealthGate(t *testing.T) {
 	input := validEvaluationInput()
 	input.Outcomes[0].UpdateState = "FAILED_TERMINAL"
+	input.Outcomes[0].UnresolvedReservation = true
 	input.Health = nil
 	decision, err := EvaluateCanary(input)
 	if err != nil || decision.State != EvaluationFailed || decision.Reason != reason.CodeCampaignBudgetThresholdReached {

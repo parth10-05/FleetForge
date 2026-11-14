@@ -79,17 +79,19 @@ func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
 			return EvaluationDecision{}, ErrInvalidEvaluationInput
 		}
 		seen[outcome.TargetID] = struct{}{}
-		if !outcome.ActiveEnrollment || outcome.UnresolvedReservation {
-			return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryPending}, nil
-		}
 		switch outcome.UpdateState {
-		case "SUCCEEDED":
-			evaluated++
 		case "FAILED_TERMINAL", "SKIPPED", "CANCELLED":
+			// A terminal canary failure must pause admission even while its
+			// reservation remains retained for remediation.
 			evaluated++
 			failed++
 		case "NEEDS_ATTENTION":
 			return EvaluationDecision{State: EvaluationPaused, Reason: reason.CodeCampaignCanaryNeedsAttention}, nil
+		case "SUCCEEDED":
+			if !outcome.ActiveEnrollment || outcome.UnresolvedReservation {
+				return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryPending}, nil
+			}
+			evaluated++
 		default:
 			return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryPending}, nil
 		}

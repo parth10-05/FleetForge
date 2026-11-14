@@ -33,7 +33,7 @@ FROM due_work d JOIN submission_admissions s ON s.target_update_id=d.subject_id
 JOIN firmware_update_attempts a ON a.id=s.active_attempt_id JOIN target_updates tu ON tu.id=d.subject_id
 WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED'
 AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6
-	AND d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status='ACCEPTED'
+	AND d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status IN ('ACCEPTED','ADOPTED')
 FOR UPDATE OF d,s,a,tu`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(&attemptID, &admissionID, &updateID, &campaignTargetID, &workType, &state, &epoch, &revision)
 	if err == pgx.ErrNoRows {
 		return fmt.Errorf("%w: claimed observation work no longer matches its fence", ErrLeaseConflict)
@@ -75,7 +75,7 @@ VALUES (md5($1)::uuid,$2::uuid,'boot',$3,$3,true,md5($4)::uuid) ON CONFLICT (cam
 		}
 	}
 	if decision.NextWorkType == "TERMINAL" {
-		if _, err := tx.Exec(ctx, `UPDATE firmware_update_attempts SET status='FAILED_TERMINAL',resolved_at=$2 WHERE id=$1::uuid AND status='ACCEPTED'`, attemptID, now.UTC()); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE firmware_update_attempts SET status='FAILED_TERMINAL',resolved_at=$2 WHERE id=$1::uuid AND status IN ('ACCEPTED','ADOPTED')`, attemptID, now.UTC()); err != nil {
 			return fmt.Errorf("mark terminal execution attempt: %w", err)
 		}
 	}
