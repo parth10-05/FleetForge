@@ -78,7 +78,7 @@ func TestComposedBinariesPauseBeforeLaterWaveAfterCanaryFailure(t *testing.T) {
 }
 
 func TestComposedBinariesResolveRecentAdminAttentionWithReplayFence(t *testing.T) {
-	runComposedSixTargetCampaign(t, "task-disappearance.json", "p06-a05", "P06-A05", "PAUSED", "recent administrator resolution was revision-fenced and idempotently replayed")
+	runComposedSixTargetCampaign(t, "controlled-ambiguity.json", "p06-a05", "P06-A05", "PAUSED", "recent administrator resolution was revision-fenced and idempotently replayed")
 }
 
 func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expectedState, invariant string) {
@@ -233,9 +233,9 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 	}
 	if caseID == "P06-A04" {
 		metrics := readSimulatorMetrics(t, demo)
-		var admittedLater int
-		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid AND ct.cohort='LATER_WAVE' AND tu.state <> 'PENDING'", campaign.Resource.Id.String()).Scan(&admittedLater); err != nil || metrics.Faults == 0 || admittedLater != 0 {
-			t.Fatalf("canary pause metrics faults=%d later_admitted=%d err=%v", metrics.Faults, admittedLater, err)
+		var failedCanary, admittedLater int
+		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE ct.cohort='CANARY' AND tu.state='FAILED_TERMINAL'),count(*) FILTER (WHERE ct.cohort='LATER_WAVE' AND tu.state <> 'PENDING') FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid", campaign.Resource.Id.String()).Scan(&failedCanary, &admittedLater); err != nil || metrics.Faults == 0 || failedCanary != 1 || admittedLater != 0 {
+			t.Fatalf("canary pause metrics faults=%d failed_canary=%d later_admitted=%d err=%v", metrics.Faults, failedCanary, admittedLater, err)
 		}
 	}
 	if caseID == "P06-A05" {
@@ -248,6 +248,10 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 			}
 			return true, nil
 		})
+		var ambiguousAttempts int
+		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FROM firmware_update_attempts fa JOIN target_updates tu ON tu.id=fa.target_update_id WHERE tu.id=$1::uuid AND fa.status='NEEDS_ATTENTION'", targetUpdateID).Scan(&ambiguousAttempts); err != nil || readSimulatorMetrics(t, demo).Faults == 0 || ambiguousAttempts != 1 {
+			t.Fatalf("controlled ambiguity faults=%d attempts=%d err=%v", readSimulatorMetrics(t, demo).Faults, ambiguousAttempts, err)
+		}
 		resolve := authenticatedRequest(t, http.MethodPost, demo.apiURL+"/v1/target-updates/"+targetUpdateID+":resolve-attention", `{"action":"TERMINAL","reason_code":"operator.reviewed","reason":"verified","reservation_disposition":"QUARANTINE"}`, token)
 		resolve.Header.Set("Idempotency-Key", "p06-a05-resolve-attention")
 		resolve.Header.Set("If-Match", fmt.Sprintf("\"rev-%d\"", revision))

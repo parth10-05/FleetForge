@@ -336,7 +336,7 @@ JOIN campaign_plan_snapshots snapshot ON snapshot.campaign_id=a.campaign_id
 WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED'
 AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6
 AND d.work_type IN ('SUBMIT','TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE','AMBIGUITY_RECONCILE')
-AND ((d.work_type='SUBMIT' AND a.status='ADMITTED') OR (d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status='ACCEPTED') OR (d.work_type='AMBIGUITY_RECONCILE' AND a.status='AMBIGUOUS'))`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(
+AND ((d.work_type='SUBMIT' AND a.status='ADMITTED') OR (d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status IN ('ACCEPTED','ADOPTED')) OR (d.work_type='AMBIGUITY_RECONCILE' AND a.status='AMBIGUOUS'))`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(
 		&attempt.AttemptID, &attempt.ParentAttemptID, &attempt.AdmissionID, &attempt.TargetID, &attempt.TargetUpdateID, &attempt.CampaignID,
 		&attempt.Artifact.Provider, &attempt.Artifact.Container, &attempt.Artifact.ObjectKey, &attempt.Artifact.ObjectVersion, &attempt.Artifact.Size, &attempt.Artifact.SHA256,
 		&attempt.ExpectedVersion, &attempt.CredentialReference, &attempt.RequestFingerprint, &attempt.RemoteTaskReference, &attempt.CommandEpoch, &attempt.AdmittedRevision, &attempt.ObservationFreshnessSeconds, &attempt.StartedAt,
