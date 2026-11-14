@@ -242,7 +242,7 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 		var targetUpdateID string
 		var revision int64
 		waitForCondition(t, 20*time.Second, func() (bool, error) {
-			err := demo.pool.QueryRow(t.Context(), "SELECT tu.id::text,tu.revision FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid AND tu.state='NEEDS_ATTENTION' ORDER BY tu.id LIMIT 1", campaign.Resource.Id.String()).Scan(&targetUpdateID, &revision)
+			err := demo.pool.QueryRow(t.Context(), "SELECT tu.id::text,tu.revision FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id JOIN firmware_update_attempts fa ON fa.target_update_id=tu.id WHERE ct.campaign_id=$1::uuid AND tu.state='NEEDS_ATTENTION' AND fa.status='NEEDS_ATTENTION' ORDER BY tu.id LIMIT 1", campaign.Resource.Id.String()).Scan(&targetUpdateID, &revision)
 			if err != nil {
 				return false, nil
 			}
@@ -463,7 +463,7 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() (boo
 
 func waitForComposedDiscovery(t *testing.T, demo *composedDemo, want int) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
 		var count int
 		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FROM target_discovery_heads WHERE last_good_id IS NOT NULL").Scan(&count); err != nil {

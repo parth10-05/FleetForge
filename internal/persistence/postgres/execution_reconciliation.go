@@ -273,7 +273,7 @@ WHERE admission_id=$1::uuid AND state IN ('ACTIVE','QUARANTINED')`, admissionID,
 func adminResolutionTransition(command execution.AdminResolutionCommand) (outcome, state, attemptStatus, work, resume string, err error) {
 	switch command.Action {
 	case "ADOPT":
-		return "ADOPTED", "UPDATE_ACCEPTED", "ADOPTED", "TASK_OBSERVE", "", nil
+		return "ADOPTED", "VERIFYING", "ADOPTED", "INVENTORY_OBSERVE", "", nil
 	case "TERMINAL":
 		return "TERMINAL_FAILURE", "FAILED_TERMINAL", "FAILED_TERMINAL", "", "", nil
 	case "RETRY_PROVEN_ABSENT":
@@ -305,7 +305,7 @@ func validReconciliationDecision(decision execution.ReconciliationDecision) bool
 func reconciliationTransition(outcome string) (state, attemptStatus, work, resume string) {
 	switch outcome {
 	case "ADOPT":
-		return "UPDATE_ACCEPTED", "ADOPTED", "TASK_OBSERVE", ""
+		return "VERIFYING", "ADOPTED", "INVENTORY_OBSERVE", ""
 	case "PROVEN_ABSENT":
 		return "RETRY_WAIT", "PROVEN_ABSENT", "RETRY_PRECHECK", "SUBMIT_ADMISSION"
 	default:

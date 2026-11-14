@@ -324,14 +324,14 @@ func TestComposedHarnessPostAcceptLossAdoptsRetainedAcceptance(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT a.status,tu.state FROM firmware_update_attempts a JOIN target_updates tu ON tu.id=a.target_update_id WHERE a.id=$1::uuid`, initial.FirmwareAttempt.AttemptID).Scan(&attemptStatus, &updateState); err != nil {
 		t.Fatal(err)
 	}
-	if attemptStatus != "ADOPTED" || updateState != "UPDATE_ACCEPTED" {
+	if attemptStatus != "ADOPTED" || updateState != "VERIFYING" {
 		t.Fatalf("adopted lifecycle attempt=%s update=%s", attemptStatus, updateState)
 	}
 	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='SUBMIT' AND delivery_state='PENDING'").Scan(&pendingSubmits); err != nil || pendingSubmits != 0 {
 		t.Fatalf("pending submits=%d err=%v, want no second target request", pendingSubmits, err)
 	}
-	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='TASK_OBSERVE' AND delivery_state='PENDING'").Scan(&pendingObservations); err != nil || pendingObservations != 1 {
-		t.Fatalf("pending task observations=%d err=%v, want one adopted observation", pendingObservations, err)
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE work_type='INVENTORY_OBSERVE' AND delivery_state='PENDING'").Scan(&pendingObservations); err != nil || pendingObservations != 1 {
+		t.Fatalf("pending inventory observations=%d err=%v, want one adopted observation", pendingObservations, err)
 	}
 	recordFaultEvidence(t, filepath.Join(root, "test", "fixtures", "simulator", "v1", "post-accept-disconnect.json"), "retained acceptance adopts the original attempt without a second submission", "P05-F03")
 }
