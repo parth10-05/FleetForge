@@ -359,7 +359,7 @@ func (adapter ExecutionAdapter) LoadReconciliation(ctx context.Context, work exe
 		return execution.ReconciliationSnapshot{}, err
 	}
 	var journalTargetID string
-	if err := adapter.Pool.QueryRow(ctx, "SELECT target_key FROM targets WHERE id=$1::uuid", attempt.TargetID).Scan(&journalTargetID); err != nil {
+	if err := adapter.Pool.QueryRow(ctx, "SELECT COALESCE(target_key,id::text) FROM targets WHERE id=$1::uuid", attempt.TargetID).Scan(&journalTargetID); err != nil {
 		return execution.ReconciliationSnapshot{}, fmt.Errorf("load reconciliation journal target: %w", err)
 	}
 	return execution.ReconciliationSnapshot{Attempt: attempt, JournalTargetID: journalTargetID}, nil
