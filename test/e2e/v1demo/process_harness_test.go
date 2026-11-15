@@ -267,9 +267,9 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 		if response.StatusCode != http.StatusAccepted {
 			t.Fatalf("attention replay status=%d", response.StatusCode)
 		}
-		var resolutions int
-		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FROM ambiguity_resolutions ar JOIN firmware_update_attempts fa ON fa.id=ar.attempt_id WHERE fa.target_update_id=$1::uuid", targetUpdateID).Scan(&resolutions); err != nil || resolutions != 1 {
-			t.Fatalf("attention resolutions=%d err=%v", resolutions, err)
+		var resolutions, reconciledAttention, terminalResolution int
+		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*),count(*) FILTER (WHERE ar.outcome='NEEDS_ATTENTION'),count(*) FILTER (WHERE ar.outcome='TERMINAL_FAILURE') FROM ambiguity_resolutions ar JOIN firmware_update_attempts fa ON fa.id=ar.attempt_id WHERE fa.target_update_id=$1::uuid", targetUpdateID).Scan(&resolutions, &reconciledAttention, &terminalResolution); err != nil || resolutions != 2 || reconciledAttention != 1 || terminalResolution != 1 {
+			t.Fatalf("attention resolutions=%d reconciled_attention=%d terminal_resolution=%d err=%v", resolutions, reconciledAttention, terminalResolution, err)
 		}
 		waitForCampaignState(t, demo, operator, campaign.Resource.Id.String(), expectedState, 30*time.Second)
 	}
