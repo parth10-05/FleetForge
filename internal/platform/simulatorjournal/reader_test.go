@@ -2,12 +2,30 @@ package simulatorjournal
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/parth10-05/fleetforge/internal/simulator/journal"
 )
+
+func TestReaderReturnsCanonicalEmptyCheckpointForPrewriteAmbiguity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.jsonl")
+	writer, err := journal.OpenWriter(path, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := (Reader{Path: path}).ReadAcceptance(context.Background(), "run-1", "node-a", time.Now().Add(-time.Minute), time.Now())
+	empty := sha256.Sum256(nil)
+	if err != nil || len(result.Entries) != 0 || result.CheckpointHash != "sha256:"+hex.EncodeToString(empty[:]) {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
 
 func TestReaderReturnsValidatedAcceptanceEvidence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.jsonl")

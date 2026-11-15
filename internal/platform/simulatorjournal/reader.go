@@ -4,6 +4,8 @@ package simulatorjournal
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -28,7 +30,14 @@ func (reader Reader) ReadAcceptance(ctx context.Context, runID, targetID string,
 	if err != nil {
 		return execution.AcceptanceJournal{}, fmt.Errorf("load retained acceptance journal: %w", err)
 	}
-	if len(entries) == 0 || entries[0].RunID != runID {
+	if len(entries) == 0 {
+		// A retained run creates its journal before the first request. A
+		// pre-write disconnect therefore has valid, empty evidence; bind the
+		// decision to the canonical empty checkpoint instead of rejecting it.
+		empty := sha256.Sum256(nil)
+		return execution.AcceptanceJournal{RunID: runID, CheckpointHash: "sha256:" + hex.EncodeToString(empty[:])}, nil
+	}
+	if entries[0].RunID != runID {
 		return execution.AcceptanceJournal{}, fmt.Errorf("acceptance journal run mismatch")
 	}
 	result := execution.AcceptanceJournal{RunID: runID, CheckpointHash: "sha256:" + entries[len(entries)-1].Hash}
