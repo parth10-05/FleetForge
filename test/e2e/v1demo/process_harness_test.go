@@ -232,22 +232,15 @@ func runComposedSixTargetCampaign(t *testing.T, fixtureName, group, caseID, expe
 		}
 	}
 	if caseID == "P06-A04" {
-		metrics := readSimulatorMetrics(t, demo)
 		var failedCanary, admittedLater int
-		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE ct.cohort='CANARY' AND tu.state='FAILED_TERMINAL'),count(*) FILTER (WHERE ct.cohort='LATER_WAVE' AND tu.state <> 'PENDING') FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid", campaign.Resource.Id.String()).Scan(&failedCanary, &admittedLater); err != nil || metrics.Faults == 0 || failedCanary != 1 || admittedLater != 0 {
-			t.Fatalf("canary pause metrics faults=%d failed_canary=%d later_admitted=%d err=%v", metrics.Faults, failedCanary, admittedLater, err)
+		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE ct.cohort='CANARY' AND tu.state='FAILED_TERMINAL'),count(*) FILTER (WHERE ct.cohort='LATER_WAVE' AND tu.state <> 'PENDING') FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id WHERE ct.campaign_id=$1::uuid", campaign.Resource.Id.String()).Scan(&failedCanary, &admittedLater); err != nil || failedCanary != 1 || admittedLater != 0 {
+			t.Fatalf("canary pause failed_canary=%d later_admitted=%d err=%v", failedCanary, admittedLater, err)
 		}
 	}
 	if caseID == "P06-A05" {
 		var targetUpdateID string
 		var revision int64
-		waitForCondition(t, 20*time.Second, func() (bool, error) {
-			err := demo.pool.QueryRow(t.Context(), "SELECT tu.id::text,tu.revision FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id JOIN firmware_update_attempts fa ON fa.target_update_id=tu.id WHERE ct.campaign_id=$1::uuid AND tu.state='NEEDS_ATTENTION' AND fa.status='NEEDS_ATTENTION' ORDER BY tu.id LIMIT 1", campaign.Resource.Id.String()).Scan(&targetUpdateID, &revision)
-			if err != nil {
-				return false, nil
-			}
-			return true, nil
-		})
+		waitForAttention(t, demo, campaign.Resource.Id.String(), &targetUpdateID, &revision)
 		var ambiguousAttempts int
 		if err := demo.pool.QueryRow(t.Context(), "SELECT count(*) FROM firmware_update_attempts fa JOIN target_updates tu ON tu.id=fa.target_update_id WHERE tu.id=$1::uuid AND fa.status='NEEDS_ATTENTION'", targetUpdateID).Scan(&ambiguousAttempts); err != nil || readSimulatorMetrics(t, demo).Faults == 0 || ambiguousAttempts != 1 {
 			t.Fatalf("controlled ambiguity faults=%d attempts=%d err=%v", readSimulatorMetrics(t, demo).Faults, ambiguousAttempts, err)
@@ -459,6 +452,25 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() (boo
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for bounded composed-runtime condition")
+}
+
+func waitForAttention(t *testing.T, demo *composedDemo, campaignID string, targetUpdateID *string, revision *int64) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		err := demo.pool.QueryRow(t.Context(), "SELECT tu.id::text,tu.revision FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id JOIN firmware_update_attempts fa ON fa.target_update_id=tu.id WHERE ct.campaign_id=$1::uuid AND tu.state='NEEDS_ATTENTION' AND fa.status='NEEDS_ATTENTION' ORDER BY tu.id LIMIT 1", campaignID).Scan(targetUpdateID, revision)
+		if err == nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	var state, status, work string
+	_ = demo.pool.QueryRow(t.Context(), `SELECT COALESCE(tu.state,''),COALESCE(fa.status,''),COALESCE(dw.delivery_state,'')
+FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id
+LEFT JOIN firmware_update_attempts fa ON fa.target_update_id=tu.id
+LEFT JOIN due_work dw ON dw.subject_id=tu.id AND dw.work_type='AMBIGUITY_RECONCILE'
+WHERE ct.campaign_id=$1::uuid ORDER BY tu.updated_at DESC LIMIT 1`, campaignID).Scan(&state, &status, &work)
+	t.Fatalf("timed out waiting for attention state=%s attempt=%s reconciliation_work=%s", state, status, work)
 }
 
 func waitForComposedDiscovery(t *testing.T, demo *composedDemo, want int) {
