@@ -288,11 +288,22 @@ func (h *Handler) task(w http.ResponseWriter, id string, result core.Result) {
 	for _, v := range result.Tasks {
 		if v.ID == id && v.Visible {
 			h.metrics.taskObservations.Add(1)
-			jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#Task.v1_7_4.Task", "Id": v.ID, "TaskState": string(v.State), "TaskStatus": "OK", "PercentComplete": v.PercentComplete, "Messages": []any{}, "Oem": map[string]any{"FleetForge": map[string]string{"OperationFingerprint": "synthetic"}}})
+			jsonOut(w, http.StatusOK, map[string]any{"@odata.type": "#Task.v1_7_4.Task", "Id": v.ID, "TaskState": redfishTaskState(v.State), "TaskStatus": "OK", "PercentComplete": v.PercentComplete, "Messages": []any{}, "Oem": map[string]any{"FleetForge": map[string]string{"OperationFingerprint": "synthetic"}}})
 			return
 		}
 	}
 	errorJSON(w, http.StatusNotFound, "Base.1.0.ResourceMissingAtURI", "The requested synthetic resource does not exist.")
+}
+
+func redfishTaskState(state core.Lifecycle) string {
+	switch state {
+	case core.LifecycleCompleted, core.LifecycleHealthy, core.LifecycleVersionContradiction, core.LifecycleHealthFailed:
+		return "Completed"
+	case core.LifecycleException:
+		return "Exception"
+	default:
+		return "Running"
+	}
 }
 func targetState(result core.Result, id string) core.TargetState {
 	for _, v := range result.State {

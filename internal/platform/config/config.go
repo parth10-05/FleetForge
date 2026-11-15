@@ -20,6 +20,11 @@ import (
 const (
 	apiAddressKey                     = "FLEETFORGE_API_ADDR"
 	apiEventHMACSecretKey             = "FLEETFORGE_API_EVENT_HMAC_SECRET"
+	apiCursorHMACSecretKey            = "FLEETFORGE_API_CURSOR_HMAC_SECRET"
+	apiLocalAuthIssuerKey             = "FLEETFORGE_LOCAL_AUTH_ISSUER"
+	apiLocalAuthAudienceKey           = "FLEETFORGE_LOCAL_AUTH_AUDIENCE"
+	apiLocalAuthKeyKey                = "FLEETFORGE_LOCAL_AUTH_KEY"
+	apiLocalAuthRecentAgeKey          = "FLEETFORGE_LOCAL_AUTH_RECENT_AGE"
 	simulatorAddressKey               = "FLEETFORGE_SIMULATOR_ADDR"
 	simulatorRunRootKey               = "FLEETFORGE_SIMULATOR_RUN_ROOT"
 	simulatorScenarioPathKey          = "FLEETFORGE_SIMULATOR_SCENARIO_PATH"
@@ -59,8 +64,14 @@ type Common struct {
 
 type API struct {
 	Common
-	Address      string
-	EventHMACKey []byte
+	Address, ObjectStoreAddress                     string
+	EventHMACKey, CursorHMACKey, ObjectStoreHMACKey []byte
+	LocalIdentity                                   LocalIdentity
+}
+type LocalIdentity struct {
+	Issuer, Audience string
+	Key              []byte
+	RecentAuth       time.Duration
 }
 type Worker struct{ Common }
 type ArtifactWorker struct {
@@ -153,7 +164,44 @@ func LoadAPI() (API, error) {
 	if err != nil {
 		return API{}, err
 	}
-	return API{Common: common, Address: address, EventHMACKey: key}, nil
+	cursorKey, err := requiredHMACKey(os.LookupEnv, apiCursorHMACSecretKey)
+	if err != nil {
+		return API{}, err
+	}
+	objectStoreAddress, err := requiredAddress(os.LookupEnv, objectStoreAddressKey)
+	if err != nil {
+		return API{}, err
+	}
+	objectStoreKey, err := requiredHMACKey(os.LookupEnv, objectStoreHMACSecretKey)
+	if err != nil {
+		return API{}, err
+	}
+	identity, err := loadLocalIdentity(os.LookupEnv)
+	if err != nil {
+		return API{}, err
+	}
+	return API{Common: common, Address: address, EventHMACKey: key, CursorHMACKey: cursorKey, ObjectStoreAddress: objectStoreAddress, ObjectStoreHMACKey: objectStoreKey, LocalIdentity: identity}, nil
+}
+
+func loadLocalIdentity(lookup lookupEnv) (LocalIdentity, error) {
+	issuer, err := requiredBoundedText(lookup, apiLocalAuthIssuerKey, 256)
+	if err != nil {
+		return LocalIdentity{}, err
+	}
+	audience, err := requiredBoundedText(lookup, apiLocalAuthAudienceKey, 256)
+	if err != nil {
+		return LocalIdentity{}, err
+	}
+	encoded, ok := lookup(apiLocalAuthKeyKey)
+	key, decodeErr := base64.RawStdEncoding.DecodeString(encoded)
+	if !ok || strings.TrimSpace(encoded) == "" || decodeErr != nil || len(key) < 32 {
+		return LocalIdentity{}, &Error{Key: apiLocalAuthKeyKey, Reason: "must be base64 and decode to at least 32 bytes"}
+	}
+	recentAuth, err := duration(lookup, apiLocalAuthRecentAgeKey, 15*time.Minute, time.Minute, time.Hour)
+	if err != nil {
+		return LocalIdentity{}, err
+	}
+	return LocalIdentity{Issuer: issuer, Audience: audience, Key: key, RecentAuth: recentAuth}, nil
 }
 
 func LoadWorker() (Worker, error) {
@@ -390,6 +438,15 @@ func optionalHMACKey(lookup lookupEnv, key string) ([]byte, error) {
 	return decoded, nil
 }
 
+func requiredHMACKey(lookup lookupEnv, key string) ([]byte, error) {
+	encoded, ok := lookup(key)
+	decoded, err := base64.RawStdEncoding.DecodeString(encoded)
+	if !ok || strings.TrimSpace(encoded) == "" || err != nil || len(decoded) < 32 {
+		return nil, &Error{Key: key, Reason: "must be base64 and decode to at least 32 bytes"}
+	}
+	return decoded, nil
+}
+
 // LoadObjectStore configures the independent local data-plane listener. Its
 // HMAC key is decoded only for process use and must never be logged.
 func LoadObjectStore() (ObjectStore, error) {
@@ -508,6 +565,16 @@ func requiredAddress(lookup lookupEnv, key string) (string, error) {
 	}
 	if err := validateAddress(value); err != nil {
 		return "", &Error{Key: key, Reason: "must be a host and port"}
+	}
+	return value, nil
+}
+func requiredBoundedText(lookup lookupEnv, key string, maximum int) (string, error) {
+	value, ok := lookup(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return "", &Error{Key: key, Reason: "is required"}
+	}
+	if len(value) > maximum || strings.ContainsAny(value, "\r\n\x00") {
+		return "", &Error{Key: key, Reason: "must be bounded safe text"}
 	}
 	return value, nil
 }

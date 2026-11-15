@@ -92,6 +92,16 @@ type AuditEvent struct {
 	CausationID       pgtype.UUID        `json:"causation_id"`
 }
 
+type AuthorizationDenial struct {
+	ID            pgtype.UUID        `json:"id"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	ActorSubject  string             `json:"actor_subject"`
+	Route         string             `json:"route"`
+	Action        string             `json:"action"`
+	ReasonCode    string             `json:"reason_code"`
+	CorrelationID pgtype.UUID        `json:"correlation_id"`
+}
+
 type Campaign struct {
 	ID                       pgtype.UUID        `json:"id"`
 	ArtifactID               pgtype.UUID        `json:"artifact_id"`
@@ -104,6 +114,17 @@ type Campaign struct {
 	FrozenTargetSnapshotHash pgtype.Text        `json:"frozen_target_snapshot_hash"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CampaignDraft struct {
+	CampaignID         pgtype.UUID        `json:"campaign_id"`
+	ArtifactID         pgtype.UUID        `json:"artifact_id"`
+	CanonicalSelector  []byte             `json:"canonical_selector"`
+	PolicyJson         []byte             `json:"policy_json"`
+	SelectionSeed      string             `json:"selection_seed"`
+	SelectionAlgorithm string             `json:"selection_algorithm"`
+	CreatedBy          string             `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type CampaignHealthEvidence struct {
@@ -238,15 +259,18 @@ type ExecutionEventReceipt struct {
 }
 
 type FirmwareArtifact struct {
-	ID              pgtype.UUID        `json:"id"`
-	FirmwareVersion string             `json:"firmware_version"`
-	Sha256Digest    string             `json:"sha256_digest"`
-	ObjectReference string             `json:"object_reference"`
-	State           string             `json:"state"`
-	Revision        int64              `json:"revision"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	UploadGrantID   pgtype.Text        `json:"upload_grant_id"`
+	ID                   pgtype.UUID        `json:"id"`
+	FirmwareVersion      string             `json:"firmware_version"`
+	Sha256Digest         string             `json:"sha256_digest"`
+	ObjectReference      string             `json:"object_reference"`
+	State                string             `json:"state"`
+	Revision             int64              `json:"revision"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	UploadGrantID        pgtype.Text        `json:"upload_grant_id"`
+	UploadGrantExpiresAt pgtype.Timestamptz `json:"upload_grant_expires_at"`
+	UploadSizeBytes      pgtype.Int8        `json:"upload_size_bytes"`
+	UploadMediaType      pgtype.Text        `json:"upload_media_type"`
 }
 
 type FirmwareUpdateAttempt struct {

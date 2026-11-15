@@ -17,7 +17,7 @@ import (
 
 func TestArtifactVerificationWorkerStreamsBoundVersionAndCompletesLease(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)
-	now := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Add(time.Second)
 	const artifactID = "00000000-0000-0000-2621-000000000001"
 	digest, err := value.ParseSHA256Digest("sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 	if err != nil {
@@ -39,10 +39,6 @@ func TestArtifactVerificationWorkerStreamsBoundVersionAndCompletesLease(t *testi
 	}
 	if err := persistence.BindUploadedArtifactObject(ctx, pool, persistence.ArtifactBindingRequest{ArtifactID: artifactID, Object: object}); err != nil {
 		t.Fatal(err)
-	}
-	scheduled, err := persistence.StartAndScheduleArtifactVerification(ctx, pool, persistence.ArtifactVerificationStartRequest{ArtifactID: artifactID, WorkID: "00000000-0000-0000-2621-000000000002", CommandID: "00000000-0000-0000-2621-000000000003", NotBefore: now})
-	if err != nil || !scheduled {
-		t.Fatalf("schedule=%v err=%v", scheduled, err)
 	}
 	verification := persistence.ArtifactVerificationAdapter{Pool: pool}
 	service := app.NewWithCompletion(nil, nil, store, nil, func() time.Time { return now }).WithVerification(verification, verification)

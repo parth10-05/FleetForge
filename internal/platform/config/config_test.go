@@ -10,6 +10,12 @@ import (
 func TestLoadValidRoleConfigurations(t *testing.T) {
 	t.Setenv("FLEETFORGE_ENV", "test")
 	t.Setenv("FLEETFORGE_API_ADDR", "127.0.0.1:8080")
+	t.Setenv(apiLocalAuthIssuerKey, "fleetforge-demo")
+	t.Setenv(apiLocalAuthAudienceKey, "fleetforge-control-api")
+	t.Setenv(apiLocalAuthKeyKey, base64.RawStdEncoding.EncodeToString([]byte("01234567890123456789012345678901")))
+	t.Setenv(apiCursorHMACSecretKey, base64.RawStdEncoding.EncodeToString([]byte("abcdefghijklmnopqrstuvwxyz012345")))
+	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")
+	t.Setenv(objectStoreHMACSecretKey, base64.RawStdEncoding.EncodeToString([]byte("01234567890123456789012345678901")))
 	t.Setenv("FLEETFORGE_SIMULATOR_ADDR", "127.0.0.1:8081")
 	t.Setenv("FLEETFORGE_SIMULATOR_RUN_ROOT", "runs")
 	t.Setenv("FLEETFORGE_SIMULATOR_SCENARIO_PATH", "scenario.json")
@@ -25,6 +31,22 @@ func TestLoadValidRoleConfigurations(t *testing.T) {
 	}
 	if _, err := LoadSimulator(); err != nil {
 		t.Fatalf("LoadSimulator() error = %v", err)
+	}
+}
+
+func TestLoadAPIRejectsInvalidLocalIdentityKeyWithoutLeakingIt(t *testing.T) {
+	const secret = "identity-key-that-must-not-appear"
+	t.Setenv("FLEETFORGE_ENV", "test")
+	t.Setenv(apiAddressKey, "127.0.0.1:8080")
+	t.Setenv(apiLocalAuthIssuerKey, "fleetforge-demo")
+	t.Setenv(apiLocalAuthAudienceKey, "fleetforge-control-api")
+	t.Setenv(apiLocalAuthKeyKey, secret)
+	t.Setenv(apiCursorHMACSecretKey, base64.RawStdEncoding.EncodeToString([]byte("abcdefghijklmnopqrstuvwxyz012345")))
+	t.Setenv(objectStoreAddressKey, "127.0.0.1:8090")
+	t.Setenv(objectStoreHMACSecretKey, base64.RawStdEncoding.EncodeToString([]byte("01234567890123456789012345678901")))
+	_, err := LoadAPI()
+	if err == nil || !strings.Contains(err.Error(), apiLocalAuthKeyKey) || strings.Contains(err.Error(), secret) {
+		t.Fatalf("LoadAPI() error=%v, want redacted local identity failure", err)
 	}
 }
 

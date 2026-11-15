@@ -10,11 +10,11 @@ import (
 	"github.com/parth10-05/fleetforge/internal/application/execution"
 )
 
-// StartFirmwarePrecheck advances one fenced CANARY_START intent into the
+// StartFirmwarePrecheck advances one fenced campaign-start intent into the
 // side-effect-free PRECHECK phase. It records the decision before scheduling
 // target I/O, and has no route to SUBMIT or an operation reservation.
 func StartFirmwarePrecheck(ctx context.Context, pool *pgxpool.Pool, work execution.WorkFence, now time.Time) error {
-	if pool == nil || now.IsZero() || !validExecutionFence(work) {
+	if pool == nil || now.IsZero() || !validExecutionFence(work) || !campaignStartWorkType(work.WorkType) {
 		return fmt.Errorf("invalid firmware precheck start")
 	}
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
@@ -27,9 +27,9 @@ func StartFirmwarePrecheck(ctx context.Context, pool *pgxpool.Pool, work executi
 	err = tx.QueryRow(ctx, `SELECT tu.id::text,ct.id::text,ct.campaign_id::text,ct.target_id::text,tu.revision,tu.command_epoch
 FROM due_work d JOIN target_updates tu ON tu.id=d.subject_id JOIN campaign_targets ct ON ct.id=tu.campaign_target_id JOIN campaigns c ON c.id=ct.campaign_id
 WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED' AND d.lease_token=$4::uuid
-AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6 AND d.work_type='CANARY_START'
+AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6 AND d.work_type=$7
 AND tu.state='PENDING' AND c.state IN ('RUNNING_CANARY','RUNNING_WAVES') AND c.command_epoch=tu.command_epoch
-FOR UPDATE OF d,tu,ct,c`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(&updateID, &campaignTargetID, &campaignID, &targetID, &revision, &epoch)
+FOR UPDATE OF d,tu,ct,c`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch, work.WorkType).Scan(&updateID, &campaignTargetID, &campaignID, &targetID, &revision, &epoch)
 	if err == pgx.ErrNoRows {
 		return fmt.Errorf("%w: canary start work no longer matches its fence", ErrLeaseConflict)
 	}
@@ -52,7 +52,7 @@ FOR UPDATE OF d,tu,ct,c`, work.DueWorkID, work.CommandID, work.DeliveryGeneratio
 	}
 	newRevision := revision + 1
 	if _, err = tx.Exec(ctx, `INSERT INTO decision_inputs (id,aggregate_type,aggregate_id,aggregate_revision,decision_sequence,logical_time,reducer_version,policy_version,normalized_facts,result,reason_code)
-VALUES (md5($1)::uuid,'TARGET_UPDATE',$2::uuid,$3,0,$4,'target-update/v1','campaign-policy/v1',jsonb_build_object('work_type','CANARY_START','next_work_type','PRECHECK'),'PRECHECK','target.precheck.eligible')`, "fleetforge.precheck.decision/v1:"+work.DueWorkID, updateID, newRevision, now.UTC()); err != nil {
+VALUES (md5($1)::uuid,'TARGET_UPDATE',$2::uuid,$3,0,$4,'target-update/v1','campaign-policy/v1',jsonb_build_object('work_type',$5::text,'next_work_type','PRECHECK'),'PRECHECK','target.precheck.eligible')`, "fleetforge.precheck.decision/v1:"+work.DueWorkID, updateID, newRevision, now.UTC(), work.WorkType); err != nil {
 		return classifyDueWorkError(err, "record precheck decision")
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO audit_events (aggregate_type,aggregate_id,aggregate_revision,event_sequence,actor_id,command_id,correlation_id,causation_id,action,reason_code)
@@ -90,4 +90,8 @@ func (adapter ExecutionAdapter) StartFirmwarePrecheck(ctx context.Context, work 
 
 func validExecutionFence(work execution.WorkFence) bool {
 	return work.DueWorkID != "" && work.CommandID != "" && work.LeaseToken != "" && work.DeliveryGeneration >= 0 && work.ExpectedRevision >= 0
+}
+
+func campaignStartWorkType(workType string) bool {
+	return workType == "CANARY_START" || workType == "LATER_WAVE_START"
 }

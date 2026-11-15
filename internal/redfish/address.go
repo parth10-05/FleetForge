@@ -60,6 +60,7 @@ func ValidateDialIP(raw string, allow []netip.Prefix) error {
 	if err != nil || !address.IsValid() {
 		return ErrForbiddenAddress
 	}
+	address = address.Unmap()
 	for _, prefix := range allow {
 		if prefix.Contains(address) {
 			return nil

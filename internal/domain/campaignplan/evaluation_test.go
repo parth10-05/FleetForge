@@ -41,6 +41,17 @@ func TestEvaluateCanaryFailsClosedForAttentionAndDuration(t *testing.T) {
 	}
 }
 
+func TestEvaluateCanaryPausesForExhaustedFailureBudgetBeforeHealthGate(t *testing.T) {
+	input := validEvaluationInput()
+	input.Outcomes[0].UpdateState = "FAILED_TERMINAL"
+	input.Outcomes[0].UnresolvedReservation = true
+	input.Health = nil
+	decision, err := EvaluateCanary(input)
+	if err != nil || decision.State != EvaluationFailed || decision.Reason != reason.CodeCampaignBudgetThresholdReached {
+		t.Fatalf("failed canary decision = %#v, err=%v", decision, err)
+	}
+}
+
 func TestEvaluateCanaryBlocksOutsideFrozenMaintenanceWindow(t *testing.T) {
 	input := validEvaluationInput()
 	input.Policy.Maintenance = MaintenanceWindow{Timezone: "UTC", Weekdays: []int{6}, StartMinute: 120, EndMinute: 180}
@@ -55,5 +66,17 @@ func validEvaluationInput() EvaluationInput {
 	policy := validPolicy(Size{Unit: SizeUnitAbsolute, Value: 1})
 	policy.FailureBudget = Fraction{Numerator: 1, Denominator: 2}
 	policy.Maintenance = MaintenanceWindow{Timezone: "UTC", Weekdays: []int{6}, StartMinute: 0, EndMinute: 120}
-	return EvaluationInput{Policy: policy, StartedAt: started, LogicalCut: started.Add(time.Minute), Outcomes: []TargetOutcome{{TargetID: "a", UpdateState: "SUCCEEDED", ActiveEnrollment: true}, {TargetID: "b", UpdateState: "SUCCEEDED", ActiveEnrollment: true}}, Health: []HealthSample{{TargetID: "a", Check: "boot", ScheduledAt: started, ObservedAt: started, Passed: true}, {TargetID: "b", Check: "boot", ScheduledAt: started, ObservedAt: started, Passed: true}}}
+	return EvaluationInput{Policy: policy, CandidateCount: 2, StartedAt: started, LogicalCut: started.Add(time.Minute), Outcomes: []TargetOutcome{{TargetID: "a", UpdateState: "SUCCEEDED", ActiveEnrollment: true}, {TargetID: "b", UpdateState: "SUCCEEDED", ActiveEnrollment: true}}, Health: []HealthSample{{TargetID: "a", Check: "boot", ScheduledAt: started, ObservedAt: started, Passed: true}, {TargetID: "b", Check: "boot", ScheduledAt: started, ObservedAt: started, Passed: true}}}
+}
+
+func TestEvaluateCanaryUsesFullCampaignCandidateCount(t *testing.T) {
+	input := validEvaluationInput()
+	input.CandidateCount = 6
+	input.Outcomes = input.Outcomes[:1]
+	input.Health = input.Health[:1]
+	input.Policy.Limits = Limits{Global: 6, Site: 3, Rack: 2}
+	decision, err := EvaluateCanary(input)
+	if err != nil || decision.State != EvaluationPassed {
+		t.Fatalf("full campaign candidate count decision = %#v, err=%v", decision, err)
+	}
 }

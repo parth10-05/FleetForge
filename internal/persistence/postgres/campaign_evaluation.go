@@ -43,14 +43,18 @@ func LoadCanaryEvaluationInput(ctx context.Context, pool *pgxpool.Pool, campaign
 func loadCanaryEvaluationInputTx(ctx context.Context, tx pgx.Tx, campaignID string, logicalCut time.Time) (campaignplan.EvaluationInput, error) {
 	var policyJSON []byte
 	var startedAt time.Time
-	if err := tx.QueryRow(ctx, `SELECT p.policy_json,c.updated_at FROM campaigns c JOIN campaign_plan_snapshots p ON p.campaign_id=c.id WHERE c.id=$1::uuid AND c.state IN ('RUNNING_CANARY','EVALUATING_CANARY')`, campaignID).Scan(&policyJSON, &startedAt); err != nil {
+	var candidateCount int64
+	if err := tx.QueryRow(ctx, `SELECT p.policy_json,c.updated_at,(SELECT count(*) FROM campaign_targets WHERE campaign_id=c.id) FROM campaigns c JOIN campaign_plan_snapshots p ON p.campaign_id=c.id WHERE c.id=$1::uuid AND c.state IN ('RUNNING_CANARY','EVALUATING_CANARY')`, campaignID).Scan(&policyJSON, &startedAt, &candidateCount); err != nil {
 		return campaignplan.EvaluationInput{}, fmt.Errorf("load frozen campaign policy: %w", err)
+	}
+	if candidateCount <= 0 {
+		return campaignplan.EvaluationInput{}, fmt.Errorf("invalid frozen campaign candidate count")
 	}
 	var policy campaignplan.Policy
 	if err := json.Unmarshal(policyJSON, &policy); err != nil {
 		return campaignplan.EvaluationInput{}, fmt.Errorf("decode frozen campaign policy: %w", err)
 	}
-	input := campaignplan.EvaluationInput{Policy: policy, StartedAt: startedAt.UTC(), LogicalCut: logicalCut.UTC()}
+	input := campaignplan.EvaluationInput{Policy: policy, CandidateCount: uint64(candidateCount), StartedAt: startedAt.UTC(), LogicalCut: logicalCut.UTC()}
 	rows, err := tx.Query(ctx, `SELECT ct.target_id::text,tu.state,(e.id IS NOT NULL AND e.state='ACTIVE'),EXISTS(SELECT 1 FROM operation_reservations r WHERE r.target_id=ct.target_id AND r.state IN ('ACTIVE','QUARANTINED'))
 FROM campaign_targets ct JOIN target_updates tu ON tu.campaign_target_id=ct.id LEFT JOIN target_enrollments e ON e.campaign_target_id=ct.id
 WHERE ct.campaign_id=$1::uuid AND ct.cohort='CANARY' ORDER BY ct.id`, campaignID)

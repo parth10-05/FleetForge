@@ -64,6 +64,24 @@ func StartCampaign(ctx context.Context, pool *pgxpool.Pool, request StartCampaig
 		return fmt.Errorf("begin campaign start: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // transaction is committed below
+	if err := startCampaignTx(ctx, tx, request); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: serialization during campaign start", ErrCampaignStartConflict)
+		}
+		return fmt.Errorf("commit campaign start: %w", err)
+	}
+	return nil
+}
+
+// startCampaignTx preserves the public StartCampaign semantics while allowing
+// an API command to complete its idempotency record in the same transaction.
+func startCampaignTx(ctx context.Context, tx pgx.Tx, request StartCampaignRequest) error {
+	if err := validateStartCampaignRequest(request); err != nil {
+		return err
+	}
 
 	var state, policyVersion, planHash string
 	var revision, epoch int64
@@ -136,12 +154,6 @@ VALUES ($1::uuid,$2::uuid,'TARGET_UPDATE',$3::uuid,'CANARY_START',1,$4,$5,$6)`, 
 			return fmt.Errorf("schedule canary due work: %w", err)
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		if isSerialization(err) {
-			return fmt.Errorf("%w: serialization during campaign start", ErrCampaignStartConflict)
-		}
-		return fmt.Errorf("commit campaign start: %w", err)
-	}
 	return nil
 }
 
@@ -179,7 +191,7 @@ ORDER BY ct.id,tu.id FOR UPDATE OF ct,tu`, campaignID)
 
 func lockActiveCanaryEnrollments(ctx context.Context, tx pgx.Tx, campaignID string, canaries map[string]lockedCanaryUpdate) error {
 	rows, err := tx.Query(ctx, `SELECT ct.id::text,e.campaign_id::text,e.state
-FROM campaign_targets ct LEFT JOIN target_enrollments e ON e.campaign_target_id=ct.id
+FROM campaign_targets ct JOIN target_enrollments e ON e.campaign_target_id=ct.id
 WHERE ct.campaign_id=$1::uuid AND ct.cohort='CANARY' ORDER BY ct.id,e.id FOR UPDATE OF e`, campaignID)
 	if err != nil {
 		return fmt.Errorf("lock canary enrollments: %w", err)

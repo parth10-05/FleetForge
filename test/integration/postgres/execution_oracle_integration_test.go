@@ -7,9 +7,46 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parth10-05/fleetforge/internal/application/access"
+	"github.com/parth10-05/fleetforge/internal/application/control"
 	"github.com/parth10-05/fleetforge/internal/application/execution"
 	persistence "github.com/parth10-05/fleetforge/internal/persistence/postgres"
 )
+
+func TestControlAttentionResolutionCommitsAndReplays(t *testing.T) {
+	_, pool, ctx := migratedHarness(t)
+	fixture := seedOwnershipFixture(t, pool, ctx)
+	prepareAdmissionFixture(t, pool, ctx, fixture, 7)
+	req := executionAdmissionRequest(fixture, "5301")
+	if err := persistence.AdmitOperation(ctx, pool, req); err != nil {
+		t.Fatal(err)
+	}
+	executionAdapter := persistence.ExecutionAdapter{Pool: pool, Now: func() time.Time { return time.Now().UTC() }}
+	work := claimExecutionSubmitWork(t, ctx, executionAdapter, "00000000-0000-0000-5301-000000000099")
+	if err := executionAdapter.CommitSubmitResult(ctx, work, execution.SubmitResult{Class: execution.SubmitPossiblyAccepted, ResponseFingerprint: executionDigest("e"), FinishedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	principal := access.Principal{Subject: "admin", Roles: []access.Role{access.RoleAdmin}, IssuerClass: "local-test", AuthenticatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute)}
+	meta := control.CommandMeta{ClaimID: "00000000-0000-0000-5301-000000000001", CommandID: "00000000-0000-0000-5301-000000000002", CorrelationID: "00000000-0000-0000-5301-000000000003", OwnerToken: "00000000-0000-0000-5301-000000000004", Route: "/v1/target-updates/{target_update_id}:resolve-attention", IdempotencyKey: "attention-resolution-request", CanonicalRequest: []byte(`{"action":"TERMINAL","reason":"verified","reason_code":"operator.reviewed","reservation_disposition":"QUARANTINE"}`)}
+	adapter := persistence.ControlAttentionAdapter{Pool: pool}
+	result, err := adapter.ResolveAttention(ctx, principal, meta, fixture.targetUpdateID, 2, control.AttentionResolutionCommand{Action: "TERMINAL", ReasonCode: "operator.reviewed", Reason: "verified", ReservationDisposition: "QUARANTINE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.ClaimID, meta.CommandID, meta.OwnerToken = "00000000-0000-0000-5301-000000000005", "00000000-0000-0000-5301-000000000006", "00000000-0000-0000-5301-000000000007"
+	replay, err := adapter.ResolveAttention(ctx, principal, meta, fixture.targetUpdateID, 2, control.AttentionResolutionCommand{Action: "TERMINAL", ReasonCode: "operator.reviewed", Reason: "verified", ReservationDisposition: "QUARANTINE"})
+	if err != nil || replay.CommandID != result.CommandID {
+		t.Fatalf("replay=%+v err=%v", replay, err)
+	}
+	var count int
+	var reason, code string
+	if err := pool.QueryRow(ctx, "SELECT count(*),coalesce(max(evidence_summary->>'reason'),''),coalesce(max(reason_code),'') FROM ambiguity_resolutions WHERE attempt_id=$1::uuid", req.FirmwareAttempt.AttemptID).Scan(&count, &reason, &code); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || reason != "verified" || code != "operator.reviewed" {
+		t.Fatalf("count=%d reason=%q code=%q", count, reason, code)
+	}
+}
 
 func TestPersistedOracleRejectsReceivedOperationClaimedProvenAbsent(t *testing.T) {
 	_, pool, ctx := migratedHarness(t)

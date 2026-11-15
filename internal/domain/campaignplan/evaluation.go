@@ -44,11 +44,12 @@ type HealthSample struct {
 }
 
 type EvaluationInput struct {
-	Policy     Policy
-	StartedAt  time.Time
-	LogicalCut time.Time
-	Outcomes   []TargetOutcome
-	Health     []HealthSample
+	Policy         Policy
+	CandidateCount uint64
+	StartedAt      time.Time
+	LogicalCut     time.Time
+	Outcomes       []TargetOutcome
+	Health         []HealthSample
 }
 
 type EvaluationDecision struct {
@@ -62,14 +63,11 @@ type EvaluationDecision struct {
 // contains no clock, store, or device access and fails closed on every missing
 // fact. A PASSED result is the only result that can authorize the later wave.
 func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
-	if input.StartedAt.IsZero() || input.LogicalCut.IsZero() || input.LogicalCut.Before(input.StartedAt) || len(input.Outcomes) == 0 || input.Policy.Validate(uint64(len(input.Outcomes))) != nil {
+	if input.StartedAt.IsZero() || input.LogicalCut.IsZero() || input.LogicalCut.Before(input.StartedAt) || input.CandidateCount < uint64(len(input.Outcomes)) || len(input.Outcomes) == 0 || input.Policy.Validate(input.CandidateCount) != nil {
 		return EvaluationDecision{}, ErrInvalidEvaluationInput
 	}
 	if input.LogicalCut.Sub(input.StartedAt) > time.Duration(input.Policy.MaximumDurationSeconds)*time.Second {
 		return EvaluationDecision{State: EvaluationPaused, Reason: reason.CodeCampaignCanaryDurationExpired}, nil
-	}
-	if !maintenanceAllows(input.Policy.Maintenance, input.LogicalCut) {
-		return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignWaveBlocked}, nil
 	}
 	seen := make(map[string]struct{}, len(input.Outcomes))
 	failed, evaluated := uint64(0), uint64(0)
@@ -81,26 +79,25 @@ func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
 			return EvaluationDecision{}, ErrInvalidEvaluationInput
 		}
 		seen[outcome.TargetID] = struct{}{}
-		if !outcome.ActiveEnrollment || outcome.UnresolvedReservation {
-			return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryPending}, nil
-		}
 		switch outcome.UpdateState {
-		case "SUCCEEDED":
-			evaluated++
 		case "FAILED_TERMINAL", "SKIPPED", "CANCELLED":
+			// A terminal canary failure must pause admission even while its
+			// reservation remains retained for remediation.
 			evaluated++
 			failed++
 		case "NEEDS_ATTENTION":
 			return EvaluationDecision{State: EvaluationPaused, Reason: reason.CodeCampaignCanaryNeedsAttention}, nil
+		case "SUCCEEDED":
+			if !outcome.ActiveEnrollment || outcome.UnresolvedReservation {
+				return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryPending}, nil
+			}
+			evaluated++
 		default:
 			return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryPending}, nil
 		}
 	}
 	if evaluated != uint64(len(input.Outcomes)) {
 		return EvaluationDecision{}, ErrInvalidEvaluationInput
-	}
-	if !healthyAtCut(input, seen) {
-		return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryHealthBlocked, Failed: failed, Evaluated: evaluated}, nil
 	}
 	if input.Policy.FailureBudget.Numerator > uint64(1<<63-1) || input.Policy.FailureBudget.Denominator > uint64(1<<63-1) {
 		return EvaluationDecision{}, ErrInvalidEvaluationInput
@@ -115,6 +112,12 @@ func EvaluateCanary(input EvaluationInput) (EvaluationDecision, error) {
 	}
 	if !decision.AdmissionAllowed {
 		return EvaluationDecision{State: EvaluationFailed, Reason: reason.CodeCampaignBudgetThresholdReached, Failed: failed, Evaluated: evaluated}, nil
+	}
+	if !maintenanceAllows(input.Policy.Maintenance, input.LogicalCut) {
+		return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignWaveBlocked}, nil
+	}
+	if !healthyAtCut(input, seen) {
+		return EvaluationDecision{State: EvaluationPending, Reason: reason.CodeCampaignCanaryHealthBlocked, Failed: failed, Evaluated: evaluated}, nil
 	}
 	return EvaluationDecision{State: EvaluationPassed, Reason: reason.CodeCampaignCanaryPassed, Failed: failed, Evaluated: evaluated}, nil
 }

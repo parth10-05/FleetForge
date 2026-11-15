@@ -1,8 +1,10 @@
 openapi: 3.1.0
 info:
   title: FleetForge Control API
-  version: 0.0.0-foundation
-  description: Operational foundation contract only. No rollout operation is exposed.
+  version: 1.0.0-draft
+  description: |
+    Local synthetic-target control API. Human API operations use bearer tokens.
+    The synthetic event-hint HMAC route is internal and intentionally absent.
 paths:
   /health/live:
     get:
@@ -32,3 +34,444 @@ paths:
       responses:
         '200':
           description: Safe build metadata.
+  /v1/targets:
+    get:
+      operationId: listTargets
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/pageSize'}, {$ref: '#/components/parameters/cursor'}]
+      responses:
+        '200':
+          description: Bounded target projection page.
+          content: {application/json: {schema: {$ref: '#/components/schemas/targetPage'}}}
+        '400': {$ref: '#/components/responses/badRequest'}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+    post:
+      operationId: registerTarget
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/idempotencyKey'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/targetRegistration'}}}
+      responses:
+        '201':
+          description: Target registration accepted.
+          content: {application/json: {schema: {$ref: '#/components/schemas/commandEnvelope'}}}
+        '400': {$ref: '#/components/responses/badRequest'}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '409': {$ref: '#/components/responses/conflict'}
+  /v1/targets/{target_id}:
+    parameters:
+      - name: target_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      operationId: getTarget
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Target projection.
+          headers: {ETag: {schema: {type: string}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/target'}}}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '404': {$ref: '#/components/responses/notFound'}
+  /v1/targets/{target_id}:discover:
+    parameters:
+      - name: target_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/idempotencyKey'}
+      - {$ref: '#/components/parameters/ifMatch'}
+    post:
+      operationId: requestTargetDiscovery
+      security: [{bearerAuth: []}]
+      responses:
+        '202':
+          description: Discovery work durably accepted.
+          content: {application/json: {schema: {$ref: '#/components/schemas/commandEnvelope'}}}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '409': {$ref: '#/components/responses/conflict'}
+        '412': {$ref: '#/components/responses/preconditionFailed'}
+        '428': {$ref: '#/components/responses/preconditionRequired'}
+  /v1/artifacts:initiate:
+    post:
+      operationId: initiateArtifact
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/idempotencyKey'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/artifactInitiation'}}}
+      responses:
+        '201':
+          description: Artifact upload grant accepted.
+          content: {application/json: {schema: {$ref: '#/components/schemas/artifactInitiationEnvelope'}}}
+        '400': {$ref: '#/components/responses/badRequest'}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '409': {$ref: '#/components/responses/conflict'}
+  /v1/artifacts/{artifact_id}:
+    parameters:
+      - name: artifact_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      operationId: getArtifact
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Artifact verification projection.
+          content: {application/json: {schema: {$ref: '#/components/schemas/artifact'}}}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '404': {$ref: '#/components/responses/notFound'}
+  /v1/campaigns:
+    post:
+      operationId: createCampaign
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/idempotencyKey'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/campaignCreation'}}}
+      responses:
+        '201':
+          description: Campaign draft accepted.
+          content: {application/json: {schema: {$ref: '#/components/schemas/commandEnvelope'}}}
+        '400': {$ref: '#/components/responses/badRequest'}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '409': {$ref: '#/components/responses/conflict'}
+  /v1/campaigns/{campaign_id}:
+    parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      operationId: getCampaign
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Campaign projection.
+          headers: {ETag: {schema: {type: string}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/campaign'}}}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '404': {$ref: '#/components/responses/notFound'}
+  /v1/campaigns/{campaign_id}:validate:
+    parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/idempotencyKey'}
+      - {$ref: '#/components/parameters/ifMatch'}
+    post:
+      operationId: validateCampaign
+      security: [{bearerAuth: []}]
+      responses:
+        '202': {description: Validation work accepted, content: {application/json: {schema: {$ref: '#/components/schemas/commandEnvelope'}}}}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '409': {$ref: '#/components/responses/conflict'}
+        '412': {$ref: '#/components/responses/preconditionFailed'}
+        '428': {$ref: '#/components/responses/preconditionRequired'}
+  /v1/campaigns/{campaign_id}:start:
+    parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/idempotencyKey'}
+      - {$ref: '#/components/parameters/ifMatch'}
+    post:
+      operationId: startCampaign
+      security: [{bearerAuth: []}]
+      responses:
+        '202': {description: Campaign start accepted, content: {application/json: {schema: {$ref: '#/components/schemas/commandEnvelope'}}}}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '409': {$ref: '#/components/responses/conflict'}
+        '412': {$ref: '#/components/responses/preconditionFailed'}
+        '428': {$ref: '#/components/responses/preconditionRequired'}
+  /v1/campaigns/{campaign_id}:pause:
+    parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/idempotencyKey'}
+      - {$ref: '#/components/parameters/ifMatch'}
+    post:
+      operationId: pauseCampaign
+      security: [{bearerAuth: []}]
+      responses:
+        '202': {description: Campaign pause accepted, content: {application/json: {schema: {$ref: '#/components/schemas/commandEnvelope'}}}}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '409': {$ref: '#/components/responses/conflict'}
+        '412': {$ref: '#/components/responses/preconditionFailed'}
+        '428': {$ref: '#/components/responses/preconditionRequired'}
+  /v1/campaigns/{campaign_id}/targets:
+    parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/pageSize'}
+      - {$ref: '#/components/parameters/cursor'}
+    get:
+      operationId: listCampaignTargets
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Bounded campaign-member projection page.
+          content: {application/json: {schema: {$ref: '#/components/schemas/targetPage'}}}
+        '400': {$ref: '#/components/responses/badRequest'}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '404': {$ref: '#/components/responses/notFound'}
+  /v1/campaigns/{campaign_id}/audit:
+    parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/pageSize'}
+      - {$ref: '#/components/parameters/cursor'}
+    get:
+      operationId: listCampaignAudit
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Bounded redacted campaign audit page.
+          content: {application/json: {schema: {$ref: '#/components/schemas/auditPage'}}}
+        '400': {$ref: '#/components/responses/badRequest'}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '404': {$ref: '#/components/responses/notFound'}
+  /v1/target-updates/{target_update_id}:resolve-attention:
+    parameters:
+      - name: target_update_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/idempotencyKey'}
+      - {$ref: '#/components/parameters/ifMatch'}
+    post:
+      operationId: resolveTargetUpdateAttention
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/attentionResolution'}}}
+      responses:
+        '202': {description: Attention resolution accepted, content: {application/json: {schema: {$ref: '#/components/schemas/commandEnvelope'}}}}
+        '400': {$ref: '#/components/responses/badRequest'}
+        '401': {$ref: '#/components/responses/unauthorized'}
+        '403': {$ref: '#/components/responses/forbidden'}
+        '409': {$ref: '#/components/responses/conflict'}
+        '412': {$ref: '#/components/responses/preconditionFailed'}
+        '428': {$ref: '#/components/responses/preconditionRequired'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+        pattern: '^[!-~]+$'
+    ifMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: '^"rev-(0|[1-9][0-9]*)"$'
+    pageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 4096
+  schemas:
+    problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, correlation_id]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string, maxLength: 256}
+        status: {type: integer, minimum: 400, maximum: 599}
+        code: {type: string, maxLength: 128}
+        correlation_id: {type: string, format: uuid}
+        detail: {type: string, maxLength: 1024}
+    resourceReference:
+      type: object
+      additionalProperties: false
+      required: [kind, id, href]
+      properties:
+        kind: {type: string, maxLength: 64}
+        id: {type: string, format: uuid}
+        href: {type: string, maxLength: 1024}
+    commandEnvelope:
+      type: object
+      additionalProperties: false
+      required: [command_id, resource, accepted_at]
+      properties:
+        command_id: {type: string, format: uuid}
+        resource: {$ref: '#/components/schemas/resourceReference'}
+        revision: {type: integer, minimum: 0}
+        accepted_at: {type: string, format: date-time}
+    targetRegistration:
+      type: object
+      additionalProperties: false
+      required: [display_name, endpoint_reference, target_key, credential_reference, labels]
+      properties:
+        display_name: {type: string, minLength: 1, maxLength: 256}
+        endpoint_reference: {type: string, minLength: 1, maxLength: 1024}
+        target_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'}
+        credential_reference: {type: string, minLength: 1, maxLength: 512}
+        labels:
+          type: object
+          maxProperties: 32
+          additionalProperties: {type: string, maxLength: 256}
+    target:
+      type: object
+      additionalProperties: false
+      required: [id, revision, as_of, state]
+      properties:
+        id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 0}
+        as_of: {type: string, format: date-time}
+        state: {type: string}
+    targetPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/target'}}
+        next_cursor: {type: string, maxLength: 4096}
+    artifactInitiation:
+      type: object
+      additionalProperties: false
+      required: [sha256, size_bytes, media_type, firmware_version]
+      properties:
+        sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        size_bytes: {type: integer, minimum: 1, maximum: 2147483648}
+        media_type: {type: string, minLength: 1, maxLength: 256}
+        firmware_version: {type: string, minLength: 1, maxLength: 256}
+        display_label: {type: string, maxLength: 256}
+    artifactInitiationEnvelope:
+      allOf:
+        - {$ref: '#/components/schemas/commandEnvelope'}
+        - type: object
+          additionalProperties: false
+          required: [upload]
+          properties:
+            upload: {$ref: '#/components/schemas/artifactUpload'}
+    artifactUpload:
+      type: object
+      additionalProperties: false
+      required: [url, grant, expires_at]
+      properties:
+        url: {type: string, format: uri, maxLength: 1024}
+        grant: {type: string, minLength: 1, maxLength: 4096}
+        expires_at: {type: string, format: date-time}
+    artifact:
+      type: object
+      additionalProperties: false
+      required: [id, state, as_of]
+      properties:
+        id: {type: string, format: uuid}
+        state: {type: string}
+        as_of: {type: string, format: date-time}
+    campaignCreation:
+      type: object
+      additionalProperties: false
+      required: [artifact_id, selector, selection_seed, policy]
+      properties:
+        artifact_id: {type: string, format: uuid}
+        selector: {type: object, maxProperties: 8}
+        selection_seed: {type: string, minLength: 1, maxLength: 256}
+        policy: {type: object}
+    campaign:
+      type: object
+      additionalProperties: false
+      required: [id, revision, as_of, state]
+      properties:
+        id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 0}
+        as_of: {type: string, format: date-time}
+        state: {type: string}
+    attentionResolution:
+      type: object
+      additionalProperties: false
+      required: [action, reason_code, reason]
+      properties:
+        action: {type: string, enum: [ADOPT, RETRY_PROVEN_ABSENT, TERMINAL]}
+        reason_code: {type: string, minLength: 1, maxLength: 64}
+        reason: {type: string, minLength: 1, maxLength: 1024}
+        reference: {type: string, maxLength: 256}
+        reservation_disposition: {type: string, enum: [QUARANTINE, RELEASE]}
+        journal_confirmed_absent: {type: boolean}
+        late_caller_excluded: {type: boolean}
+        late_caller_exclusion_method: {type: string, maxLength: 128}
+    auditRecord:
+      type: object
+      additionalProperties: false
+      required: [action, outcome, occurred_at]
+      properties:
+        action: {type: string, maxLength: 128}
+        outcome: {type: string, maxLength: 64}
+        occurred_at: {type: string, format: date-time}
+    auditPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/auditRecord'}}
+        next_cursor: {type: string, maxLength: 4096}
+  responses:
+    badRequest:
+      description: Invalid request.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/problem'}}}
+    unauthorized:
+      description: Authentication failed.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/problem'}}}
+    forbidden:
+      description: Permission denied.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/problem'}}}
+    notFound:
+      description: Resource not found.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/problem'}}}
+    conflict:
+      description: Command conflict.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/problem'}}}
+    preconditionFailed:
+      description: Revision precondition failed.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/problem'}}}
+    preconditionRequired:
+      description: Required precondition missing.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/problem'}}}

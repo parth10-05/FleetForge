@@ -160,6 +160,17 @@ func CompleteIdempotencyKey(ctx context.Context, pool *pgxpool.Pool, completion 
 	return nil
 }
 
+// CompleteVersionedIdempotencyKey completes an API command whose replay
+// response is represented by the versioned, non-secret response-reference
+// codec. Legacy callers keep using CompleteIdempotencyKey because historic
+// response references are not necessarily v1ref values.
+func CompleteVersionedIdempotencyKey(ctx context.Context, pool *pgxpool.Pool, completion IdempotencyCompletion, ownerToken string) error {
+	if _, err := DecodeResponseReference(completion.ResponseReference); err != nil {
+		return fmt.Errorf("validate versioned idempotency response reference: %w", err)
+	}
+	return CompleteIdempotencyKey(ctx, pool, completion, ownerToken)
+}
+
 // ApplyIdempotentAggregateMutation performs the second phase of a mutating
 // idempotent command. It locks the successful claim, writes the aggregate,
 // audit/outbox/due-work records, and completes the key in the same serializable
@@ -200,6 +211,17 @@ func ApplyIdempotentAggregateMutation(ctx context.Context, pool *pgxpool.Pool, i
 		return fmt.Errorf("commit idempotent aggregate mutation: %w", err)
 	}
 	return nil
+}
+
+// ApplyVersionedIdempotentAggregateMutation is the API-command counterpart of
+// ApplyIdempotentAggregateMutation. It verifies the replay locator before a
+// transaction begins, preventing a newly written API command from persisting
+// an opaque, malformed, or secret-bearing response reference.
+func ApplyVersionedIdempotentAggregateMutation(ctx context.Context, pool *pgxpool.Pool, input IdempotentAggregateMutation) error {
+	if _, err := DecodeResponseReference(input.Completion.ResponseReference); err != nil {
+		return fmt.Errorf("validate versioned idempotency response reference: %w", err)
+	}
+	return ApplyIdempotentAggregateMutation(ctx, pool, input)
 }
 
 func completeIdempotencyKeyInTx(ctx context.Context, tx pgx.Tx, completion IdempotencyCompletion, ownerToken, keyHash string) error {

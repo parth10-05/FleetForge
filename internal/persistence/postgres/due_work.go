@@ -134,7 +134,38 @@ RETURNING id::text,command_id::text,subject_type,subject_id::text,work_type,leas
 }
 
 func CompleteDueWork(ctx context.Context, pool *pgxpool.Pool, result DueWorkResult) error {
-	return finishDueWork(ctx, pool, result, true)
+	if pool == nil {
+		return fmt.Errorf("due-work persistence is unavailable")
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return fmt.Errorf("begin due-work completion: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := completeDueWorkTx(ctx, tx, result); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return classifyDueWorkError(err, "commit due-work completion")
+	}
+	return nil
+}
+
+// completeDueWorkTx owns completion of one exact leased work row inside a
+// caller's transaction. Validation finalization uses it so READY and work
+// completion cannot be committed independently.
+func completeDueWorkTx(ctx context.Context, tx pgx.Tx, result DueWorkResult) error {
+	if result.ID == "" || result.LeaseToken == "" || result.ExpectedRevision < 0 || result.Now.IsZero() {
+		return fmt.Errorf("invalid due-work result")
+	}
+	tag, err := tx.Exec(ctx, `UPDATE due_work SET delivery_state='COMPLETED', lease_token=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=$5 WHERE id=$1::uuid AND delivery_state='CLAIMED' AND lease_token=$2::uuid AND expected_revision=$3 AND expected_command_epoch IS NOT DISTINCT FROM $4`, result.ID, result.LeaseToken, result.ExpectedRevision, result.ExpectedCommandEpoch, result.Now)
+	if err != nil {
+		return classifyDueWorkError(err, "complete due work")
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("%w: stale token, revision, or epoch", ErrLeaseConflict)
+	}
+	return nil
 }
 
 func FailDueWork(ctx context.Context, pool *pgxpool.Pool, result DueWorkResult) error {

@@ -30,9 +30,13 @@ func (issuer *Issuer) IssueUploadCapability(_ context.Context, request app.Uploa
 	if issuer == nil || len(issuer.secret) < 32 || request.ArtifactID == "" || request.GrantID == "" || request.Container == "" || request.Key == "" || request.ExpiresAt.IsZero() {
 		return app.UploadCapability{}, fmt.Errorf("invalid local upload capability request")
 	}
-	versionID, err := issuer.newVersionID()
-	if err != nil {
-		return app.UploadCapability{}, fmt.Errorf("allocate local object version: %w", err)
+	versionID := request.VersionID
+	if versionID == "" {
+		var err error
+		versionID, err = issuer.newVersionID()
+		if err != nil {
+			return app.UploadCapability{}, fmt.Errorf("allocate local object version: %w", err)
+		}
 	}
 	claims := localartifactstore.UploadGrantClaims{Version: "fleetforge.upload-grant/v1", GrantID: request.GrantID, ArtifactID: request.ArtifactID, Method: "PUT", Provider: artifact.ObjectProviderLocalV1, Container: request.Container, Key: request.Key, VersionID: versionID, Size: request.Metadata.Size(), Digest: request.Metadata.Digest().String(), MediaType: request.Metadata.MediaType(), ExpiresAt: request.ExpiresAt.UTC()}
 	grant, err := localartifactstore.IssueSignedGrant(issuer.secret, claims)

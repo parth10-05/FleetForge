@@ -177,6 +177,11 @@ func applyAggregateRevisionUpdate(ctx context.Context, tx pgx.Tx, m AggregateMut
 			m.AggregateID, m.ExpectedRevision,
 			m.NewState, m.CommandEpoch, m.ResumeStep,
 		)
+	case "TARGET":
+		tag, err = tx.Exec(ctx,
+			"UPDATE targets SET revision=revision+1, updated_at=now() WHERE id=$1::uuid AND revision=$2",
+			m.AggregateID, m.ExpectedRevision,
+		)
 	default:
 		return fmt.Errorf("%w: aggregate_type %q", ErrCorruptPersistedValue, m.AggregateType)
 	}

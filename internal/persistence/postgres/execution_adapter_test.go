@@ -29,8 +29,8 @@ func TestAdmissionRequestFromExecutionPreservesAuthorizedEnvelope(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.CommandID != command.Work.CommandID || request.ExpectedTargetRevision != command.Work.ExpectedRevision || request.CapturedCommandEpoch != command.Snapshot.CommandEpoch || request.CampaignTargetID != command.Envelope.CampaignTargetID || request.FirmwareAttempt == nil || request.FirmwareAttempt.RequestFingerprint != command.RequestFingerprint || request.FirmwareAttempt.SHA256Digest != command.Artifact.SHA256 {
-		t.Fatalf("mapped request lost fenced or immutable identity: %#v", request)
+	if request.CommandID == command.Work.CommandID || request.CommandID != deterministicExecutionUUID(command.Work.CommandID+":submit") || request.ExpectedTargetRevision != command.Work.ExpectedRevision || request.CapturedCommandEpoch != command.Snapshot.CommandEpoch || request.CampaignTargetID != command.Envelope.CampaignTargetID || request.FirmwareAttempt == nil || request.FirmwareAttempt.RequestFingerprint != command.RequestFingerprint || request.FirmwareAttempt.SHA256Digest != command.Artifact.SHA256 {
+		t.Fatalf("mapped request did not preserve fenced or distinct submission identity: %#v", request)
 	}
 	if request.Global.Key != "GLOBAL" || request.Site.Key != "site-a" || request.Rack.Key != "rack-a" || string(request.OutboxPayload) != `{"admitted":true}` || string(request.NormalizedFacts) != `{"eligible":true}` || request.PrecheckObservedAt != now || len(request.PrecheckEvidence) == 0 {
 		t.Fatalf("mapped request lost authorized envelope: %#v", request)

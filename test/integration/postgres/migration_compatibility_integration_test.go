@@ -21,7 +21,7 @@ import (
 
 const (
 	lastSupportedMigrationVersion int64 = 5
-	latestMigrationVersion        int64 = 26
+	latestMigrationVersion        int64 = 31
 )
 
 func TestMigrationCompatibilityEmptyAndLastSupportedReachLatest(t *testing.T) {

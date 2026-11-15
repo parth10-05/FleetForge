@@ -111,7 +111,22 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 		return fmt.Errorf("begin readiness enrollment transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // intentional best-effort rollback
+	if err := acquireReadinessEnrollmentTx(ctx, tx, req, targets); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: serialization during readiness commit", ErrRevisionConflict)
+		}
+		return fmt.Errorf("commit readiness enrollment: %w", err)
+	}
+	return nil
+}
 
+// acquireReadinessEnrollmentTx performs the full readiness recheck and
+// transition inside a caller-owned serializable transaction. It preserves the
+// canonical campaign, membership, enrollment, reservation lock ordering.
+func acquireReadinessEnrollmentTx(ctx context.Context, tx pgx.Tx, req ReadinessEnrollmentRequest, targets []TargetEnrollmentEntry) error {
 	// Step 1: Lock the campaign row to anchor the transaction order.
 	var campaignState, campaignArtifactID string
 	if err := tx.QueryRow(ctx,
@@ -190,12 +205,6 @@ func AcquireReadinessEnrollment(ctx context.Context, pool *pgxpool.Pool, req Rea
 		return fmt.Errorf("insert readiness outbox event: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		if isSerialization(err) {
-			return fmt.Errorf("%w: serialization during readiness commit", ErrRevisionConflict)
-		}
-		return fmt.Errorf("commit readiness enrollment: %w", err)
-	}
 	return nil
 }
 

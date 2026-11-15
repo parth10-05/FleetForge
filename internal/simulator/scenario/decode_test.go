@@ -36,7 +36,7 @@ func TestGoldenFixtures(t *testing.T) {
 		t.Fatal("runtime.Caller() failed")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-	for _, name := range []string{"healthy.json", "lost-event.json", "post-accept-disconnect.json", "task-disappearance.json", "canary-health-failure.json"} {
+	for _, name := range []string{"healthy.json", "lost-event.json", "post-accept-disconnect.json", "task-disappearance.json", "canary-health-failure.json", "controlled-ambiguity.json"} {
 		valid, err := os.ReadFile(filepath.Join(root, "test", "fixtures", "simulator", "v1", name))
 		if err != nil {
 			t.Fatal(err)

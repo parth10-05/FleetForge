@@ -19,24 +19,24 @@ type WakeupSubmitHandler struct {
 }
 
 // PrecheckStartRepository is intentionally smaller than the execution
-// repository: consuming CANARY_START can only create bounded PRECHECK work.
+// repository: consuming a campaign start can only create bounded PRECHECK work.
 type PrecheckStartRepository interface {
 	StartFirmwarePrecheck(context.Context, WorkFence) error
 }
 
 // WakeupPrecheckStartHandler finalizes the fenced, side-effect-free
-// CANARY_START transition. It has neither artifact access nor a target port.
+// campaign-start transition. It has neither artifact access nor a target port.
 type WakeupPrecheckStartHandler struct{ Repository PrecheckStartRepository }
 
 func (handler WakeupPrecheckStartHandler) Supports(envelope orchestration.Envelope) bool {
-	return envelope.QueueClass == orchestration.QueueUpdateStep && envelope.WorkType == "CANARY_START"
+	return envelope.QueueClass == orchestration.QueueUpdateStep && (envelope.WorkType == "CANARY_START" || envelope.WorkType == "LATER_WAVE_START")
 }
 
 func (handler WakeupPrecheckStartHandler) HandleFinalized(ctx context.Context, work orchestration.ClaimedWork) error {
-	if handler.Repository == nil || work.WorkType != "CANARY_START" {
+	if handler.Repository == nil || (work.WorkType != "CANARY_START" && work.WorkType != "LATER_WAVE_START") {
 		return fmt.Errorf("invalid precheck start wakeup")
 	}
-	return handler.Repository.StartFirmwarePrecheck(ctx, WorkFence{DueWorkID: work.DueWorkID, CommandID: work.CommandID, LeaseToken: work.LeaseToken, DeliveryGeneration: work.DeliveryGeneration, ExpectedRevision: work.ExpectedRevision, ExpectedCommandEpoch: work.ExpectedCommandEpoch})
+	return handler.Repository.StartFirmwarePrecheck(ctx, WorkFence{DueWorkID: work.DueWorkID, CommandID: work.CommandID, LeaseToken: work.LeaseToken, WorkType: work.WorkType, DeliveryGeneration: work.DeliveryGeneration, ExpectedRevision: work.ExpectedRevision, ExpectedCommandEpoch: work.ExpectedCommandEpoch})
 }
 
 func (handler WakeupSubmitHandler) Supports(envelope orchestration.Envelope) bool {

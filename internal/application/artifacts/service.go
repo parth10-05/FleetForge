@@ -30,8 +30,11 @@ type UploadCapabilityRequest struct {
 	GrantID    string
 	Container  string
 	Key        string
-	Metadata   artifact.UploadMetadata
-	ExpiresAt  time.Time
+	// VersionID is supplied only when a durable command must regenerate an
+	// identical capability. Empty retains provider-generated version identity.
+	VersionID string
+	Metadata  artifact.UploadMetadata
+	ExpiresAt time.Time
 }
 
 type UploadCapability struct {

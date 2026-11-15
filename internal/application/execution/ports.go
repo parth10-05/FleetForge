@@ -5,12 +5,14 @@ import (
 	"context"
 	"io"
 	"time"
+
+	"github.com/parth10-05/fleetforge/internal/application/access"
 )
 
 type WorkFence struct {
-	DueWorkID, CommandID, LeaseToken     string
-	DeliveryGeneration, ExpectedRevision int64
-	ExpectedCommandEpoch                 *int64
+	DueWorkID, CommandID, LeaseToken, WorkType string
+	DeliveryGeneration, ExpectedRevision       int64
+	ExpectedCommandEpoch                       *int64
 }
 type ObjectIdentity struct {
 	Provider, Container, ObjectKey, ObjectVersion, SHA256 string
@@ -151,7 +153,10 @@ type ObservationDecision struct {
 	Observation  Observation
 	NextWorkType string
 }
-type ReconciliationSnapshot struct{ Attempt AttemptSnapshot }
+type ReconciliationSnapshot struct {
+	Attempt         AttemptSnapshot
+	JournalTargetID string
+}
 type ReconciliationDecision struct {
 	Work                                                          WorkFence
 	Outcome                                                       string
@@ -166,13 +171,14 @@ type VerifiedPrincipal struct {
 	Verified                   bool
 }
 type AdminResolutionCommand struct {
-	Principal                                      VerifiedPrincipal
-	Work                                           WorkFence
-	AttemptID, Action, Reason, EvidenceFingerprint string
-	ReservationDisposition                         string
-	JournalConfirmedAbsent, LateCallerExcluded     bool
-	LateCallerExclusionMethod, ProofReference      string
-	Now                                            time.Time
+	Principal                                                  VerifiedPrincipal
+	AccessPrincipal                                            access.Principal
+	Work                                                       WorkFence
+	AttemptID, Action, Reason, ReasonCode, EvidenceFingerprint string
+	ReservationDisposition                                     string
+	JournalConfirmedAbsent, LateCallerExcluded                 bool
+	LateCallerExclusionMethod, ProofReference                  string
+	Now                                                        time.Time
 }
 type ResolutionResult struct{ TargetUpdateID string }
 
@@ -222,7 +228,4 @@ type AcceptanceEntry struct {
 	AttemptID, RequestFingerprint string
 	Received, Accepted            bool
 	Sequence                      int64
-}
-type TokenVerifier interface {
-	VerifyAccessToken(context.Context, string) (VerifiedPrincipal, error)
 }

@@ -25,9 +25,13 @@ func (r *reconciliationRepository) CommitReconciliation(_ context.Context, _ Wor
 	return nil
 }
 
-type acceptanceReader struct{ journal AcceptanceJournal }
+type acceptanceReader struct {
+	journal  AcceptanceJournal
+	targetID string
+}
 
-func (r acceptanceReader) ReadAcceptance(context.Context, string, string, time.Time, time.Time) (AcceptanceJournal, error) {
+func (r *acceptanceReader) ReadAcceptance(_ context.Context, _ string, targetID string, _ time.Time, _ time.Time) (AcceptanceJournal, error) {
+	r.targetID = targetID
 	return r.journal, nil
 }
 
@@ -57,11 +61,12 @@ func TestEvaluateAcceptanceJournalAdoptsMatchingAcceptedAttempt(t *testing.T) {
 func TestReconciliationWorkerAdoptsOnlyIndependentMatchingAcceptance(t *testing.T) {
 	attempt := AttemptSnapshot{AttemptID: "attempt-1", TargetID: "target-1", RequestFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", StartedAt: time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC)}
 	work := WorkFence{DueWorkID: "work", CommandID: "command", LeaseToken: "lease"}
-	repository := &reconciliationRepository{snapshot: ReconciliationSnapshot{Attempt: attempt}}
-	worker := ReconciliationWorker{Claimer: reconciliationClaimer{work: work}, Repository: repository, Journal: acceptanceReader{journal: AcceptanceJournal{RunID: "run", CheckpointHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Entries: []AcceptanceEntry{{AttemptID: attempt.AttemptID, RequestFingerprint: attempt.RequestFingerprint, Received: true, Accepted: true, Sequence: 5}}}}, RunID: "run", Now: func() time.Time { return time.Date(2026, 10, 9, 0, 1, 0, 0, time.UTC) }}
+	repository := &reconciliationRepository{snapshot: ReconciliationSnapshot{Attempt: attempt, JournalTargetID: "synthetic-target-1"}}
+	reader := &acceptanceReader{journal: AcceptanceJournal{RunID: "run", CheckpointHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Entries: []AcceptanceEntry{{AttemptID: attempt.AttemptID, RequestFingerprint: attempt.RequestFingerprint, Received: true, Accepted: true, Sequence: 5}}}}
+	worker := ReconciliationWorker{Claimer: reconciliationClaimer{work: work}, Repository: repository, Journal: reader, RunID: "run", Now: func() time.Time { return time.Date(2026, 10, 9, 0, 1, 0, 0, time.UTC) }}
 	claimed, err := worker.RunOnce(context.Background(), "reconciler", "token")
-	if err != nil || !claimed || repository.committed.Outcome != reconciliationAdopt || repository.committed.Work != work {
-		t.Fatalf("claimed=%t err=%v decision=%+v", claimed, err, repository.committed)
+	if err != nil || !claimed || repository.committed.Outcome != reconciliationAdopt || repository.committed.Work != work || reader.targetID != "synthetic-target-1" {
+		t.Fatalf("claimed=%t err=%v target=%s decision=%+v", claimed, err, reader.targetID, repository.committed)
 	}
 }
 
@@ -78,7 +83,7 @@ func TestReconciliationWorkerFailsClosedForInvertedEvidenceWindow(t *testing.T) 
 	work := WorkFence{DueWorkID: "work", CommandID: "command", LeaseToken: "lease"}
 	reader := &failingAcceptanceReader{}
 	started := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
-	worker := ReconciliationWorker{Claimer: reconciliationClaimer{work: work}, Repository: &reconciliationRepository{snapshot: ReconciliationSnapshot{Attempt: AttemptSnapshot{AttemptID: "attempt-1", TargetID: "target-1", StartedAt: started}}}, Journal: reader, RunID: "run", Now: func() time.Time { return started.Add(-time.Second) }}
+	worker := ReconciliationWorker{Claimer: reconciliationClaimer{work: work}, Repository: &reconciliationRepository{snapshot: ReconciliationSnapshot{Attempt: AttemptSnapshot{AttemptID: "attempt-1", TargetID: "target-1", StartedAt: started}, JournalTargetID: "synthetic-target-1"}}, Journal: reader, RunID: "run", Now: func() time.Time { return started.Add(-time.Second) }}
 	if _, err := worker.RunOnce(context.Background(), "reconciler", "token"); err == nil || reader.calls != 0 {
 		t.Fatalf("err=%v reader calls=%d", err, reader.calls)
 	}

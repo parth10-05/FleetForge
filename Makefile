@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := verify
 
-.PHONY: format lint test test-race build domain-test domain-property-test postgres-integration-test redfish-fuzz-test sqlc-generate web-typecheck web-lint web-test web-build container-build secret-scan verify
+.PHONY: format lint test test-race build domain-test domain-property-test postgres-integration-test p06-acceptance-test redfish-fuzz-test sqlc-generate openapi-lint openapi-generate openapi-generate-check web-typecheck web-lint web-test web-build container-build secret-scan verify
 
 format:
 	go fmt ./...
@@ -23,6 +23,9 @@ domain-property-test:
 postgres-integration-test:
 	go test -tags=postgresintegration -count=1 ./test/integration/postgres/...
 
+p06-acceptance-test:
+	go test -tags=postgresintegration -count=1 ./test/e2e/v1demo/...
+
 redfish-fuzz-test:
 	go test ./internal/domain/inventory -run '^$$' -fuzz '^FuzzSelectorCanonicalRoundTrip$$' -fuzztime=10s
 	go test ./internal/redfish -run '^$$' -fuzz '^FuzzTargetAddressKeepsAcceptedResourcesUnderServiceRoot$$' -fuzztime=10s
@@ -31,8 +34,17 @@ redfish-fuzz-test:
 sqlc-generate:
 	CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
 
+openapi-lint:
+	pnpm --dir web exec spectral lint --ruleset ../api/openapi/.spectral.yaml ../api/openapi/openapi.yaml
+
+openapi-generate:
+	go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1 --config api/openapi/oapi-codegen.yaml api/openapi/openapi.yaml
+
+openapi-generate-check: openapi-generate
+	git diff --exit-code -- internal/delivery/controlhttp/openapi_types.gen.go
+
 build:
-	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-sweeper ./cmd/wakeup-worker ./cmd/execution-worker ./cmd/precheck-worker ./cmd/observation-worker ./cmd/reconciliation-worker
+	go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-sweeper ./cmd/wakeup-worker ./cmd/execution-worker ./cmd/precheck-worker ./cmd/observation-worker ./cmd/reconciliation-worker ./cmd/fleetforge-demo
 
 web-typecheck:
 	pnpm --dir web typecheck

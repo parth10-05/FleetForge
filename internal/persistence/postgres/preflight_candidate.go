@@ -28,6 +28,24 @@ type PreflightCandidateRequest struct {
 // membership atomically. Existing candidate IDs are immutable: a replay is
 // stable only when it names the same snapshot hash.
 func PersistPreflightCandidate(ctx context.Context, pool *pgxpool.Pool, request PreflightCandidateRequest) error {
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return fmt.Errorf("begin preflight candidate: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := persistPreflightCandidateTx(ctx, tx, request); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if isSerialization(err) {
+			return fmt.Errorf("%w: candidate commit", ErrPreflightCandidateConflict)
+		}
+		return fmt.Errorf("commit preflight candidate: %w", err)
+	}
+	return nil
+}
+
+func persistPreflightCandidateTx(ctx context.Context, tx pgx.Tx, request PreflightCandidateRequest) error {
 	candidateID, err := uuidParameter(request.CandidateID)
 	if err != nil {
 		return fmt.Errorf("preflight candidate ID: %w", err)
@@ -35,11 +53,6 @@ func PersistPreflightCandidate(ctx context.Context, pool *pgxpool.Pool, request 
 	if request.Snapshot.Hash().IsZero() || len(request.Report) == 0 || len(request.Report) > 32*1024 || !isJSONObject(request.Report) {
 		return fmt.Errorf("invalid preflight candidate request")
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
-	if err != nil {
-		return fmt.Errorf("begin preflight candidate: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
 	if err := validateCandidateInputs(ctx, tx, request.Snapshot); err != nil {
 		return err
 	}
@@ -54,9 +67,6 @@ func PersistPreflightCandidate(ctx context.Context, pool *pgxpool.Pool, request 
 		if existingHash != request.Snapshot.Hash().String() {
 			return ErrPreflightCandidateConflict
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("commit preflight candidate replay: %w", err)
-		}
 		return nil
 	}
 	if err != nil {
@@ -66,12 +76,6 @@ func PersistPreflightCandidate(ctx context.Context, pool *pgxpool.Pool, request 
 		if _, err := tx.Exec(ctx, `INSERT INTO preflight_candidate_targets (candidate_id, target_id, frozen_target_revision, site_key, rack_key, target_family, compatibility_policy_version, compatibility_reason) VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8)`, candidateID, target.ID.String(), int64(target.Revision.Uint64()), target.Labels.Site().String(), target.Labels.Rack().String(), target.Family.String(), target.Compatibility.PolicyVersion(), target.Compatibility.Reason()); err != nil {
 			return fmt.Errorf("insert preflight candidate target %s: %w", target.ID.String(), err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		if isSerialization(err) {
-			return fmt.Errorf("%w: candidate commit", ErrPreflightCandidateConflict)
-		}
-		return fmt.Errorf("commit preflight candidate: %w", err)
 	}
 	return nil
 }

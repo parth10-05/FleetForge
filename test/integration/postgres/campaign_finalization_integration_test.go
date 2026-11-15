@@ -29,14 +29,8 @@ func TestFinalizeCanaryDerivesReleaseAndRecordsBothTransitions(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO campaign_health_evidence (id,campaign_target_id,check_name,scheduled_at,observed_at,passed) VALUES ('00000000-0000-0000-9301-000000000012',$1,'boot',$2,$2,true)", fixture.campaignTargetID, cut.Add(-time.Second)); err != nil {
 		t.Fatalf("insert scheduled health evidence: %v", err)
 	}
-	req := persistence.FinalizeCanaryRequest{
-		CampaignID: fixture.campaignID, TerminalCommandID: "00000000-0000-0000-9301-000000000020", ResolutionCommandID: "00000000-0000-0000-9301-000000000021",
-		ExpectedRevision: 2, ExpectedEpoch: 0, LogicalCut: cut, Now: cut, ActorID: "test-actor", CorrelationID: "00000000-0000-0000-9301-000000000022", CausationID: "00000000-0000-0000-9301-000000000023",
-		AuditAction: "CANARY_APPROVED", OutboxEventID: "00000000-0000-0000-9301-000000000024", DecisionInputID: "00000000-0000-0000-9301-000000000025", ReducerVersion: "campaign-reducer/v1",
-		LaterIntents: []persistence.CanaryWorkIntent{{DueWorkID: "00000000-0000-0000-9301-000000000026", CommandID: "00000000-0000-0000-9301-000000000027", TargetUpdateID: later.targetUpdateID}},
-	}
-	if err := persistence.FinalizeCanary(context.Background(), pool, req); err != nil {
-		t.Fatalf("finalize canary: %v", err)
+	if processed, err := persistence.FinalizeEligibleCanaryOnce(context.Background(), pool, cut); err != nil || !processed {
+		t.Fatalf("finalize eligible canary processed=%t err=%v", processed, err)
 	}
 	var state string
 	var revision int64
@@ -59,7 +53,20 @@ func TestFinalizeCanaryDerivesReleaseAndRecordsBothTransitions(t *testing.T) {
 	if terminalAudits != 1 || decisions != 2 || dueWork != 1 {
 		t.Fatalf("terminal evidence/audit=%d decisions=%d later due work=%d, want 1/2/1", terminalAudits, decisions, dueWork)
 	}
-	if err := persistence.FinalizeCanary(context.Background(), pool, req); err != nil {
-		t.Fatalf("retry finalization: %v", err)
+	mustExecute(t, pool, ctx, "UPDATE target_updates SET state='SUCCEEDED' WHERE id='"+later.targetUpdateID+"'")
+	if processed, err := persistence.CompleteEligibleCampaignOnce(context.Background(), pool, cut.Add(time.Second)); err != nil || !processed {
+		t.Fatalf("complete eligible campaign processed=%t err=%v", processed, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT state,revision FROM campaigns WHERE id=$1::uuid", fixture.campaignID).Scan(&state, &revision); err != nil {
+		t.Fatal(err)
+	}
+	if state != "COMPLETED" || revision != 5 {
+		t.Fatalf("completed campaign=%s/%d, want COMPLETED/5", state, revision)
+	}
+	if processed, err := persistence.FinalizeEligibleCanaryOnce(context.Background(), pool, cut.Add(time.Second)); err != nil || processed {
+		t.Fatalf("retry finalization processed=%t err=%v", processed, err)
+	}
+	if processed, err := persistence.CompleteEligibleCampaignOnce(context.Background(), pool, cut.Add(2*time.Second)); err != nil || processed {
+		t.Fatalf("retry completion processed=%t err=%v", processed, err)
 	}
 }

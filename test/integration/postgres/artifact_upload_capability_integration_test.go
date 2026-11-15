@@ -58,7 +58,11 @@ func TestArtifactUploadCapabilityReservesDatabaseKeyBeforeSigning(t *testing.T) 
 		t.Fatal(err)
 	}
 	var versionID string
-	if err := pool.QueryRow(ctx, "SELECT a.state,o.version_id FROM firmware_artifacts a JOIN artifact_object_versions o ON o.artifact_id=a.id WHERE a.id=$1::uuid", "00000000-0000-0000-2411-000000000001").Scan(&state, &versionID); err != nil || state != "UPLOADED" || versionID != receipt.Object.VersionID() {
+	if err := pool.QueryRow(ctx, "SELECT a.state,o.version_id FROM firmware_artifacts a JOIN artifact_object_versions o ON o.artifact_id=a.id WHERE a.id=$1::uuid", "00000000-0000-0000-2411-000000000001").Scan(&state, &versionID); err != nil || state != "VERIFYING" || versionID != receipt.Object.VersionID() {
 		t.Fatalf("binding state=%q version=%q err=%v", state, versionID, err)
+	}
+	var workCount int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM due_work WHERE subject_id=$1::uuid AND subject_type='ARTIFACT' AND work_type='VERIFY_ARTIFACT' AND delivery_state='PENDING'", "00000000-0000-0000-2411-000000000001").Scan(&workCount); err != nil || workCount != 1 {
+		t.Fatalf("verification work=%d err=%v", workCount, err)
 	}
 }

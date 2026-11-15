@@ -34,10 +34,16 @@ jobs:
               - 'db/migrations/**'
               - 'sqlc.yaml'
               - 'test/**'
+              - 'docs/evidence/v1-p06/**'
+              - 'docs/versions/v1/**'
+              - 'docs/implementation-plan/v1-p06-authenticated-api-demo.md'
+              - 'docs/implementation-plan/v1-p06-acceptance-runner.md'
+              - 'README.md'
               - 'Makefile'
               - '.gitleaks.toml'
               - '.github/workflows/foundation.yml'
             web:
+              - 'api/**'
               - 'web/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
@@ -61,10 +67,14 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.27.0'
           cache-dependency-path: go.mod
+      - run: go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1 --config api/openapi/oapi-codegen.yaml api/openapi/openapi.yaml && git diff --exit-code -- internal/delivery/controlhttp/openapi_types.gen.go
       - run: CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate && git diff --exit-code -- internal/persistence/postgres/sqlcgen
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
@@ -85,6 +95,18 @@ jobs:
         env:
           FLEETFORGE_TEST_POSTGRES_DSN: postgres://fleetforge_test:fleetforge_test@localhost:5432/fleetforge_test?sslmode=disable
           FLEETFORGE_FAULT_EVIDENCE_DIR: ${{ runner.temp }}/fleetforge-fault-evidence
+      - name: Run P06 API acceptance evidence
+        run: |
+          set -o pipefail
+          mkdir -p test-results "$RUNNER_TEMP/fleetforge-p06-evidence"
+          git fetch --no-tags origin "${GITHUB_BASE_REF:-main}"
+          export FLEETFORGE_P06_MERGE_BASE_SHA="$(git merge-base HEAD "origin/${GITHUB_BASE_REF:-main}")"
+          go test -json -tags=postgresintegration -count=1 ./test/e2e/v1demo/... | tee test-results/p06-acceptance.json
+          test -f "$RUNNER_TEMP/fleetforge-p06-evidence/index.json"
+        env:
+          FLEETFORGE_TEST_POSTGRES_DSN: postgres://fleetforge_test:fleetforge_test@localhost:5432/fleetforge_test?sslmode=disable
+          FLEETFORGE_P06_EVIDENCE_DIR: ${{ runner.temp }}/fleetforge-p06-evidence
+          FLEETFORGE_P06_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Confirm wrong PostgreSQL endpoint fails the integration gate
         run: |
           if FLEETFORGE_TEST_POSTGRES_DSN=postgres://fleetforge_test:fleetforge_test@localhost:1/fleetforge_test?sslmode=disable go test -tags=postgresintegration -count=1 ./test/integration/postgres/... -run TestDatabasePingUsesIsolatedSchema; then
@@ -100,7 +122,7 @@ jobs:
       - run: go test ./internal/redfish -run '^$' -fuzz '^FuzzDecodeDocumentRejectsUnsafeInputWithoutPanic$' -fuzztime=10s
       - run: go test ./internal/domain/campaignplan -run '^$' -fuzz '^FuzzBuildCanonicalPlanIsStable$' -fuzztime=10s
       - run: go test ./internal/application/orchestration -run '^$' -fuzz '^FuzzDecode$' -fuzztime=10s
-      - run: go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-worker ./cmd/wakeup-sweeper ./cmd/execution-worker ./cmd/precheck-worker ./cmd/observation-worker ./cmd/reconciliation-worker
+      - run: go build ./cmd/control-api ./cmd/orchestrator-worker ./cmd/redfish-simulator ./cmd/discovery-worker ./cmd/local-object-store ./cmd/database-readiness-check ./cmd/wakeup-worker ./cmd/wakeup-sweeper ./cmd/execution-worker ./cmd/precheck-worker ./cmd/observation-worker ./cmd/reconciliation-worker ./cmd/fleetforge-demo
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -113,6 +135,12 @@ jobs:
           name: fault-harness-evidence
           path: ${{ runner.temp }}/fleetforge-fault-evidence/
           if-no-files-found: warn
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: p06-acceptance-evidence
+          path: ${{ runner.temp }}/fleetforge-p06-evidence/
+          if-no-files-found: error
 
   web:
     needs: changes
@@ -129,6 +157,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir web exec spectral lint --ruleset ../api/openapi/.spectral.yaml ../api/openapi/openapi.yaml
       - run: pnpm --dir web lint
       - run: pnpm --dir web typecheck
       - run: mkdir -p test-results && pnpm --dir web test -- --reporter=json --outputFile=../test-results/web-unit.json

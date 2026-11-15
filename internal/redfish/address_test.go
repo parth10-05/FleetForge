@@ -56,3 +56,9 @@ func TestDialPolicyRejectsPrivateMetadataAndLoopback(t *testing.T) {
 		t.Fatalf("explicitly allowlisted address rejected: %v", err)
 	}
 }
+
+func TestDialPolicyMatchesIPv4MappedAddressAgainstIPv4Allowlist(t *testing.T) {
+	if err := ValidateDialIP("::ffff:127.0.0.1", []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}); err != nil {
+		t.Fatalf("mapped loopback rejected: %v", err)
+	}
+}

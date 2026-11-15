@@ -119,6 +119,7 @@ func advanceRealtime(ctx context.Context, done chan<- struct{}, engine *core.Eng
 	defer close(done)
 	initial, err := engine.Submit(ctx, core.Snapshot{})
 	if err != nil {
+		slog.Error("simulator realtime clock stopped", "stage", "initial_snapshot", "error", err)
 		return
 	}
 	next := initial.Time + 1
@@ -131,6 +132,7 @@ func advanceRealtime(ctx context.Context, done chan<- struct{}, engine *core.Eng
 		case <-ticker.C:
 			result, err := engine.Submit(ctx, core.AdvanceTo{Time: clock.LogicalTime(next)})
 			if err != nil {
+				slog.Error("simulator realtime clock stopped", "stage", "advance", "logical_time", next, "error", err)
 				return
 			}
 			next++

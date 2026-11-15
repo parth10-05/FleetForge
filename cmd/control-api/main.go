@@ -11,11 +11,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/parth10-05/fleetforge/internal/application/control"
+	"github.com/parth10-05/fleetforge/internal/delivery/controlhttp"
 	"github.com/parth10-05/fleetforge/internal/delivery/eventhinthttp"
 	"github.com/parth10-05/fleetforge/internal/delivery/healthhttp"
 	"github.com/parth10-05/fleetforge/internal/persistence/postgres"
 	"github.com/parth10-05/fleetforge/internal/platform/buildinfo"
 	"github.com/parth10-05/fleetforge/internal/platform/config"
+	"github.com/parth10-05/fleetforge/internal/platform/localartifactissuer"
+	"github.com/parth10-05/fleetforge/internal/platform/localoidc"
 )
 
 func main() {
@@ -41,8 +45,11 @@ func run() error {
 	defer pool.Close()
 	health := healthhttp.NewHandler(healthhttp.FileProbe{Path: cfg.ReadinessFile}, cfg.ReadinessTimeout, buildinfo.Current())
 	health.MarkStarted()
+	verifier := localoidc.Verifier{Issuer: cfg.LocalIdentity.Issuer, Audience: cfg.LocalIdentity.Audience, Key: cfg.LocalIdentity.Key, RecentAuth: cfg.LocalIdentity.RecentAuth, Now: time.Now}
 	mux := http.NewServeMux()
 	mux.Handle("/", health.Routes())
+	artifactService := control.NewArtifactService(postgres.ControlArtifactAdapter{Pool: pool}, time.Now).WithInitiation(postgres.ControlArtifactAdapter{Pool: pool}, localartifactissuer.New(cfg.ObjectStoreHMACKey, nil), "artifacts")
+	mux.Handle("/v1/", controlhttp.NewRouterWithResourcesUploadAndCampaigns(verifier, time.Now, control.NewTargetService(postgres.ControlTargetAdapter{Pool: pool}, time.Now), artifactService, control.NewCampaignService(postgres.ControlCampaignAdapter{Pool: pool}, time.Now), cfg.CursorHMACKey, "http://"+cfg.ObjectStoreAddress+"/v1/objects/upload", control.NewAttentionService(postgres.ControlAttentionAdapter{Pool: pool}, time.Now)))
 	mux.Handle("/v1/events/synthetic", eventhinthttp.New(cfg.EventHMACKey, postgres.EventHintStore{Pool: pool}, time.Now).Routes())
 	server := newServer(cfg.Address, mux)
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

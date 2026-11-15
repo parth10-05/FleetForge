@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -103,9 +104,27 @@ func (client *Client) SubmitFirmwareAuthenticated(ctx context.Context, address T
 		return FirmwareSubmitResult{Class: FirmwarePossiblyAccepted, FinishedAt: finished}
 	}
 	defer response.Body.Close()
-	fingerprint, readOK := firmwareResponseFingerprint(response, client.maxBytes)
+	body, readOK := readFirmwareResponse(response, client.maxBytes)
+	fingerprint := firmwareResponseFingerprint(response, body, readOK)
 	if response.StatusCode == http.StatusAccepted {
-		reference, err := localTaskReference(address, response.Header.Get("Location"))
+		location := response.Header.Get("Location")
+		if location == "" && readOK {
+			var envelope map[string]any
+			if json.Unmarshal(body, &envelope) == nil {
+				if value, ok := envelope["@odata.id"].(string); ok {
+					location = value
+				}
+			}
+		}
+		reference, err := localTaskReference(address, location)
+		if err != nil && readOK {
+			var envelope map[string]any
+			if json.Unmarshal(body, &envelope) == nil {
+				if bodyLocation, ok := envelope["@odata.id"].(string); ok {
+					reference, err = localTaskReference(address, bodyLocation)
+				}
+			}
+		}
 		if err == nil && readOK {
 			return FirmwareSubmitResult{Class: FirmwareAccepted, RemoteTaskReference: reference, ResponseFingerprint: fingerprint, FinishedAt: finished}
 		}
@@ -126,17 +145,24 @@ func validFirmwareSHA256(value string) bool {
 	return err == nil && value == strings.ToLower(value)
 }
 
-func firmwareResponseFingerprint(response *http.Response, maxBytes int) (string, bool) {
+func readFirmwareResponse(response *http.Response, maxBytes int) ([]byte, bool) {
 	if maxBytes <= 0 {
-		return "", false
+		return nil, false
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, int64(maxBytes)+1))
 	if err != nil || len(body) > maxBytes {
-		return "", false
+		return nil, false
+	}
+	return body, true
+}
+
+func firmwareResponseFingerprint(response *http.Response, body []byte, readOK bool) string {
+	if !readOK {
+		return ""
 	}
 	material := fmt.Sprintf("%d\n%s\n%s\n", response.StatusCode, response.Header.Get("Location"), body)
 	digest := sha256.Sum256([]byte(material))
-	return "sha256:" + hex.EncodeToString(digest[:]), true
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 func localTaskReference(address TargetAddress, location string) (string, error) {

@@ -56,6 +56,7 @@ func (adapter ExecutionAdapter) AdmitSubmission(ctx context.Context, command exe
 	if err != nil {
 		return execution.AdmissionResult{}, err
 	}
+	request.ClaimedWorkID, request.ClaimedCommandID, request.ClaimedLeaseToken, request.ClaimedDeliveryGeneration = command.Work.DueWorkID, command.Work.CommandID, command.Work.LeaseToken, command.Work.DeliveryGeneration
 	if err := AdmitOperation(ctx, adapter.Pool, request); err != nil {
 		return execution.AdmissionResult{}, fmt.Errorf("admit fenced firmware submission: %w", err)
 	}
@@ -71,7 +72,7 @@ func (adapter ExecutionAdapter) AdmitRetrySubmission(ctx context.Context, comman
 		return execution.AdmissionResult{}, err
 	}
 	request.RetryParentAttemptID = command.RetryParentAttemptID
-	request.ClaimedWorkID, request.ClaimedLeaseToken, request.ClaimedDeliveryGeneration = command.Work.DueWorkID, command.Work.LeaseToken, command.Work.DeliveryGeneration
+	request.ClaimedWorkID, request.ClaimedCommandID, request.ClaimedLeaseToken, request.ClaimedDeliveryGeneration = command.Work.DueWorkID, command.Work.CommandID, command.Work.LeaseToken, command.Work.DeliveryGeneration
 	if err := AdmitRetryOperation(ctx, adapter.Pool, request); err != nil {
 		return execution.AdmissionResult{}, fmt.Errorf("admit proof-backed retry: %w", err)
 	}
@@ -94,10 +95,13 @@ func admissionRequestFromExecution(command execution.AdmissionCommand) (Admissio
 	if err != nil {
 		return AdmissionRequest{}, fmt.Errorf("encode firmware precheck evidence: %w", err)
 	}
+	// The precheck command is already the identity of its due-work row. The
+	// admitted SUBMIT work needs its own stable command identity.
+	submissionCommandID := deterministicExecutionUUID(command.Work.CommandID + ":submit")
 	request := AdmissionRequest{
 		CampaignID: snapshot.CampaignID, CampaignTargetID: envelope.CampaignTargetID, TargetID: snapshot.TargetID, ArtifactID: snapshot.ArtifactID, TargetUpdateID: snapshot.TargetUpdateID,
 		ExpectedTargetRevision: command.Work.ExpectedRevision, CapturedCommandEpoch: snapshot.CommandEpoch, ExpectedTargetState: envelope.ExpectedTargetState, NextTargetState: envelope.NextTargetState, ResumeStep: envelope.ResumeStep,
-		CommandID: command.Work.CommandID, Step: envelope.Step, AdmissionID: command.AdmissionID, StepAttemptID: command.StepAttemptID,
+		CommandID: submissionCommandID, Step: envelope.Step, AdmissionID: command.AdmissionID, StepAttemptID: command.StepAttemptID,
 		Global: ScopeCapacity{Level: envelope.Global.Level, Key: envelope.Global.Key, Limit: envelope.Global.Limit}, Site: ScopeCapacity{Level: envelope.Site.Level, Key: envelope.Site.Key, Limit: envelope.Site.Limit}, Rack: ScopeCapacity{Level: envelope.Rack.Level, Key: envelope.Rack.Key, Limit: envelope.Rack.Limit}, ReservationIDs: envelope.ReservationIDs,
 		ActorID: envelope.ActorID, CorrelationID: envelope.CorrelationID, CausationID: envelope.CausationID, Action: envelope.Action, ReasonCode: envelope.ReasonCode, AuditEventSequence: envelope.AuditEventSequence,
 		OutboxEventID: envelope.OutboxEventID, OutboxEventType: envelope.OutboxEventType, OutboxSchemaVersion: envelope.OutboxSchemaVersion, OutboxPayload: json.RawMessage(envelope.OutboxPayload),
@@ -332,7 +336,7 @@ JOIN campaign_plan_snapshots snapshot ON snapshot.campaign_id=a.campaign_id
 WHERE d.id=$1::uuid AND d.command_id=$2::uuid AND d.delivery_generation=$3 AND d.delivery_state='CLAIMED'
 AND d.lease_token=$4::uuid AND d.expected_revision=$5 AND d.expected_command_epoch IS NOT DISTINCT FROM $6
 AND d.work_type IN ('SUBMIT','TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE','AMBIGUITY_RECONCILE')
-AND ((d.work_type='SUBMIT' AND a.status='ADMITTED') OR (d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status='ACCEPTED') OR (d.work_type='AMBIGUITY_RECONCILE' AND a.status='AMBIGUOUS'))`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(
+AND ((d.work_type='SUBMIT' AND a.status='ADMITTED') OR (d.work_type IN ('TASK_OBSERVE','REBOOT_OBSERVE','INVENTORY_OBSERVE','HEALTH_OBSERVE') AND a.status IN ('ACCEPTED','ADOPTED')) OR (d.work_type='AMBIGUITY_RECONCILE' AND a.status='AMBIGUOUS'))`, work.DueWorkID, work.CommandID, work.DeliveryGeneration, work.LeaseToken, work.ExpectedRevision, work.ExpectedCommandEpoch).Scan(
 		&attempt.AttemptID, &attempt.ParentAttemptID, &attempt.AdmissionID, &attempt.TargetID, &attempt.TargetUpdateID, &attempt.CampaignID,
 		&attempt.Artifact.Provider, &attempt.Artifact.Container, &attempt.Artifact.ObjectKey, &attempt.Artifact.ObjectVersion, &attempt.Artifact.Size, &attempt.Artifact.SHA256,
 		&attempt.ExpectedVersion, &attempt.CredentialReference, &attempt.RequestFingerprint, &attempt.RemoteTaskReference, &attempt.CommandEpoch, &attempt.AdmittedRevision, &attempt.ObservationFreshnessSeconds, &attempt.StartedAt,
@@ -354,7 +358,11 @@ func (adapter ExecutionAdapter) LoadReconciliation(ctx context.Context, work exe
 	if err != nil {
 		return execution.ReconciliationSnapshot{}, err
 	}
-	return execution.ReconciliationSnapshot{Attempt: attempt}, nil
+	var journalTargetID string
+	if err := adapter.Pool.QueryRow(ctx, "SELECT COALESCE(target_key,id::text) FROM targets WHERE id=$1::uuid", attempt.TargetID).Scan(&journalTargetID); err != nil {
+		return execution.ReconciliationSnapshot{}, fmt.Errorf("load reconciliation journal target: %w", err)
+	}
+	return execution.ReconciliationSnapshot{Attempt: attempt, JournalTargetID: journalTargetID}, nil
 }
 
 func (adapter ExecutionAdapter) CommitSubmitResult(ctx context.Context, work execution.WorkFence, result execution.SubmitResult) error {

@@ -31,6 +31,15 @@ func TestEvaluateBlocksIncompatibleTargetWithoutPersisting(t *testing.T) {
 	}
 }
 
+func TestEvaluateSnapshotDoesNotRequireCandidateWriter(t *testing.T) {
+	artifactID, target := testInputs(t, "synthetic")
+	service := New(staticSelector{targets: []Target{target}}, staticArtifact{record: testArtifact(t, artifactID, "synthetic")}, nil)
+	result, err := service.EvaluateSnapshot(context.Background(), Request{CandidateID: "candidate-1", ArtifactID: artifactID, Maximum: 10, Selector: []byte(`{"version":"fleetforge.selector/v1","all":[{"key":"site","value":"west"}]}`)})
+	if err != nil || result.Snapshot.Hash().IsZero() {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 type staticSelector struct{ targets []Target }
 
 func (source staticSelector) Select(context.Context, inventory.Selector, int) ([]Target, error) {
